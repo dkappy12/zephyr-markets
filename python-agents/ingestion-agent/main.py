@@ -55,12 +55,6 @@ SOURCE_LABEL = "Elexon BMRS"
 SIGNAL_TYPE = "remit"
 CONFIDENCE = "HIGH"
 
-_HUMAN_UNAVAILABILITY: dict[str, str] = {
-    "UnavailabilitiesOfElectricityFacilities": "Generation Outage",
-    "UnavailabilitiesOfProductionAndGenerationUnits": "Production Unavailability",
-    "UnavailabilitiesOfConsumptionUnits": "Consumption Unavailability",
-}
-
 # -----------------------------------------------------------------------------
 # Logging — structured, Railway-friendly (stdout, no noisy libraries)
 # -----------------------------------------------------------------------------
@@ -226,15 +220,30 @@ def _get_float(notice: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
-def humanise_unavailability_type(raw: str) -> str:
-    """Map REMIT API enums to short labels; otherwise insert spaces before capitals."""
+def humanise_unavailability_enum(raw: str) -> str:
+    """Long unavailability type enums: insert spaces before capitals for readability."""
     if not raw:
         return ""
-    if raw in _HUMAN_UNAVAILABILITY:
-        return _HUMAN_UNAVAILABILITY[raw]
     s = re.sub(r"([a-z])([A-Z])", r"\1 \2", raw)
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
     return s.strip()
+
+
+def event_label_from_message_type(message_type: str) -> str:
+    """
+    Humanised event category for titles (from messageType, not unavailabilityType).
+    Production is checked before Generation so combined names map to Production.
+    """
+    if not message_type:
+        return "Grid Event"
+    mt = message_type
+    if "Production" in mt:
+        return "Production Unavailability"
+    if "Electricity" in mt or "Generation" in mt:
+        return "Generation Outage"
+    if "Consumption" in mt:
+        return "Consumption Unavailability"
+    return "Grid Event"
 
 
 def format_event_time_utc(iso: str) -> str:
@@ -269,40 +278,47 @@ def format_event_time_utc(iso: str) -> str:
 
 
 def build_title(notice: dict[str, Any]) -> str:
-    """{assetName} — humanised unavailabilityType."""
+    """{assetName} — event label from messageType (not Planned/Unplanned)."""
     asset = _get_str(notice, "assetName")
     if not asset:
         asset = _get_str(notice, "affectedUnit", "assetId")
-    ut_raw = _get_str(notice, "unavailabilityType", "UnavailabilityType")
-    human = humanise_unavailability_type(ut_raw) if ut_raw else ""
-    if asset and human:
-        return f"{asset} — {human}"
+    mt = _get_str(notice, "messageType", "MessageType")
+    event_label = event_label_from_message_type(mt)
+    if asset and event_label:
+        return f"{asset} — {event_label}"
     if asset:
         return asset
-    if human:
-        return human
+    if event_label:
+        return event_label
     return "REMIT notice"
 
 
 def build_description(notice: dict[str, Any]) -> str:
-    """Two-sentence prose: capacity line + event window with humanised type."""
+    """Capacity line + window; Planned/Unplanned stays here only, not in title."""
     unit = _get_str(notice, "affectedUnit", "assetName") or "Unit"
     ucap = _get_str(notice, "unavailableCapacity", "UnavailableCapacity")
     ncap = _get_str(notice, "normalCapacity", "NormalCapacity")
     ut_raw = _get_str(notice, "unavailabilityType", "UnavailabilityType")
-    ut_h = humanise_unavailability_type(ut_raw) if ut_raw else "Unavailability"
+    mt = _get_str(notice, "messageType", "MessageType")
+    event_label = event_label_from_message_type(mt)
     es = format_event_time_utc(_get_str(notice, "eventStartTime", "EventStartTime"))
     ee = format_event_time_utc(_get_str(notice, "eventEndTime", "EventEndTime"))
 
     s1 = f"{unit} derated by {ucap or '—'}MW ({ncap or '—'}MW normal)."
+    plan_prefix = ""
+    if ut_raw in ("Planned", "Unplanned"):
+        plan_prefix = f"{ut_raw}. "
+    elif ut_raw:
+        plan_prefix = f"{humanise_unavailability_enum(ut_raw)}. "
+
     if es and ee:
-        s2 = f" {ut_h} from {es} to {ee}."
+        s2 = f" {plan_prefix}{event_label} from {es} to {ee}."
     elif es:
-        s2 = f" {ut_h} from {es}."
+        s2 = f" {plan_prefix}{event_label} from {es}."
     elif ee:
-        s2 = f" {ut_h} until {ee}."
+        s2 = f" {plan_prefix}{event_label} until {ee}."
     else:
-        s2 = f" {ut_h}."
+        s2 = f" {plan_prefix}{event_label}."
     return (s1 + s2).strip()
 
 
