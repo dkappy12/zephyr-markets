@@ -59,8 +59,6 @@ WEATHER_POLL_MINUTES = 30
 GIE_AGSI_API_URL = "https://agsi.gie.eu/api"
 STORAGE_SOURCE = "GIE AGSI"
 STORAGE_POLL_HOURS = 6
-# AGSI reports injection/withdrawal as GWh/d; store as TWh (÷ 1000).
-AGSI_GWH_TO_TWH = 0.001
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -349,43 +347,92 @@ def _agsi_row_to_storage_record(
     gas_day_fallback: str,
     fetched_at: str,
 ) -> dict[str, Any] | None:
-    """Map one AGSI `data` object to a PostgREST row."""
+    """Map one AGSI row object to a PostgREST row (volumes as TWh per AGSI JSON)."""
     day = (item.get("gasDayStart") or gas_day_fallback or "").strip()
     if not day:
         return None
 
     full = _agsi_parse_float(item.get("full"))
     wgv = _agsi_parse_float(item.get("workingGasVolume"))
-    inj_gwh = _agsi_parse_float(item.get("injection"))
-    wd_gwh = _agsi_parse_float(item.get("withdrawal"))
-
-    inj_twh = inj_gwh * AGSI_GWH_TO_TWH if inj_gwh is not None else None
-    wd_twh = wd_gwh * AGSI_GWH_TO_TWH if wd_gwh is not None else None
+    inj = _agsi_parse_float(item.get("injection"))
+    wd = _agsi_parse_float(item.get("withdrawal"))
 
     return {
         "report_date": day,
         "location": location,
         "full_pct": full,
         "working_volume_twh": wgv,
-        "injection_twh": inj_twh,
-        "withdrawal_twh": wd_twh,
+        "injection_twh": inj,
+        "withdrawal_twh": wd,
         "source": STORAGE_SOURCE,
         "fetched_at": fetched_at,
     }
 
 
-def _agsi_pick_row(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Use the first list entry (latest gas day for default sort)."""
+def _agsi_json_for_log(payload: Any) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return repr(payload)
+
+
+def _agsi_extract_items(payload: Any) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Normalize AGSI JSON into a list of row dicts.
+
+    Returns (rows, structure_ok). structure_ok is False when the payload cannot
+    be interpreted (caller should log the raw body at WARNING).
+    """
+    if payload is None:
+        return [], False
+
+    if isinstance(payload, list):
+        rows = [x for x in payload if isinstance(x, dict)]
+        # Top-level array of rows — valid even if empty.
+        return rows, True
+
+    if not isinstance(payload, dict):
+        return [], False
+
     data = payload.get("data")
-    if not isinstance(data, list) or not data:
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)], True
+
+    for key in ("results", "items", "records", "rows"):
+        alt = payload.get(key)
+        if isinstance(alt, list):
+            return [x for x in alt if isinstance(x, dict)], True
+
+    # Single row object without a wrapper (unusual but easy to support).
+    if any(
+        k in payload
+        for k in (
+            "gasDayStart",
+            "workingGasVolume",
+            "full",
+            "gasInStorage",
+            "injection",
+            "withdrawal",
+        )
+    ):
+        return [payload], True
+
+    return [], False
+
+
+def _agsi_select_row(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Prefer EU-style aggregate row (`name` ~ aggregated); else first row."""
+    if not items:
         return None
-    first = data[0]
-    return first if isinstance(first, dict) else None
+    for it in items:
+        if str(it.get("name", "")).strip().lower() == "aggregated":
+            return it
+    return items[0]
 
 
 async def fetch_agsi_json(
     client: httpx.AsyncClient, *, country: str, size: int, page: int
-) -> dict[str, Any]:
+) -> Any:
     resp = await client.get(
         GIE_AGSI_API_URL,
         params={"country": country, "size": str(size), "page": str(page)},
@@ -393,7 +440,14 @@ async def fetch_agsi_json(
     )
     resp.raise_for_status()
     raw = resp.json()
-    return raw if isinstance(raw, dict) else {}
+    logger.debug(
+        "agsi raw response country=%s size=%s page=%s: %s",
+        country,
+        size,
+        page,
+        _agsi_json_for_log(raw),
+    )
+    return raw
 
 
 async def upsert_storage_levels_http(
@@ -415,6 +469,14 @@ async def upsert_storage_levels_http(
     resp.raise_for_status()
 
 
+def _agsi_gas_day_fallback(payload: Any) -> str:
+    if isinstance(payload, dict):
+        v = payload.get("gas_day")
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
 async def run_storage_cycle() -> None:
     """Fetch GB + EU aggregate from GIE AGSI and upsert into storage_levels."""
     _require_supabase_env()
@@ -427,19 +489,25 @@ async def run_storage_cycle() -> None:
         },
         follow_redirects=True,
     ) as http:
-        gb_payload = await fetch_agsi_json(http, country="GB", size=10, page=1)
+        gb_payload = await fetch_agsi_json(http, country="GB", size=1, page=1)
         eu_payload = await fetch_agsi_json(http, country="eu", size=1, page=1)
 
         rows: list[dict[str, Any]] = []
-        gas_day_gb = str(gb_payload.get("gas_day") or "").strip()
 
-        gb_item = _agsi_pick_row(gb_payload)
-        if gb_item is None:
+        gb_items, gb_ok = _agsi_extract_items(gb_payload)
+        if not gb_ok:
             logger.warning(
+                "storage_cycle: unexpected AGSI JSON structure for GB; raw=%s",
+                _agsi_json_for_log(gb_payload),
+            )
+        gas_day_gb = _agsi_gas_day_fallback(gb_payload)
+        gb_item = _agsi_select_row(gb_items) if gb_ok else None
+        if gb_ok and gb_item is None:
+            logger.info(
                 "storage_cycle: no AGSI data rows for GB (gas_day=%s)",
                 gas_day_gb or "?",
             )
-        else:
+        elif gb_item is not None:
             rec = _agsi_row_to_storage_record(
                 gb_item, "GB", gas_day_gb, fetched_at
             )
@@ -455,16 +523,21 @@ async def run_storage_cycle() -> None:
                     rec["withdrawal_twh"],
                 )
 
-        gas_day_eu = str(eu_payload.get("gas_day") or "").strip()
-        eu_item = _agsi_pick_row(eu_payload)
-        if eu_item is None:
+        eu_items, eu_ok = _agsi_extract_items(eu_payload)
+        if not eu_ok:
+            logger.warning(
+                "storage_cycle: unexpected AGSI JSON structure for EU; raw=%s",
+                _agsi_json_for_log(eu_payload),
+            )
+        gas_day_eu = _agsi_gas_day_fallback(eu_payload)
+        eu_item = _agsi_select_row(eu_items) if eu_ok else None
+        if eu_ok and eu_item is None:
             logger.info(
                 "storage_cycle: no AGSI data rows for EU aggregate "
-                "(country=eu, gas_day=%s, total=%s)",
+                "(country=eu, gas_day=%s)",
                 gas_day_eu or "?",
-                eu_payload.get("total"),
             )
-        else:
+        elif eu_item is not None:
             rec_eu = _agsi_row_to_storage_record(
                 eu_item, "EU", gas_day_eu, fetched_at
             )
