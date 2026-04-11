@@ -294,31 +294,44 @@ def build_title(notice: dict[str, Any]) -> str:
 
 
 def build_description(notice: dict[str, Any]) -> str:
-    """Capacity line + window; Planned/Unplanned stays here only, not in title."""
-    unit = _get_str(notice, "affectedUnit", "assetName") or "Unit"
+    """
+    "{assetName} derated by … {Planned|Unplanned} outage from … to …"
+    Event category (Generation Outage, etc.) is only in the title, not here.
+    """
+    asset = _get_str(notice, "assetName", "affectedUnit") or "Unit"
     ucap = _get_str(notice, "unavailableCapacity", "UnavailableCapacity")
     ncap = _get_str(notice, "normalCapacity", "NormalCapacity")
     ut_raw = _get_str(notice, "unavailabilityType", "UnavailabilityType")
-    mt = _get_str(notice, "messageType", "MessageType")
-    event_label = event_label_from_message_type(mt)
     es = format_event_time_utc(_get_str(notice, "eventStartTime", "EventStartTime"))
     ee = format_event_time_utc(_get_str(notice, "eventEndTime", "EventEndTime"))
 
-    s1 = f"{unit} derated by {ucap or '—'}MW ({ncap or '—'}MW normal)."
-    plan_prefix = ""
+    s1 = f"{asset} derated by {ucap or '—'}MW ({ncap or '—'}MW normal)."
+
     if ut_raw in ("Planned", "Unplanned"):
-        plan_prefix = f"{ut_raw}. "
+        plan_phrase = ut_raw
     elif ut_raw:
-        plan_prefix = f"{humanise_unavailability_enum(ut_raw)}. "
+        plan_phrase = humanise_unavailability_enum(ut_raw)
+    else:
+        plan_phrase = ""
 
     if es and ee:
-        s2 = f" {plan_prefix}{event_label} from {es} to {ee}."
+        if plan_phrase:
+            s2 = f" {plan_phrase} outage from {es} to {ee}."
+        else:
+            s2 = f" Outage from {es} to {ee}."
     elif es:
-        s2 = f" {plan_prefix}{event_label} from {es}."
+        if plan_phrase:
+            s2 = f" {plan_phrase} outage from {es}."
+        else:
+            s2 = f" Outage from {es}."
     elif ee:
-        s2 = f" {plan_prefix}{event_label} until {ee}."
+        if plan_phrase:
+            s2 = f" {plan_phrase} outage until {ee}."
+        else:
+            s2 = f" Outage until {ee}."
     else:
-        s2 = f" {plan_prefix}{event_label}."
+        s2 = f" {plan_phrase} outage." if plan_phrase else " Outage."
+
     return (s1 + s2).strip()
 
 
