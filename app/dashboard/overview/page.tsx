@@ -27,6 +27,20 @@ function formatPct(v: number | null | undefined): string {
   return `${Math.round(v)}%`;
 }
 
+/** Always show sign, one decimal (e.g. +1.8, -0.3, +0.0). */
+function formatSignedNormalisedScore(n: number): string {
+  const abs = Math.abs(n).toFixed(1);
+  if (n > 0) return `+${abs}`;
+  if (n < 0) return `-${abs}`;
+  return "+0.0";
+}
+
+const PREMIUM_DIRECTION_LABEL: Record<string, string> = {
+  FIRMING: "Firming",
+  SOFTENING: "Softening",
+  STABLE: "Stable",
+};
+
 export default function OverviewPage() {
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
@@ -35,6 +49,11 @@ export default function OverviewPage() {
     Partial<Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>>
   >({});
   const [windGw, setWindGw] = useState<number | null>(null);
+  const [premiumLoading, setPremiumLoading] = useState(true);
+  const [premiumRow, setPremiumRow] = useState<{
+    normalised_score: number;
+    direction: string;
+  } | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -42,42 +61,56 @@ export default function OverviewPage() {
     const nowIso = new Date().toISOString();
 
     async function load() {
-      const [sigRes, countRes, deStorageRes, euStorageRes, windRes] =
-        await Promise.all([
-          supabase
-            .from("signals")
-            .select(
-              "id, type, title, description, direction, source, confidence, created_at, raw_data",
-            )
-            .order("created_at", { ascending: false })
-            .limit(4),
-          supabase
-            .from("signals")
-            .select("*", { count: "exact", head: true })
-            .eq("type", "remit")
-            .gte("created_at", since),
-          supabase
-            .from("storage_levels")
-            .select("full_pct")
-            .eq("location", "DE")
-            .order("report_date", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          supabase
-            .from("storage_levels")
-            .select("location, full_pct, report_date")
-            .in("location", [...EU_STORAGE_LOCATIONS])
-            .order("report_date", { ascending: false })
-            .limit(40),
-          supabase
-            .from("weather_forecasts")
-            .select("wind_speed_100m, forecast_time")
-            .eq("location", "GB")
-            .lte("forecast_time", nowIso)
-            .order("forecast_time", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
+      const [
+        sigRes,
+        countRes,
+        deStorageRes,
+        euStorageRes,
+        windRes,
+        premiumRes,
+      ] = await Promise.all([
+        supabase
+          .from("signals")
+          .select(
+            "id, type, title, description, direction, source, confidence, created_at, raw_data",
+          )
+          .order("created_at", { ascending: false })
+          .limit(4),
+        supabase
+          .from("signals")
+          .select("*", { count: "exact", head: true })
+          .eq("type", "remit")
+          .gte("created_at", since),
+        supabase
+          .from("storage_levels")
+          .select("full_pct")
+          .eq("location", "DE")
+          .order("report_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("storage_levels")
+          .select("location, full_pct, report_date")
+          .in("location", [...EU_STORAGE_LOCATIONS])
+          .order("report_date", { ascending: false })
+          .limit(40),
+        supabase
+          .from("weather_forecasts")
+          .select("wind_speed_100m, forecast_time")
+          .eq("location", "GB")
+          .lte("forecast_time", nowIso)
+          .order("forecast_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("physical_premium")
+          .select(
+            "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, calculated_at",
+          )
+          .order("calculated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
       if (!sigRes.error && sigRes.data) {
         setPreview((sigRes.data as SignalRow[]).map(signalRowToCardProps));
@@ -123,6 +156,23 @@ export default function OverviewPage() {
       } else {
         setWindGw(null);
       }
+
+      if (!premiumRes.error && premiumRes.data) {
+        const ns = premiumRes.data.normalised_score;
+        const score =
+          typeof ns === "number" ? ns : ns != null ? Number(ns) : Number.NaN;
+        const dirRaw = premiumRes.data.direction;
+        const dir =
+          typeof dirRaw === "string" ? dirRaw.trim().toUpperCase() : "";
+        if (Number.isFinite(score)) {
+          setPremiumRow({ normalised_score: score, direction: dir });
+        } else {
+          setPremiumRow(null);
+        }
+      } else {
+        setPremiumRow(null);
+      }
+      setPremiumLoading(false);
     }
 
     load();
@@ -205,16 +255,24 @@ export default function OverviewPage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-gold">
               Physical premium
             </p>
-            <p className="mt-2 font-serif text-5xl leading-none text-ink">
-              +1.8
+            <p className="mt-2 font-serif text-5xl leading-none text-ink tabular-nums">
+              {premiumLoading
+                ? "…"
+                : premiumRow
+                  ? formatSignedNormalisedScore(premiumRow.normalised_score)
+                  : "--"}
             </p>
             <p className="mt-2 text-sm text-ink-mid">
               Normalised gap between market-implied and physically-implied price.
             </p>
           </div>
-          <span className="inline-flex w-fit items-center rounded-[2px] border-[0.5px] border-gold/50 bg-ivory px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-gold">
-            Firming
-          </span>
+          {!premiumLoading &&
+            premiumRow &&
+            PREMIUM_DIRECTION_LABEL[premiumRow.direction] && (
+              <span className="inline-flex w-fit items-center rounded-[2px] border-[0.5px] border-gold/50 bg-ivory px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-gold">
+                {PREMIUM_DIRECTION_LABEL[premiumRow.direction]}
+              </span>
+            )}
         </div>
       </motion.section>
 
