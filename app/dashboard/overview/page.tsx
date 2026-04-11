@@ -10,28 +10,73 @@ import { type SignalRow, signalRowToCardProps } from "@/lib/signals";
 
 type CardWithId = SignalCardProps & { id: string };
 
+/** 17 GW approximate output at 8 m/s mean wind → linear scale to GW. */
+const MS_TO_GW = 17 / 8;
+
+const EU_STORAGE_LOCATIONS = ["DE", "FR", "IT", "NL", "AT"] as const;
+const EU_LABELS: Record<(typeof EU_STORAGE_LOCATIONS)[number], string> = {
+  DE: "Germany",
+  FR: "France",
+  IT: "Italy",
+  NL: "Netherlands",
+  AT: "Austria",
+};
+
+function formatPct(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  return `${Math.round(v)}%`;
+}
+
 export default function OverviewPage() {
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
+  const [deFullPct, setDeFullPct] = useState<number | null>(null);
+  const [euFillByLoc, setEuFillByLoc] = useState<
+    Partial<Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>>
+  >({});
+  const [windGw, setWindGw] = useState<number | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
 
     async function load() {
-      const [sigRes, countRes] = await Promise.all([
-        supabase
-          .from("signals")
-          .select(
-            "id, type, title, description, direction, source, confidence, created_at, raw_data",
-          )
-          .order("created_at", { ascending: false })
-          .limit(4),
-        supabase
-          .from("signals")
-          .select("*", { count: "exact", head: true })
-          .gte("created_at", since),
-      ]);
+      const [sigRes, countRes, deStorageRes, euStorageRes, windRes] =
+        await Promise.all([
+          supabase
+            .from("signals")
+            .select(
+              "id, type, title, description, direction, source, confidence, created_at, raw_data",
+            )
+            .order("created_at", { ascending: false })
+            .limit(4),
+          supabase
+            .from("signals")
+            .select("*", { count: "exact", head: true })
+            .gte("created_at", since),
+          supabase
+            .from("storage_levels")
+            .select("full_pct")
+            .eq("location", "DE")
+            .order("report_date", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from("storage_levels")
+            .select("location, full_pct, report_date")
+            .in("location", [...EU_STORAGE_LOCATIONS])
+            .order("report_date", { ascending: false })
+            .limit(40),
+          supabase
+            .from("weather_forecasts")
+            .select("wind_speed_100m, forecast_time")
+            .eq("location", "GB")
+            .lte("forecast_time", nowIso)
+            .order("forecast_time", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
 
       if (!sigRes.error && sigRes.data) {
         setPreview((sigRes.data as SignalRow[]).map(signalRowToCardProps));
@@ -41,10 +86,59 @@ export default function OverviewPage() {
       } else {
         setRemit24h(countRes.count ?? 0);
       }
+
+      if (!deStorageRes.error && deStorageRes.data) {
+        const p = deStorageRes.data.full_pct;
+        setDeFullPct(
+          typeof p === "number" ? p : p != null ? Number(p) : null,
+        );
+      } else {
+        setDeFullPct(null);
+      }
+
+      if (!euStorageRes.error && euStorageRes.data?.length) {
+        const latest: Partial<
+          Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>
+        > = {};
+        for (const row of euStorageRes.data) {
+          const loc = row.location as (typeof EU_STORAGE_LOCATIONS)[number];
+          if (!EU_STORAGE_LOCATIONS.includes(loc) || latest[loc] !== undefined) {
+            continue;
+          }
+          const p = row.full_pct;
+          latest[loc] =
+            typeof p === "number" ? p : p != null ? Number(p) : null;
+        }
+        setEuFillByLoc(latest);
+      } else {
+        setEuFillByLoc({});
+      }
+
+      if (!windRes.error && windRes.data) {
+        const w = windRes.data.wind_speed_100m;
+        const ms =
+          typeof w === "number" ? w : w != null ? Number(w) : Number.NaN;
+        setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
+      } else {
+        setWindGw(null);
+      }
     }
 
     load();
   }, []);
+
+  const euTooltip = (
+    <ul className="space-y-1">
+      {EU_STORAGE_LOCATIONS.map((code) => (
+        <li key={code} className="flex justify-between gap-6">
+          <span className="text-ink-mid">{EU_LABELS[code]}</span>
+          <span className="font-medium tabular-nums text-ink">
+            {formatPct(euFillByLoc[code] ?? null)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div className="space-y-10">
@@ -64,12 +158,18 @@ export default function OverviewPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Wind generation" value="12.8" unit="GW" trend="up" />
+        <MetricCard
+          label="Wind generation"
+          value={windGw === null ? "—" : windGw.toFixed(1)}
+          unit="GW"
+          trend={windGw === null ? undefined : "flat"}
+        />
         <MetricCard
           label="EU storage"
-          value="82"
+          value={deFullPct === null ? "—" : String(Math.round(deFullPct))}
           unit="% full"
           trend="flat"
+          hoverDetail={euTooltip}
         />
         <MetricCard label="LNG vessels" value="14" unit="in region" />
         <MetricCard

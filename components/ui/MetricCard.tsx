@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Minus, TrendingDown, TrendingUp, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 export type MetricTrend = "up" | "down" | "flat";
 
@@ -11,6 +12,8 @@ export type MetricCardProps = {
   unit?: string;
   trend?: MetricTrend;
   className?: string;
+  /** Extra panel shown on hover (e.g. multi-country breakdown). */
+  hoverDetail?: ReactNode;
 };
 
 const trendIcon: Record<MetricTrend, LucideIcon> = {
@@ -25,13 +28,14 @@ export function MetricCard({
   unit,
   trend,
   className = "",
+  hoverDetail,
 }: MetricCardProps) {
   const Icon = trend ? trendIcon[trend] : null;
 
   return (
     <motion.div
       layout
-      className={`rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-3 ${className}`}
+      className={`rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-3 ${hoverDetail ? "group relative" : ""} ${className}`}
     >
       <p className="text-[9px] font-medium uppercase tracking-[0.12em] text-ink-mid">
         {label}
@@ -58,6 +62,14 @@ export function MetricCard({
           </span>
         ) : null}
       </div>
+      {hoverDetail ? (
+        <div
+          className="pointer-events-none invisible absolute left-0 top-full z-30 mt-2 min-w-[220px] rounded-[3px] border-[0.5px] border-ivory-border bg-card px-3 py-2 text-left text-[11px] leading-snug text-ink shadow-sm opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100"
+          role="tooltip"
+        >
+          {hoverDetail}
+        </div>
+      ) : null}
     </motion.div>
   );
 }
