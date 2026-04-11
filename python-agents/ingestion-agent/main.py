@@ -6,7 +6,7 @@ Polls the public BMRS API for active REMIT notices and inserts new rows into
 Supabase `signals` via the PostgREST HTTP API (no supabase-py client).
 
 Required Supabase columns (add via migration if missing):
-  - remit_message_id (text, unique) — deduplication key from REMIT dataset row id
+  - remit_message_id (text, unique) — deduplication key from REMIT notice mrid
   - type, title, description, direction, source, confidence, raw_data (jsonb)
 
 Example: add remit_message_id (text) and a unique index on it for deduplication.
@@ -116,7 +116,7 @@ def _supabase_auth_headers() -> dict[str, str]:
 
 
 async def remit_message_exists_http(client: httpx.AsyncClient, message_id: str) -> bool:
-    """Return True if a signal with this REMIT message id is already stored."""
+    """Return True if a signal with this remit_message_id (mrid) is already stored."""
     if not message_id:
         return True
     try:
@@ -148,7 +148,10 @@ async def insert_signal_http(client: httpx.AsyncClient, row: dict[str, Any]) -> 
 
 
 def _parse_remit_dataset(payload: Any) -> list[dict[str, Any]]:
-    """Extract REMIT rows from Insights Solution JSON (primary: top-level 'data' array)."""
+    """Extract REMIT rows from Insights Solution JSON (primary: top-level 'data' array).
+
+    Each row should include an 'mrid' used downstream as the unique deduplication key.
+    """
     if payload is None:
         return []
     if isinstance(payload, dict):
@@ -166,12 +169,15 @@ def _parse_remit_dataset(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _get_message_id(notice: dict[str, Any]) -> str | None:
-    """Unique key for dedup: REMIT dataset row id (then messageId as fallback)."""
-    for key in ("id", "messageId", "messageID", "MessageId", "MessageID"):
-        val = notice.get(key)
-        if val is not None and str(val).strip():
-            return str(val).strip()
+def _get_remit_mrid(notice: dict[str, Any]) -> str | None:
+    """Unique key for dedup: Elexon REMIT mrid (legacy id/messageId as fallback)."""
+    val = notice.get("mrid")
+    if val is not None and str(val).strip():
+        return str(val).strip()
+    for key in ("messageId", "messageID", "MessageId", "MessageID", "id"):
+        v = notice.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
     return None
 
 
@@ -196,25 +202,11 @@ def _get_float(notice: dict[str, Any], *keys: str) -> float | None:
 
 
 def build_title(notice: dict[str, Any]) -> str:
-    asset = _get_str(
-        notice,
-        "assetName",
-        "affectedUnit",
-        "affectedAssetName",
-        "affectedAsset",
-        "AssetName",
-        "asset",
-    )
-    event = _get_str(
-        notice,
-        "eventType",
-        "EventType",
-        "event_type",
-        "messageType",
-        "MessageType",
-        "unavailabilityType",
-        "UnavailabilityType",
-    )
+    """Human-readable title from REMIT dataset fields (assetName, messageType, etc.)."""
+    asset = _get_str(notice, "assetName", "affectedUnit")
+    if not asset:
+        asset = _get_str(notice, "assetId")
+    event = _get_str(notice, "messageType", "unavailabilityType")
     if asset and event:
         return f"{asset} — {event}"
     if asset:
@@ -225,25 +217,20 @@ def build_title(notice: dict[str, Any]) -> str:
 
 
 def build_description(notice: dict[str, Any]) -> str:
-    parts = [
-        ("Unavailability type", _get_str(notice, "unavailabilityType", "UnavailabilityType")),
-        (
-            "Affected asset",
-            _get_str(
-                notice,
-                "assetName",
-                "affectedUnit",
-                "affectedAsset",
-                "affectedAssetName",
-                "AssetName",
-            ),
-        ),
-        ("Asset ID", _get_str(notice, "assetId", "AssetId")),
-        (
-            "Unavailable capacity (MW)",
-            _get_str(notice, "unavailableCapacity", "UnavailableCapacity"),
-        ),
-        ("Normal capacity (MW)", _get_str(notice, "normalCapacity", "NormalCapacity")),
+    """Lines for whichever of the standard REMIT fields are present."""
+    parts: list[tuple[str, str]] = [
+        ("MRID", _get_str(notice, "mrid")),
+        ("Message type", _get_str(notice, "messageType")),
+        ("Revision", _get_str(notice, "revisionNumber")),
+        ("Publish time", _get_str(notice, "publishTime")),
+        ("Unavailability type", _get_str(notice, "unavailabilityType")),
+        ("Asset ID", _get_str(notice, "assetId")),
+        ("Asset name", _get_str(notice, "assetName")),
+        ("Affected unit", _get_str(notice, "affectedUnit")),
+        ("Unavailable capacity (MW)", _get_str(notice, "unavailableCapacity")),
+        ("Normal capacity (MW)", _get_str(notice, "normalCapacity")),
+        ("Event start", _get_str(notice, "eventStartTime")),
+        ("Event end", _get_str(notice, "eventEndTime")),
     ]
     lines = [f"{label}: {value}" for label, value in parts if value]
     if not lines:
@@ -267,9 +254,9 @@ def classify_direction(unavailable_mw: float | None) -> str:
 
 
 def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
-    mid = _get_message_id(notice)
+    mid = _get_remit_mrid(notice)
     if not mid:
-        logger.warning("Skipping notice without id/messageId: %s", str(notice)[:200])
+        logger.warning("Skipping notice without mrid: %s", str(notice)[:200])
         return None
 
     unavailable = _get_float(notice, "unavailableCapacity", "UnavailableCapacity")
