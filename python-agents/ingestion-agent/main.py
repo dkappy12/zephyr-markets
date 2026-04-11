@@ -1164,12 +1164,51 @@ def scheduled_solar() -> None:
 # -----------------------------------------------------------------------------
 
 REMIT_DERATED_MW_RE = re.compile(r"derated by\s+([\d.]+)\s*MW", re.IGNORECASE)
+REMIT_OUTAGE_END_RE = re.compile(
+    r"to\s+(\d{1,2}:\d{2})\s+UTC\s+(\d{1,2})\s+([A-Za-z]{3})",
+    re.IGNORECASE,
+)
 
 
-def _remit_parse_planned_unplanned_mw(descriptions: list[str]) -> tuple[float, float]:
-    """Sum unavailable MW for planned vs unplanned REMIT descriptions."""
+def _remit_parse_outage_end_utc(description: str, now: datetime) -> datetime | None:
+    """Parse outage end from '... to HH:MM UTC DD Mon'. None if unparseable."""
+    matches = list(REMIT_OUTAGE_END_RE.finditer(description))
+    if not matches:
+        return None
+    m = matches[-1]
+    hhmm = m.group(1)
+    try:
+        day = int(m.group(2))
+    except ValueError:
+        return None
+    mon_s = m.group(3).title()
+    candidates: list[datetime] = []
+    for y in (now.year - 1, now.year, now.year + 1):
+        try:
+            dt = datetime.strptime(
+                f"{hhmm} UTC {day} {mon_s} {y}",
+                "%H:%M UTC %d %b %Y",
+            )
+            dt = dt.replace(tzinfo=timezone.utc)
+            candidates.append(dt)
+        except ValueError:
+            continue
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: abs((c - now).total_seconds()))
+
+
+def _remit_active_planned_unplanned_mw(
+    descriptions: list[str], now: datetime
+) -> tuple[float, float, int, int]:
+    """Sum MW for outages still active (end in future). Unparseable end → include.
+
+    Returns (planned_mw, unplanned_mw, active_outage_count, total_signals_24h).
+    """
+    total_signals_24h = len(descriptions)
     planned_mw = 0.0
     unplanned_mw = 0.0
+    active_outage_count = 0
     for desc in descriptions:
         if not desc:
             continue
@@ -1180,6 +1219,9 @@ def _remit_parse_planned_unplanned_mw(descriptions: list[str]) -> tuple[float, f
             mw = float(m.group(1))
         except ValueError:
             continue
+        end_dt = _remit_parse_outage_end_utc(desc, now)
+        if end_dt is not None and end_dt <= now:
+            continue
         low = desc.lower()
         if "unplanned" in low:
             unplanned_mw += mw
@@ -1187,7 +1229,8 @@ def _remit_parse_planned_unplanned_mw(descriptions: list[str]) -> tuple[float, f
             planned_mw += mw
         else:
             planned_mw += mw
-    return planned_mw, unplanned_mw
+        active_outage_count += 1
+    return planned_mw, unplanned_mw, active_outage_count, total_signals_24h
 
 
 def _remit_adder_per_gw(available_margin_gw: float) -> float:
@@ -1271,11 +1314,11 @@ async def insert_physical_premium_http(
 async def calculate_physical_premium() -> None:
     """CCGT-anchored SRMC implied price vs market; append to physical_premium."""
     _require_supabase_env()
-    calculated_at = datetime.now(timezone.utc).isoformat()
+    now_utc = datetime.now(timezone.utc)
+    calculated_at = now_utc.isoformat()
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
         wind_ms: float | None = None
-        wind_ft: str | None = None
         try:
             wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)
         except Exception as e:
@@ -1344,7 +1387,7 @@ async def calculate_physical_premium() -> None:
 
         remit_descriptions: list[str] = []
         try:
-            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            since = (now_utc - timedelta(hours=24)).isoformat()
             r = await http.get(
                 _signals_rest_url(),
                 headers=_supabase_auth_headers(),
@@ -1364,10 +1407,20 @@ async def calculate_physical_premium() -> None:
         except Exception as e:
             logger.warning("premium_cycle: REMIT signals fetch failed: %s", e)
 
-        remit_planned_mw, remit_unplanned_mw = _remit_parse_planned_unplanned_mw(
-            remit_descriptions
-        )
+        (
+            remit_planned_mw,
+            remit_unplanned_mw,
+            remit_active_count,
+            remit_total_24h,
+        ) = _remit_active_planned_unplanned_mw(remit_descriptions, now_utc)
         remit_total_mw = remit_planned_mw + (remit_unplanned_mw * 2.5)
+        logger.info(
+            "premium_cycle REMIT: %s active outages (%s total in 24h) = %.0f MW planned + %.0f MW unplanned",
+            remit_active_count,
+            remit_total_24h,
+            remit_planned_mw,
+            remit_unplanned_mw,
+        )
 
         wind_gw: float | None = None
         if wind_ms is not None:
