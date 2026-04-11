@@ -12,6 +12,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   `market_prices` (upsert by price_date + settlement_period + market).
 - TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
+- Physical premium: CCGT SRMC model → Supabase `physical_premium` (append-only history).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -21,6 +22,7 @@ Required Supabase:
   - market_prices: see market_prices.sql
   - gas_prices: see gas_prices.sql
   - solar_outturn: see solar_outturn.sql
+  - physical_premium: see physical_premium.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
@@ -76,6 +78,18 @@ SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
 HUB_TTF = "TTF"
 TTF_POLL_MINUTES = 15
 SOLAR_POLL_MINUTES = 5
+
+# Physical premium (CCGT SRMC merit order, Ward et al. 2019; Hagfors & Bunn 2016; Ghelasi & Ziel 2025)
+GBP_EUR_RATE = 0.855
+ETA_CCGT = 0.50
+EF_TCO2_PER_MWH_EL = 0.37
+UKA_PRICE_GBP_PER_T = 55.0
+CPS_GBP_PER_T = 18.0
+VOM_GBP_PER_MWH = 2.0
+BASE_DEMAND_GW = 32.0
+WIND_MS_TO_GW = 17.0 / 8.0
+PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
+PHYSICAL_PREMIUM_POLL_MINUTES = 5
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_LAT = 54.0
@@ -181,6 +195,11 @@ def _gas_prices_rest_url() -> str:
 def _solar_outturn_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/solar_outturn"
+
+
+def _physical_premium_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/physical_premium"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -1141,6 +1160,333 @@ def scheduled_solar() -> None:
 
 
 # -----------------------------------------------------------------------------
+# Physical premium (CCGT SRMC) → physical_premium (INSERT history)
+# -----------------------------------------------------------------------------
+
+REMIT_DERATED_MW_RE = re.compile(r"derated by\s+([\d.]+)\s*MW", re.IGNORECASE)
+
+
+def _remit_parse_planned_unplanned_mw(descriptions: list[str]) -> tuple[float, float]:
+    """Sum unavailable MW for planned vs unplanned REMIT descriptions."""
+    planned_mw = 0.0
+    unplanned_mw = 0.0
+    for desc in descriptions:
+        if not desc:
+            continue
+        m = REMIT_DERATED_MW_RE.search(desc)
+        if not m:
+            continue
+        try:
+            mw = float(m.group(1))
+        except ValueError:
+            continue
+        low = desc.lower()
+        if "unplanned" in low:
+            unplanned_mw += mw
+        elif "planned" in low:
+            planned_mw += mw
+        else:
+            planned_mw += mw
+    return planned_mw, unplanned_mw
+
+
+def _remit_adder_per_gw(available_margin_gw: float) -> float:
+    if available_margin_gw > 8:
+        return 2.0
+    if available_margin_gw > 6:
+        return 5.5
+    if available_margin_gw > 4:
+        return 8.0
+    if available_margin_gw > 2:
+        return 16.5
+    return 50.0
+
+
+async def _fetch_weather_wind_closest_now(
+    client: httpx.AsyncClient,
+) -> tuple[float | None, str | None]:
+    """Latest GB wind_speed_100m where forecast_time is closest to now (UTC)."""
+    now = datetime.now(timezone.utc)
+    lo = (now - timedelta(days=4)).isoformat()
+    hi = (now + timedelta(days=4)).isoformat()
+    url = _weather_forecasts_rest_url()
+    params = [
+        ("location", "eq.GB"),
+        ("select", "wind_speed_100m,forecast_time"),
+        ("forecast_time", f"gte.{lo}"),
+        ("forecast_time", f"lte.{hi}"),
+    ]
+    resp = await client.get(
+        url,
+        headers=_supabase_auth_headers(),
+        params=params,
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    rows = resp.json()
+    if not isinstance(rows, list) or not rows:
+        return None, None
+    best: dict[str, Any] | None = None
+    best_abs = float("inf")
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ft = r.get("forecast_time")
+        if not ft:
+            continue
+        dt = _parse_dt_flexible(str(ft))
+        if dt is None:
+            continue
+        d = abs((dt - now).total_seconds())
+        if d < best_abs:
+            best_abs = d
+            best = r
+    if best is None:
+        return None, None
+    w = best.get("wind_speed_100m")
+    try:
+        w_ms = float(w) if w is not None else None
+    except (TypeError, ValueError):
+        w_ms = None
+    ft = str(best.get("forecast_time") or "")
+    return w_ms, ft
+
+
+async def insert_physical_premium_http(
+    client: httpx.AsyncClient, row: dict[str, Any]
+) -> None:
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    resp = await client.post(
+        _physical_premium_rest_url(),
+        headers=headers,
+        json=row,
+    )
+    resp.raise_for_status()
+
+
+async def calculate_physical_premium() -> None:
+    """CCGT-anchored SRMC implied price vs market; append to physical_premium."""
+    _require_supabase_env()
+    calculated_at = datetime.now(timezone.utc).isoformat()
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        wind_ms: float | None = None
+        wind_ft: str | None = None
+        try:
+            wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)
+        except Exception as e:
+            logger.warning("premium_cycle: weather fetch failed: %s", e)
+
+        solar_mw: float | None = None
+        try:
+            r = await http.get(
+                _solar_outturn_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "order": "datetime_gmt.desc",
+                    "limit": "1",
+                    "select": "solar_mw",
+                },
+                timeout=HTTP_TIMEOUT,
+            )
+            r.raise_for_status()
+            sr = r.json()
+            if isinstance(sr, list) and sr and isinstance(sr[0], dict):
+                sm = sr[0].get("solar_mw")
+                solar_mw = float(sm) if sm is not None else None
+        except Exception as e:
+            logger.warning("premium_cycle: solar fetch failed: %s", e)
+
+        ttf_eur_mwh: float | None = None
+        try:
+            r = await http.get(
+                _gas_prices_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "hub": "eq.TTF",
+                    "order": "price_time.desc",
+                    "limit": "1",
+                    "select": "price_eur_mwh",
+                },
+                timeout=HTTP_TIMEOUT,
+            )
+            r.raise_for_status()
+            gr = r.json()
+            if isinstance(gr, list) and gr and isinstance(gr[0], dict):
+                te = gr[0].get("price_eur_mwh")
+                ttf_eur_mwh = float(te) if te is not None else None
+        except Exception as e:
+            logger.warning("premium_cycle: TTF gas fetch failed: %s", e)
+
+        market_price_gbp_mwh: float | None = None
+        try:
+            r = await http.get(
+                _market_prices_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "order": "price_date.desc,settlement_period.desc",
+                    "limit": "1",
+                    "select": "price_gbp_mwh",
+                },
+                timeout=HTTP_TIMEOUT,
+            )
+            r.raise_for_status()
+            mr = r.json()
+            if isinstance(mr, list) and mr and isinstance(mr[0], dict):
+                mp = mr[0].get("price_gbp_mwh")
+                market_price_gbp_mwh = float(mp) if mp is not None else None
+        except Exception as e:
+            logger.warning("premium_cycle: market price fetch failed: %s", e)
+
+        remit_descriptions: list[str] = []
+        try:
+            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            r = await http.get(
+                _signals_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "type": "eq.remit",
+                    "created_at": f"gte.{since}",
+                    "select": "description",
+                },
+                timeout=HTTP_TIMEOUT,
+            )
+            r.raise_for_status()
+            sigs = r.json()
+            if isinstance(sigs, list):
+                for s in sigs:
+                    if isinstance(s, dict) and s.get("description"):
+                        remit_descriptions.append(str(s["description"]))
+        except Exception as e:
+            logger.warning("premium_cycle: REMIT signals fetch failed: %s", e)
+
+        remit_planned_mw, remit_unplanned_mw = _remit_parse_planned_unplanned_mw(
+            remit_descriptions
+        )
+        remit_total_mw = remit_planned_mw + (remit_unplanned_mw * 2.5)
+
+        wind_gw: float | None = None
+        if wind_ms is not None:
+            wind_gw = wind_ms * WIND_MS_TO_GW
+
+        solar_gw: float | None = None
+        if solar_mw is not None:
+            solar_gw = solar_mw / 1000.0
+
+        wg = wind_gw if wind_gw is not None else 0.0
+        sg = solar_gw if solar_gw is not None else 0.0
+        residual_demand_gw = max(BASE_DEMAND_GW - wg - sg, 0.0)
+
+        total_carbon_cost = UKA_PRICE_GBP_PER_T + CPS_GBP_PER_T
+        srmc_gbp_mwh: float | None = None
+        if ttf_eur_mwh is not None:
+            ttf_gbp_mwh = ttf_eur_mwh * GBP_EUR_RATE
+            gas_component = ttf_gbp_mwh / ETA_CCGT
+            carbon_component = total_carbon_cost * EF_TCO2_PER_MWH_EL
+            srmc_gbp_mwh = gas_component + carbon_component + VOM_GBP_PER_MWH
+
+        implied_price_gbp_mwh: float | None = None
+        remit_price_adder = 0.0
+        if srmc_gbp_mwh is not None:
+            remit_gw = remit_total_mw / 1000.0
+            available_margin_gw = BASE_DEMAND_GW - residual_demand_gw - remit_gw
+            adder_per_gw = _remit_adder_per_gw(available_margin_gw)
+            remit_price_adder = remit_gw * adder_per_gw
+            implied_price_gbp_mwh = (
+                srmc_gbp_mwh
+                + (residual_demand_gw * 2.5)
+                + (residual_demand_gw**2 * 0.15)
+                + remit_price_adder
+            )
+            implied_price_gbp_mwh = max(implied_price_gbp_mwh, -60.0)
+
+        premium_value: float | None = None
+        normalised_score: float | None = None
+        direction = "STABLE"
+        if implied_price_gbp_mwh is not None and market_price_gbp_mwh is not None:
+            premium_value = implied_price_gbp_mwh - market_price_gbp_mwh
+            normalised_score = round(premium_value / 10.0, 1)
+            normalised_score = max(-9.9, min(9.9, normalised_score))
+            if normalised_score > 0.3:
+                direction = "FIRMING"
+            elif normalised_score < -0.3:
+                direction = "SOFTENING"
+            else:
+                direction = "STABLE"
+
+        inputs_available = sum(
+            1
+            for x in (wind_ms, solar_mw, ttf_eur_mwh, market_price_gbp_mwh)
+            if x is not None
+        )
+        if inputs_available == 4:
+            confidence = "High"
+        elif inputs_available >= 2:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+
+        row: dict[str, Any] = {
+            "calculated_at": calculated_at,
+            "implied_price_gbp_mwh": implied_price_gbp_mwh,
+            "market_price_gbp_mwh": market_price_gbp_mwh,
+            "premium_value": premium_value,
+            "normalised_score": normalised_score,
+            "direction": direction,
+            "confidence": confidence,
+            "wind_gw": wind_gw,
+            "solar_gw": solar_gw,
+            "residual_demand_gw": residual_demand_gw,
+            "ttf_eur_mwh": ttf_eur_mwh,
+            "srmc_gbp_mwh": srmc_gbp_mwh,
+            "remit_mw_lost": remit_total_mw,
+            "source": PHYSICAL_PREMIUM_SOURCE,
+        }
+
+        await insert_physical_premium_http(http, row)
+
+        ip = implied_price_gbp_mwh
+        mp = market_price_gbp_mwh
+        pv = premium_value
+        ns = normalised_score
+        wg_s = f"{wind_gw:.1f}" if wind_gw is not None else "n/a"
+        sg_s = f"{solar_gw:.1f}" if solar_gw is not None else "n/a"
+        rd_s = f"{residual_demand_gw:.1f}"
+        sr = srmc_gbp_mwh
+        prem_s = f"{pv:+.2f}" if pv is not None else "n/a"
+        score_s = f"{ns:+.1f}" if ns is not None else "n/a"
+        ip_s = f"{ip:.2f}" if ip is not None else "n/a"
+        mp_s = f"{mp:.2f}" if mp is not None else "n/a"
+        sr_s = f"{sr:.2f}" if sr is not None else "n/a"
+        logger.info(
+            "premium_cycle: implied=£%s market=£%s premium=%s score=%s wind=%sGW solar=%sGW "
+            "residual=%sGW SRMC=£%s REMIT=%.0fMW direction=%s confidence=%s",
+            ip_s,
+            mp_s,
+            prem_s,
+            score_s,
+            wg_s,
+            sg_s,
+            rd_s,
+            sr_s,
+            remit_total_mw,
+            direction,
+            confidence,
+        )
+
+
+def scheduled_physical_premium() -> None:
+    try:
+        asyncio.run(calculate_physical_premium())
+    except Exception as e:
+        logger.error("Physical premium cycle aborted: %s", e, exc_info=True)
+
+
+# -----------------------------------------------------------------------------
 # REMIT HTTP + parsing
 # -----------------------------------------------------------------------------
 
@@ -1505,7 +1851,7 @@ def main() -> None:
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
-        "| TTF NGP every %s min | PV_Live solar every %s min",
+        "| TTF NGP every %s min | PV_Live solar every %s min | physical premium every %s min",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -1517,6 +1863,7 @@ def main() -> None:
         MID_DATASET_URL,
         TTF_POLL_MINUTES,
         SOLAR_POLL_MINUTES,
+        PHYSICAL_PREMIUM_POLL_MINUTES,
     )
 
     scheduled_poll()
@@ -1525,11 +1872,13 @@ def main() -> None:
     scheduled_market_prices()
     scheduled_ttf()
     scheduled_solar()
+    scheduled_physical_premium()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
     schedule.every(MARKET_INDEX_POLL_MINUTES).minutes.do(scheduled_market_prices)
     schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_ttf)
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
+    schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
 
     while True:
         schedule.run_pending()
