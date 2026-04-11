@@ -10,6 +10,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   (upsert by report_date + location).
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
   `market_prices` (upsert by price_date + settlement_period + market).
+- TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time).
+- Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -17,6 +19,8 @@ Required Supabase:
   - weather_forecasts: see weather_forecasts.sql
   - storage_levels: see storage_levels.sql
   - market_prices: see market_prices.sql
+  - gas_prices: see gas_prices.sql
+  - solar_outturn: see solar_outturn.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
@@ -27,6 +31,8 @@ Environment:
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
@@ -62,6 +68,14 @@ MARKET_CODE_N2EX = "N2EX"
 MARKET_CODE_APX = "APX"
 MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
+
+TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
+PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
+GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
+SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
+HUB_TTF = "TTF"
+TTF_POLL_MINUTES = 15
+SOLAR_POLL_MINUTES = 5
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_LAT = 54.0
@@ -157,6 +171,16 @@ def _storage_levels_rest_url() -> str:
 def _market_prices_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/market_prices"
+
+
+def _gas_prices_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/gas_prices"
+
+
+def _solar_outturn_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/solar_outturn"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -826,6 +850,290 @@ def scheduled_market_prices() -> None:
 
 
 # -----------------------------------------------------------------------------
+# EEX TTF NGP CSV → gas_prices | Sheffield Solar PV_Live → solar_outturn
+# -----------------------------------------------------------------------------
+
+
+def _parse_dt_flexible(raw: str) -> datetime | None:
+    """Parse CSV/API datetime strings to timezone-aware UTC where possible."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%d/%m/%Y %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+    ):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _ttf_csv_dict_rows(text: str) -> list[dict[str, str]]:
+    text = text.strip()
+    if not text:
+        return []
+    first_line = text.splitlines()[0] if text else ""
+    delim = ";" if first_line.count(";") >= first_line.count(",") else ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=delim)
+    out: list[dict[str, str]] = []
+    for row in reader:
+        out.append({(k or "").strip(): (v or "").strip() for k, v in row.items()})
+    return out
+
+
+def _ttf_resolve_columns(headers: list[str]) -> tuple[str | None, str | None, str | None, str | None]:
+    """Return (single_dt_col, date_col, time_col, price_col)."""
+    hl = [(h, h.lower()) for h in headers if h and str(h).strip()]
+    price_col = None
+    for h, low in hl:
+        if "ngp" in low:
+            price_col = h
+            break
+    if price_col is None:
+        for h, low in hl:
+            if "price" in low and "eur" in low:
+                price_col = h
+                break
+    if price_col is None:
+        for h, low in hl:
+            if "price" in low or "eur" in low:
+                price_col = h
+                break
+
+    dt_col = None
+    for h, low in hl:
+        if "delivery" in low and "start" in low:
+            dt_col = h
+            break
+    if dt_col is None:
+        for h, low in hl:
+            if low in ("timestamp", "datetime") or "time (utc)" in low or "time (gmt)" in low:
+                dt_col = h
+                break
+    date_col = None
+    time_col = None
+    if dt_col is None:
+        for h, low in hl:
+            if low == "date" or low.endswith(" day"):
+                date_col = h
+        for h, low in hl:
+            if low == "time" or low == "period":
+                time_col = h
+                break
+            if "time" in low and "price" not in low and "delivery" not in low:
+                time_col = h
+                break
+    return dt_col, date_col, time_col, price_col
+
+
+def _ttf_row_datetime_price(
+    row: dict[str, str],
+    dt_col: str | None,
+    date_col: str | None,
+    time_col: str | None,
+    price_col: str | None,
+) -> tuple[datetime | None, float | None]:
+    if not price_col or price_col not in row:
+        return None, None
+    ps = row.get(price_col, "").replace(" ", "").replace(",", ".")
+    try:
+        price = float(ps)
+    except (TypeError, ValueError):
+        return None, None
+
+    dt: datetime | None = None
+    if dt_col and row.get(dt_col):
+        dt = _parse_dt_flexible(row[dt_col])
+    elif date_col and time_col:
+        dt = _parse_dt_flexible(f"{row.get(date_col, '')} {row.get(time_col, '')}")
+    return dt, price
+
+
+async def upsert_gas_prices_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _gas_prices_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "price_time"},
+    )
+    resp.raise_for_status()
+
+
+async def fetch_ttf_price() -> None:
+    """Fetch EEX TTF NGP CSV and upsert the latest row into gas_prices."""
+    _require_supabase_env()
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "text/csv,text/plain,*/*",
+            "User-Agent": "ZephyrMarkets-TTF-Ingestion/1.0",
+        },
+        follow_redirects=True,
+    ) as http:
+        resp = await http.get(TTF_NGP_CSV_URL, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        text = resp.text
+
+    rows = _ttf_csv_dict_rows(text)
+    logger.debug("ttf_cycle: first 3 parsed CSV rows: %s", rows[:3])
+
+    if not rows:
+        logger.warning("ttf_cycle: empty TTF CSV")
+        return
+
+    hdrs = list(rows[0].keys())
+    dt_col, date_col, time_col, price_col = _ttf_resolve_columns(hdrs)
+    if price_col is None:
+        logger.error("ttf_cycle: could not resolve price column in headers=%s", hdrs)
+        return
+
+    parsed: list[tuple[datetime, float]] = []
+    for row in rows:
+        dt, price = _ttf_row_datetime_price(row, dt_col, date_col, time_col, price_col)
+        if dt is not None and price is not None:
+            parsed.append((dt, price))
+
+    if not parsed:
+        logger.warning("ttf_cycle: no parseable TTF rows (headers=%s)", hdrs)
+        return
+
+    latest_dt, latest_price = max(parsed, key=lambda x: x[0])
+    price_time_iso = latest_dt.astimezone(timezone.utc).isoformat()
+
+    row = {
+        "price_time": price_time_iso,
+        "hub": HUB_TTF,
+        "price_eur_mwh": latest_price,
+        "source": GAS_PRICE_SOURCE_DEFAULT,
+        "fetched_at": fetched_at,
+    }
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        await upsert_gas_prices_http(http, [row])
+
+    logger.info(
+        "ttf_cycle: TTF NGP = €%.2f/MWh at %s",
+        latest_price,
+        price_time_iso,
+    )
+
+
+def scheduled_ttf() -> None:
+    try:
+        asyncio.run(fetch_ttf_price())
+    except Exception as e:
+        logger.error("TTF cycle aborted: %s", e, exc_info=True)
+
+
+async def upsert_solar_outturn_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _solar_outturn_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "datetime_gmt"},
+    )
+    resp.raise_for_status()
+
+
+async def fetch_solar_outturn() -> None:
+    """Fetch PV_Live GB national aggregate (gsp_id=0) and upsert latest row."""
+    _require_supabase_env()
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "ZephyrMarkets-Solar-Ingestion/1.0",
+        },
+        follow_redirects=True,
+    ) as http:
+        resp = await http.get(PV_LIVE_GSP0_URL, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list) or not data:
+        logger.warning("solar_cycle: PV_Live empty data")
+        return
+
+    def _pv_ts_key(row: Any) -> float:
+        if isinstance(row, (list, tuple)) and len(row) > 1:
+            dt = _parse_dt_flexible(str(row[1]))
+            if dt:
+                return dt.timestamp()
+        return float("-inf")
+
+    latest = max(data, key=_pv_ts_key)
+    if not isinstance(latest, (list, tuple)) or len(latest) < 3:
+        logger.warning("solar_cycle: unexpected PV_Live row shape: %s", latest)
+        return
+
+    _gsp_id, dt_raw, solar_mw = latest[0], latest[1], latest[2]
+    dt_s = str(dt_raw).strip()
+    try:
+        mw = float(solar_mw)
+    except (TypeError, ValueError):
+        logger.warning("solar_cycle: bad solar_mw value: %s", solar_mw)
+        return
+
+    row = {
+        "datetime_gmt": dt_s,
+        "solar_mw": mw,
+        "source": SOLAR_SOURCE_DEFAULT,
+        "fetched_at": fetched_at,
+    }
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        await upsert_solar_outturn_http(http, [row])
+
+    logger.info(
+        "solar_cycle: GB solar = %s MW at %s",
+        f"{mw:,.0f}",
+        dt_s,
+    )
+
+
+def scheduled_solar() -> None:
+    try:
+        asyncio.run(fetch_solar_outturn())
+    except Exception as e:
+        logger.error("Solar cycle aborted: %s", e, exc_info=True)
+
+
+# -----------------------------------------------------------------------------
 # REMIT HTTP + parsing
 # -----------------------------------------------------------------------------
 
@@ -1189,7 +1497,8 @@ def main() -> None:
 
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
-        "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s)",
+        "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
+        "| TTF NGP every %s min | PV_Live solar every %s min",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -1199,15 +1508,21 @@ def main() -> None:
         GIE_AGSI_API_URL,
         MARKET_INDEX_POLL_MINUTES,
         MID_DATASET_URL,
+        TTF_POLL_MINUTES,
+        SOLAR_POLL_MINUTES,
     )
 
     scheduled_poll()
     _schedule_weather_with_startup_delay()
     scheduled_storage()
     scheduled_market_prices()
+    scheduled_ttf()
+    scheduled_solar()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
     schedule.every(MARKET_INDEX_POLL_MINUTES).minutes.do(scheduled_market_prices)
+    schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_ttf)
+    schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
 
     while True:
         schedule.run_pending()
