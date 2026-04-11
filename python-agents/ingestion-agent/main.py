@@ -987,12 +987,16 @@ async def fetch_ttf_price() -> None:
     _require_supabase_env()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
+    logger.debug(
+        "ttf_cycle: SSL verification disabled for EEX gasandregistry domain",
+    )
     async with httpx.AsyncClient(
         headers={
             "Accept": "text/csv,text/plain,*/*",
             "User-Agent": "ZephyrMarkets-TTF-Ingestion/1.0",
         },
         follow_redirects=True,
+        verify=False,
     ) as http:
         resp = await http.get(TTF_NGP_CSV_URL, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
