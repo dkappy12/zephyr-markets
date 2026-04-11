@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import os
+from collections import defaultdict
 import re
 import sys
 import threading
@@ -58,6 +59,7 @@ REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
 MID_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
 MID_STREAM_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID/stream"
 MARKET_CODE_N2EX = "N2EX"
+MARKET_CODE_APX = "APX"
 MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
 
@@ -591,42 +593,81 @@ def scheduled_storage() -> None:
 
 
 # -----------------------------------------------------------------------------
-# Elexon BMRS MID → market_prices (N2EX, upsert on price_date + settlement_period + market)
+# Elexon BMRS MID → market_prices (N2EX / APX, upsert on price_date + settlement_period + market)
 # -----------------------------------------------------------------------------
 
 
-def _mid_row_to_record(
-    row: dict[str, Any],
+def _mid_utc_day_bounds_iso() -> tuple[str, str, str]:
+    """Return (from, to) ISO 8601 Z for the current UTC calendar day, and YYYY-MM-DD."""
+    today = datetime.now(timezone.utc).date()
+    start = datetime(
+        today.year, today.month, today.day, 0, 0, 0, tzinfo=timezone.utc
+    )
+    end = datetime(
+        today.year, today.month, today.day, 23, 59, 59, tzinfo=timezone.utc
+    )
+    zfmt = "%Y-%m-%dT%H:%M:%SZ"
+    return start.strftime(zfmt), end.strftime(zfmt), today.isoformat()
+
+
+def _mid_build_upsert_rows(
+    data: list[Any],
     fallback_date: str,
     fetched_at: str,
-) -> dict[str, Any] | None:
-    """Map one MID API row (`data`) to PostgREST `market_prices` columns."""
-    raw_date = row.get("settlementDate")
-    if raw_date is not None and str(raw_date).strip():
-        pdate = str(raw_date).strip()[:10]
-    else:
+) -> list[dict[str, Any]]:
+    """
+    One row per settlement period: prefer N2EXMIDP price if > 0, else APXMIDP if > 0.
+    """
+    by_sp: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for r in data:
+        if not isinstance(r, dict):
+            continue
+        sp_raw = r.get("settlementPeriod")
+        if sp_raw is None or str(sp_raw).strip() == "":
+            continue
+        try:
+            sp = int(round(float(str(sp_raw).strip())))
+        except (TypeError, ValueError):
+            continue
+        by_sp[sp].append(r)
+
+    out: list[dict[str, Any]] = []
+    for sp in sorted(by_sp.keys()):
+        rows = by_sp[sp]
+        n2ex_p: float | None = None
+        apx_p: float | None = None
         pdate = fallback_date
+        for r in rows:
+            dp = r.get("dataProvider")
+            pr = _get_float(r, "price", "Price")
+            rd = r.get("settlementDate")
+            if rd is not None and str(rd).strip():
+                pdate = str(rd).strip()[:10]
+            if dp == "N2EXMIDP":
+                n2ex_p = pr
+            elif dp == "APXMIDP":
+                apx_p = pr
 
-    sp_raw = row.get("settlementPeriod")
-    if sp_raw is None or str(sp_raw).strip() == "":
-        return None
-    try:
-        settlement_period = int(round(float(str(sp_raw).strip())))
-    except (TypeError, ValueError):
-        return None
+        if n2ex_p is not None and n2ex_p > 0:
+            market = MARKET_CODE_N2EX
+            price = n2ex_p
+        elif apx_p is not None and apx_p > 0:
+            market = MARKET_CODE_APX
+            price = apx_p
+        else:
+            continue
 
-    price = _get_float(row, "price", "Price")
-    if price is None:
-        return None
-
-    return {
-        "price_date": pdate,
-        "settlement_period": settlement_period,
-        "price_gbp_mwh": price,
-        "market": MARKET_CODE_N2EX,
-        "source": MARKET_MID_SOURCE,
-        "fetched_at": fetched_at,
-    }
+        out.append(
+            {
+                "price_date": pdate,
+                "settlement_period": sp,
+                "price_gbp_mwh": price,
+                "market": market,
+                "source": MARKET_MID_SOURCE,
+                "fetched_at": fetched_at,
+            }
+        )
+    return out
 
 
 async def upsert_market_prices_http(
@@ -676,12 +717,12 @@ def _parse_mid_http_body(text: str) -> Any:
 async def fetch_market_prices() -> None:
     """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
     _require_supabase_env()
-    settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    from_iso, to_iso, settlement_date = _mid_utc_day_bounds_iso()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
     base_params: dict[str, str] = {
-        "from": settlement_date,
-        "to": settlement_date,
+        "from": from_iso,
+        "to": to_iso,
     }
     if ELEXON_API_KEY:
         base_params["APIKey"] = ELEXON_API_KEY
@@ -756,21 +797,11 @@ async def fetch_market_prices() -> None:
             )
             return
 
-        n2ex_rows = [
-            r
-            for r in data
-            if isinstance(r, dict) and r.get("dataProvider") == "N2EXMIDP"
-        ]
-
-        out: list[dict[str, Any]] = []
-        for r in n2ex_rows:
-            rec = _mid_row_to_record(r, settlement_date, fetched_at)
-            if rec:
-                out.append(rec)
+        out = _mid_build_upsert_rows(data, settlement_date, fetched_at)
 
         if not out:
             logger.warning(
-                "n2ex_cycle: no N2EXMIDP rows to upsert for %s (data len=%s)",
+                "n2ex_cycle: no MID rows to upsert for %s (data len=%s)",
                 settlement_date,
                 len(data),
             )
