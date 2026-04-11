@@ -1,5 +1,5 @@
 /**
- * Classical 8-point compass rose, line art only (charcoal ink).
+ * Classical 8-point compass rose: eight equal radial spokes and inner ring.
  */
 export type CompassRoseProps = {
   size?: number;
@@ -31,29 +31,15 @@ export function CompassRose({ size = 80, className = "" }: CompassRoseProps) {
     >
       <g
         stroke="#2C2A26"
-        strokeWidth={0.5}
+        strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"
+        fill="none"
       >
         <circle cx={c} cy={c} r={rInner} />
         {points.map((p, i) => (
           <line key={i} x1={c} y1={c} x2={p.x} y2={p.y} />
         ))}
-        {/* Intercardinal shorter ticks */}
-        {[22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5].map((deg) => {
-          const rad = ((deg - 90) * Math.PI) / 180;
-          const r2 = r * 0.55;
-          return (
-            <line
-              key={deg}
-              x1={c}
-              y1={c}
-              x2={c + r2 * Math.cos(rad)}
-              y2={c + r2 * Math.sin(rad)}
-              opacity={0.55}
-            />
-          );
-        })}
       </g>
     </svg>
   );

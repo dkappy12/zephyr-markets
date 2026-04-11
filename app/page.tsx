@@ -46,8 +46,14 @@ export default function Home() {
         <div className="pointer-events-none absolute inset-0 z-0 min-h-[420px]">
           <TopoBackground className="h-full w-full min-h-[420px]" lineOpacity={0.25} />
         </div>
-        <div className="pointer-events-none absolute right-0 top-0 z-[1] opacity-90">
-          <TriangulationMesh width={240} height={240} opacity={0.12} />
+        <div className="pointer-events-none absolute right-0 top-0 z-[1] h-[300px] w-[300px] opacity-90">
+          <TriangulationMesh
+            className="h-full w-full"
+            width={300}
+            height={300}
+            opacity={0.12}
+            strokeWidth={1}
+          />
         </div>
         <div className="relative z-10 mx-auto max-w-[1100px] px-4 pb-16 pt-[120px] sm:px-6 sm:pb-24 sm:pt-[128px] lg:px-8">
           <div className="mx-auto max-w-3xl text-center">

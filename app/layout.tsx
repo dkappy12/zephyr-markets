@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   },
   description:
     "Real-time physical intelligence for GB and Northwest European energy traders. The physical world, translated into financial intelligence.",
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png" }],
+  },
   metadataBase: new URL("https://zephyr.markets"),
   openGraph: {
     title: "Zephyr Markets",

@@ -1,6 +1,5 @@
 "use client";
 
-import { CompassRose } from "@/components/ui/CompassRose";
 import { WindRose } from "@/components/ui/WindRose";
 import { motion } from "framer-motion";
 
@@ -28,9 +27,8 @@ export default function WeatherPage() {
           transition={{ duration: 0.3 }}
           className="relative min-h-[320px] rounded-[4px] border-[0.5px] border-ivory-border bg-card"
         >
-          <div className="absolute right-4 top-4 flex flex-col items-end gap-3">
-            <CompassRose size={72} />
-            <WindRose size={88} />
+          <div className="absolute right-4 top-4">
+            <WindRose size={96} />
           </div>
           <div className="absolute bottom-4 left-4">
             <span className="font-sans text-[9px] font-medium uppercase tracking-[0.14em] text-ink-light">

@@ -24,9 +24,10 @@ export function WindRose({ size = 96, className = "" }: WindRoseProps) {
     >
       <g
         stroke="#2C2A26"
-        strokeWidth={0.5}
+        strokeWidth={1}
         strokeLinecap="round"
-        opacity={0.85}
+        fill="none"
+        opacity={0.2}
       >
         {LENGTHS.map((len, i) => {
           const deg = i * 22.5;

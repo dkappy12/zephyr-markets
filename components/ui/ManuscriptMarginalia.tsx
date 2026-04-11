@@ -22,7 +22,8 @@ export function ManuscriptMarginalia({
         stroke="#9E9890"
         strokeWidth={0.5}
         strokeLinecap="round"
-        opacity={0.08}
+        fill="none"
+        opacity={0.15}
       >
         <path d="M12 8 L18 14 L12 20 L6 14 Z" />
         <path d="M8 48 L16 48" />

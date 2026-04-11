@@ -61,8 +61,17 @@ export function SignalCard({
       transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
       className={`relative overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border border-l-[2px] bg-card px-4 py-3 ${borderClass[tone]} ${className}`}
     >
-      <div className="pointer-events-none absolute right-0 top-0 overflow-hidden" aria-hidden>
-        <TriangulationMesh width={72} height={96} opacity={0.08} />
+      <div
+        className="pointer-events-none absolute right-0 top-0 z-0 h-[96px] w-[72px] overflow-visible"
+        aria-hidden
+      >
+        <TriangulationMesh
+          className="block h-full w-full"
+          width={72}
+          height={96}
+          opacity={0.08}
+          strokeWidth={1}
+        />
       </div>
       <div className="relative z-[1] flex items-start gap-3">
         <span className="mt-0.5 text-ink-mid" aria-hidden>

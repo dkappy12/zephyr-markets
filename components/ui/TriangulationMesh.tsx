@@ -6,13 +6,35 @@ export type TriangulationMeshProps = {
   height?: number;
   /** Overall stroke opacity (ink #2C2A26). Default 0.12. */
   opacity?: number;
+  /** Stroke width in user units (viewBox 180×240). Default 1. */
+  strokeWidth?: number;
   className?: string;
 };
+
+/** Irregular triangle wireframes as closed polygons (explicit edges render reliably). */
+const TRIANGLES: string[] = [
+  "8,12 52,8 28,48",
+  "52,8 88,22 64,52",
+  "88,22 120,14 104,48",
+  "28,48 64,52 44,88",
+  "64,52 104,48 84,90",
+  "104,48 132,38 118,78",
+  "44,88 84,90 62,124",
+  "84,90 118,78 102,118",
+  "132,38 168,52 148,88",
+  "118,78 168,52 154,96",
+  "8,140 48,128 32,176",
+  "48,128 92,138 72,182",
+  "92,138 132,124 112,172",
+  "32,176 72,182 54,220",
+  "72,182 112,172 96,214",
+];
 
 export function TriangulationMesh({
   width = 200,
   height = 200,
   opacity = 0.12,
+  strokeWidth: strokeW = 1,
   className = "",
 }: TriangulationMeshProps) {
   return (
@@ -27,27 +49,15 @@ export function TriangulationMesh({
     >
       <g
         stroke="#2C2A26"
-        strokeWidth={0.5}
+        strokeWidth={strokeW}
         strokeLinecap="round"
         strokeLinejoin="round"
+        fill="none"
         opacity={opacity}
       >
-        {/* Irregular triangulation */}
-        <path d="M8 12 L52 8 L28 48 Z" />
-        <path d="M52 8 L88 22 L64 52 Z" />
-        <path d="M88 22 L120 14 L104 48 Z" />
-        <path d="M28 48 L64 52 L44 88 Z" />
-        <path d="M64 52 L104 48 L84 90 Z" />
-        <path d="M104 48 L132 38 L118 78 Z" />
-        <path d="M44 88 L84 90 L62 124 Z" />
-        <path d="M84 90 L118 78 L102 118 Z" />
-        <path d="M132 38 L168 52 L148 88 Z" />
-        <path d="M118 78 L168 52 L154 96 Z" />
-        <path d="M8 140 L48 128 L32 176 Z" />
-        <path d="M48 128 L92 138 L72 182 Z" />
-        <path d="M92 138 L132 124 L112 172 Z" />
-        <path d="M32 176 L72 182 L54 220 Z" />
-        <path d="M72 182 L112 172 L96 214 Z" />
+        {TRIANGLES.map((points, i) => (
+          <polygon key={i} points={points} />
+        ))}
       </g>
     </svg>
   );
