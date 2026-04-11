@@ -1,5 +1,5 @@
 -- Run in Supabase SQL editor (or migration) before enabling EEX TTF NGP ingestion.
--- PostgREST upsert uses ON CONFLICT on (price_time).
+-- PostgREST upsert uses ON CONFLICT on (price_time, hub).
 
 CREATE TABLE IF NOT EXISTS public.gas_prices (
   price_time timestamptz NOT NULL,
@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS public.gas_prices (
   price_eur_mwh numeric NOT NULL,
   source text NOT NULL DEFAULT 'EEX NGP',
   fetched_at timestamptz NOT NULL,
-  PRIMARY KEY (price_time)
+  PRIMARY KEY (price_time, hub)
 );
 
 COMMENT ON TABLE public.gas_prices IS

@@ -10,7 +10,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   (upsert by report_date + location).
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
   `market_prices` (upsert by price_date + settlement_period + market).
-- TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time).
+- TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 
 Required Supabase:
@@ -962,7 +962,7 @@ async def upsert_gas_prices_http(
         _gas_prices_rest_url(),
         headers=headers,
         json=rows,
-        params={"on_conflict": "price_time"},
+        params={"on_conflict": "price_time,hub"},
     )
     resp.raise_for_status()
 
