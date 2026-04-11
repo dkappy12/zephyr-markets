@@ -54,6 +54,7 @@ export default function OverviewPage() {
           supabase
             .from("signals")
             .select("*", { count: "exact", head: true })
+            .eq("type", "remit")
             .gte("created_at", since),
           supabase
             .from("storage_levels")
@@ -171,7 +172,11 @@ export default function OverviewPage() {
           trend="flat"
           hoverDetail={euTooltip}
         />
-        <MetricCard label="LNG vessels" value="14" unit="in region" />
+        <MetricCard
+          label="vessel tracking"
+          value="Coming soon"
+          valueClassName="font-sans text-lg font-medium leading-snug text-ink-light md:text-xl"
+        />
         <MetricCard
           label="REMIT alerts"
           value={remit24h === null ? "—" : String(remit24h)}

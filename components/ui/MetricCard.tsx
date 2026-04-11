@@ -14,6 +14,8 @@ export type MetricCardProps = {
   className?: string;
   /** Extra panel shown on hover (e.g. multi-country breakdown). */
   hoverDetail?: ReactNode;
+  /** Override default value typography (e.g. placeholder styling). */
+  valueClassName?: string;
 };
 
 const trendIcon: Record<MetricTrend, LucideIcon> = {
@@ -29,6 +31,7 @@ export function MetricCard({
   trend,
   className = "",
   hoverDetail,
+  valueClassName,
 }: MetricCardProps) {
   const Icon = trend ? trendIcon[trend] : null;
 
@@ -41,7 +44,12 @@ export function MetricCard({
         {label}
       </p>
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="font-serif text-2xl font-semibold leading-none tracking-tight text-ink md:text-3xl">
+        <span
+          className={
+            valueClassName ??
+            "font-serif text-2xl font-semibold leading-none tracking-tight text-ink md:text-3xl"
+          }
+        >
           {value}
         </span>
         {unit ? (
