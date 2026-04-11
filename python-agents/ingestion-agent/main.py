@@ -595,26 +595,19 @@ def scheduled_storage() -> None:
 # -----------------------------------------------------------------------------
 
 
-def _parse_mid_dataset(payload: Any) -> list[dict[str, Any]]:
-    """Extract MID rows from BMRS Insights JSON (same envelope as REMIT)."""
-    return _parse_remit_dataset(payload)
-
-
 def _mid_row_to_record(
     row: dict[str, Any],
-    query_date: str,
+    fallback_date: str,
     fetched_at: str,
 ) -> dict[str, Any] | None:
-    """Map one MID row to PostgREST columns (settlementDate, settlementPeriod, price)."""
-    pdate = _get_str(row, "settlementDate", "SettlementDate", "settlement_date")
-    if not pdate:
-        pdate = query_date
-    if len(pdate) >= 10:
-        pdate = pdate[:10]
+    """Map one MID API row (`data`) to PostgREST `market_prices` columns."""
+    raw_date = row.get("settlementDate")
+    if raw_date is not None and str(raw_date).strip():
+        pdate = str(raw_date).strip()[:10]
+    else:
+        pdate = fallback_date
 
     sp_raw = row.get("settlementPeriod")
-    if sp_raw is None:
-        sp_raw = row.get("SettlementPeriod") or row.get("settlement_period")
     if sp_raw is None or str(sp_raw).strip() == "":
         return None
     try:
@@ -622,7 +615,7 @@ def _mid_row_to_record(
     except (TypeError, ValueError):
         return None
 
-    price = _get_float(row, "price", "Price", "indexPrice", "marketIndexPrice")
+    price = _get_float(row, "price", "Price")
     if price is None:
         return None
 
@@ -656,7 +649,7 @@ async def upsert_market_prices_http(
 
 
 def _parse_mid_http_body(text: str) -> Any:
-    """Parse JSON body or newline-delimited JSON (stream) into a structure _parse_mid_dataset accepts."""
+    """Parse JSON body or newline-delimited JSON (stream) into an object with `data` rows."""
     text = text.strip()
     if not text:
         return None
@@ -682,9 +675,9 @@ def _parse_mid_http_body(text: str) -> Any:
 
 async def fetch_market_prices() -> None:
     """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
-    # TEMP: one-shot debug — log full body at INFO, then exit (no parse / upsert).
     _require_supabase_env()
     settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    fetched_at = datetime.now(timezone.utc).isoformat()
 
     base_params: dict[str, str] = {
         "from": settlement_date,
@@ -694,6 +687,7 @@ async def fetch_market_prices() -> None:
         base_params["APIKey"] = ELEXON_API_KEY
 
     dataset_params = {**base_params, "format": "json"}
+    stream_params = dict(base_params)
 
     async with httpx.AsyncClient(
         headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
@@ -703,11 +697,94 @@ async def fetch_market_prices() -> None:
             MID_DATASET_URL, params=dataset_params, timeout=HTTP_TIMEOUT
         )
         logger.info(
-            "n2ex_cycle: full MID raw response status=%s body=%s",
+            "n2ex_cycle: GET %s status=%s",
+            MID_DATASET_URL,
             resp.status_code,
+        )
+        logger.debug(
+            "n2ex_cycle: raw MID response body: %s",
             resp.text,
         )
-        return
+
+        if resp.status_code == 404:
+            resp = await http.get(
+                MID_STREAM_URL, params=stream_params, timeout=HTTP_TIMEOUT
+            )
+            logger.info(
+                "n2ex_cycle: GET %s status=%s",
+                MID_STREAM_URL,
+                resp.status_code,
+            )
+            logger.debug(
+                "n2ex_cycle: raw MID stream response body: %s",
+                resp.text,
+            )
+
+        if resp.status_code == 404:
+            logger.error(
+                "n2ex_cycle: MID dataset and stream both returned 404 date=%s",
+                settlement_date,
+            )
+            return
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "n2ex_cycle: MID HTTP error status=%s url=%s",
+                e.response.status_code if e.response is not None else "?",
+                str(e.request.url) if e.request else "?",
+            )
+            return
+
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError:
+            payload = _parse_mid_http_body(resp.text)
+        if not isinstance(payload, dict):
+            logger.error(
+                "n2ex_cycle: MID response is not a JSON object date=%s",
+                settlement_date,
+            )
+            return
+
+        data = payload.get("data")
+        if not isinstance(data, list):
+            logger.warning(
+                "n2ex_cycle: missing or invalid data[] for %s",
+                settlement_date,
+            )
+            return
+
+        n2ex_rows = [
+            r
+            for r in data
+            if isinstance(r, dict) and r.get("dataProvider") == "N2EXMIDP"
+        ]
+
+        out: list[dict[str, Any]] = []
+        for r in n2ex_rows:
+            rec = _mid_row_to_record(r, settlement_date, fetched_at)
+            if rec:
+                out.append(rec)
+
+        if not out:
+            logger.warning(
+                "n2ex_cycle: no N2EXMIDP rows to upsert for %s (data len=%s)",
+                settlement_date,
+                len(data),
+            )
+            return
+
+        await upsert_market_prices_http(http, out)
+
+        avg_price = sum(x["price_gbp_mwh"] for x in out) / len(out)
+        logger.info(
+            "n2ex_cycle: upserted %s rows for %s (average price: £%.2f/MWh)",
+            len(out),
+            settlement_date,
+            avg_price,
+        )
 
 
 def scheduled_market_prices() -> None:
