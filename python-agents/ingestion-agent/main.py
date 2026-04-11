@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Elexon BMRS REMIT ingestion agent — Zephyr Markets.
+Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECMWF).
 
-Polls the public BMRS API for active REMIT notices and inserts new rows into
-Supabase `signals` via the PostgREST HTTP API (no supabase-py client).
+- REMIT: polls BMRS REMIT dataset → Supabase `signals` (PostgREST HTTP).
+- Weather: polls Open-Meteo forecast → Supabase `weather_forecasts` (upsert by
+  forecast_time + location).
 
-Required Supabase columns (add via migration if missing):
-  - remit_message_id (text, unique) — deduplication key from REMIT notice mrid
-  - type, title, description, direction, source, confidence, raw_data (jsonb)
-
-Example: add remit_message_id (text) and a unique index on it for deduplication.
+Required Supabase:
+  - signals: remit_message_id, type, title, description, direction, source,
+    confidence, raw_data (jsonb)
+  - weather_forecasts: see weather_forecasts.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
@@ -44,6 +44,13 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").stri
 ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
+
+OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_LAT = 54.0
+WEATHER_LON = -2.0
+WEATHER_LOCATION = "GB"
+WEATHER_SOURCE = "Open-Meteo ECMWF"
+WEATHER_POLL_MINUTES = 30
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -112,6 +119,11 @@ def _signals_rest_url() -> str:
     return f"{base}/rest/v1/signals"
 
 
+def _weather_forecasts_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/weather_forecasts"
+
+
 def _supabase_auth_headers() -> dict[str, str]:
     key = SUPABASE_SERVICE_ROLE_KEY
     return {
@@ -159,6 +171,144 @@ async def insert_signal_http(client: httpx.AsyncClient, row: dict[str, Any]) -> 
     }
     resp = await client.post(_signals_rest_url(), headers=headers, json=row)
     resp.raise_for_status()
+
+
+# -----------------------------------------------------------------------------
+# Open-Meteo → weather_forecasts (upsert on forecast_time + location)
+# -----------------------------------------------------------------------------
+
+
+def _normalize_forecast_time_iso(t: str) -> str:
+    """Ensure timestamptz-friendly ISO; Open-Meteo hourly times are UTC."""
+    s = str(t).strip()
+    if not s:
+        return s
+    if s.endswith("Z"):
+        return s
+    if "T" in s and "+" not in s and s.count("-") >= 2:
+        return s + "Z"
+    return s
+
+
+def _hourly_float_at(hourly: dict[str, Any], key: str, i: int) -> float | None:
+    raw = hourly.get(key)
+    if not isinstance(raw, list) or i >= len(raw):
+        return None
+    v = raw[i]
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_open_meteo_hourly(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build one row per hour for PostgREST (column names match weather_forecasts)."""
+    hourly = payload.get("hourly") or {}
+    times = hourly.get("time") or []
+    if not isinstance(times, list):
+        return []
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    rows: list[dict[str, Any]] = []
+
+    for i, t in enumerate(times):
+        if not isinstance(t, str):
+            continue
+        w10 = _hourly_float_at(hourly, "windspeed_10m", i)
+        if w10 is None:
+            w10 = _hourly_float_at(hourly, "wind_speed_10m", i)
+        w100 = _hourly_float_at(hourly, "windspeed_100m", i)
+        if w100 is None:
+            w100 = _hourly_float_at(hourly, "wind_speed_100m", i)
+        t2 = _hourly_float_at(hourly, "temperature_2m", i)
+        rad = _hourly_float_at(hourly, "direct_radiation", i)
+
+        rows.append(
+            {
+                "forecast_time": _normalize_forecast_time_iso(t),
+                "location": WEATHER_LOCATION,
+                "wind_speed_10m": w10,
+                "wind_speed_100m": w100,
+                "temperature_2m": t2,
+                "solar_radiation": rad,
+                "source": WEATHER_SOURCE,
+                "fetched_at": fetched_at,
+            }
+        )
+
+    return rows
+
+
+async def fetch_open_meteo_forecast(client: httpx.AsyncClient) -> dict[str, Any]:
+    params = {
+        "latitude": str(WEATHER_LAT),
+        "longitude": str(WEATHER_LON),
+        "hourly": "windspeed_10m,windspeed_100m,temperature_2m,direct_radiation",
+        "wind_speed_unit": "ms",
+        "forecast_days": "7",
+        "timezone": "UTC",
+    }
+    resp = await client.get(
+        OPEN_METEO_FORECAST_URL,
+        params=params,
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def upsert_weather_forecasts_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    """INSERT ... ON CONFLICT (forecast_time, location) DO UPDATE via PostgREST."""
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _weather_forecasts_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "forecast_time,location"},
+    )
+    resp.raise_for_status()
+
+
+async def run_weather_cycle() -> None:
+    """Fetch ECMWF hourly forecast from Open-Meteo and upsert into weather_forecasts."""
+    _require_supabase_env()
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "ZephyrMarkets-Weather-Ingestion/1.0",
+        },
+        follow_redirects=True,
+    ) as http:
+        payload = await fetch_open_meteo_forecast(http)
+        rows = parse_open_meteo_hourly(payload)
+        n = len(rows)
+        if n == 0:
+            logger.info("weather_cycle: no hourly rows from Open-Meteo")
+            return
+        await upsert_weather_forecasts_http(http, rows)
+        logger.info(
+            "weather_cycle: upserted %s forecast hours (location=%s, source=%s)",
+            n,
+            WEATHER_LOCATION,
+            WEATHER_SOURCE,
+        )
+
+
+def scheduled_weather() -> None:
+    try:
+        asyncio.run(run_weather_cycle())
+    except Exception as e:
+        logger.error("Weather cycle aborted: %s", e, exc_info=True)
 
 
 # -----------------------------------------------------------------------------
@@ -519,14 +669,17 @@ def main() -> None:
     supabase_startup_check()
 
     logger.info(
-        "BMRS ingestion agent starting | poll every %ss | REMIT URL=%s",
+        "Ingestion agent starting | REMIT every %ss (%s) | weather every %s min (%s)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
+        WEATHER_POLL_MINUTES,
+        OPEN_METEO_FORECAST_URL,
     )
 
-    # First run immediately, then every 60 seconds via schedule
     scheduled_poll()
+    scheduled_weather()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
+    schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
 
     while True:
         schedule.run_pending()
