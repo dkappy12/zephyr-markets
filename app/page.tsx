@@ -37,6 +37,82 @@ const tickerItems = [
   "Interconnector Nemo · 880 MW",
   "Rough Storage · 82%",
   "REMIT · 3 new alerts",
+] as const;
+
+const PLAN_COMPARISON_ROWS: {
+  feature: string;
+  free: string;
+  pro: string;
+  team: string;
+}[] = [
+  { feature: "Price", free: "£0", pro: "£39/month", team: "£149/month" },
+  { feature: "Seats", free: "1", pro: "1", team: "5" },
+  {
+    feature: "Signal feed",
+    free: "Delayed 2h",
+    pro: "Real-time",
+    team: "Real-time",
+  },
+  {
+    feature: "Physical premium score",
+    free: "✓",
+    pro: "✓",
+    team: "✓",
+  },
+  {
+    feature: "REMIT alerts",
+    free: "Delayed 2h",
+    pro: "Real-time",
+    team: "Real-time",
+  },
+  {
+    feature: "Morning brief",
+    free: "08:00 delayed",
+    pro: "06:00 live",
+    team: "06:00 live per seat",
+  },
+  {
+    feature: "Markets covered",
+    free: "GB Power, NBP",
+    pro: "5 markets",
+    team: "All markets",
+  },
+  {
+    feature: "Portfolio positions",
+    free: "—",
+    pro: "30 positions",
+    team: "Unlimited",
+  },
+  {
+    feature: "Signal history",
+    free: "7 days",
+    pro: "6 months",
+    team: "24 months",
+  },
+  {
+    feature: "API access",
+    free: "—",
+    pro: "—",
+    team: "Full REST API",
+  },
+  {
+    feature: "Data export",
+    free: "—",
+    pro: "—",
+    team: "✓",
+  },
+  {
+    feature: "Team management",
+    free: "—",
+    pro: "—",
+    team: "Admin + invitations",
+  },
+  {
+    feature: "Support",
+    free: "Community",
+    pro: "Email",
+    team: "Priority email",
+  },
 ];
 
 export default function Home() {
@@ -177,18 +253,97 @@ export default function Home() {
               period="/month"
               blurb="Live signals, 06:00 brief, five markets, portfolio tools."
               cta="Get Pro"
-              href="/signup"
+              href="/signup?plan=pro"
               emphasis
+              footnote="Stripe integration coming soon — sign up now to reserve your place."
             />
             <PricingCard
               name="Team"
               price="£149"
               period="/month"
               blurb="Five seats, unlimited positions, API access, all markets."
-              cta="Talk to us"
-              href="/signup"
+              cta="Get Team"
+              href="/signup?plan=team"
               emphasis={false}
+              footnote="Stripe integration coming soon — sign up now to reserve your place."
             />
+          </div>
+          <p className="mt-10 text-center text-sm text-ink-light">
+            Need more than 5 seats?{" "}
+            <a
+              href="mailto:enterprise@zephyr.markets"
+              className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+            >
+              enterprise@zephyr.markets
+            </a>
+          </p>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="plan-comparison-heading"
+        className="border-b-[0.5px] border-ivory-border bg-ivory py-16 sm:py-20"
+      >
+        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
+          <h2
+            id="plan-comparison-heading"
+            className="text-center font-serif text-3xl text-ink sm:text-4xl"
+          >
+            Everything in the plan
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-ink-mid">
+            Compare tiers at a glance. Upgrade when you need real time, depth, or
+            a full desk on one book.
+          </p>
+          <div className="mt-10 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
+            <table className="w-full min-w-[640px] border-collapse text-left">
+              <thead>
+                <tr className="border-b-[0.5px] border-ivory-border">
+                  <th
+                    scope="col"
+                    className="sticky left-0 z-[1] bg-card px-4 py-4 text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid"
+                  >
+                    Feature
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                  >
+                    Free
+                  </th>
+                  <th
+                    scope="col"
+                    className="border-x border-gold/45 bg-ivory-dark/50 px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                  >
+                    Pro
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                  >
+                    Team
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {PLAN_COMPARISON_ROWS.map((row) => (
+                  <tr
+                    key={row.feature}
+                    className="border-b-[0.5px] border-ivory-border last:border-b-0"
+                  >
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-[1] bg-card px-4 py-3 text-sm font-medium text-ink"
+                    >
+                      {row.feature}
+                    </th>
+                    <PlanComparisonCell value={row.free} />
+                    <PlanComparisonCell value={row.pro} highlight />
+                    <PlanComparisonCell value={row.team} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -238,6 +393,7 @@ function PricingCard({
   cta,
   href,
   emphasis,
+  footnote,
 }: {
   name: string;
   price: string;
@@ -246,6 +402,7 @@ function PricingCard({
   cta: string;
   href: string;
   emphasis?: boolean;
+  footnote?: string;
 }) {
   return (
     <div
@@ -275,6 +432,37 @@ function PricingCard({
       >
         {cta}
       </Link>
+      {footnote ? (
+        <p className="mt-3 text-center text-[10px] leading-snug text-ink-light">
+          {footnote}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function PlanComparisonCell({
+  value,
+  highlight,
+}: {
+  value: string;
+  highlight?: boolean;
+}) {
+  const isCheck = value === "✓";
+  const isDash = value === "—";
+  return (
+    <td
+      className={`px-4 py-3 text-center align-middle text-sm ${
+        highlight ? "border-x border-gold/45 bg-ivory-dark/50" : ""
+      } ${
+        isCheck
+          ? "font-medium text-bull"
+          : isDash
+            ? "text-ink-light"
+            : "text-ink-mid"
+      }`}
+    >
+      {value}
+    </td>
   );
 }
