@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -52,7 +53,13 @@ MAX_BACKOFF_SEC = 60.0
 
 SOURCE_LABEL = "Elexon BMRS"
 SIGNAL_TYPE = "remit"
-CONFIDENCE = "High"
+CONFIDENCE = "HIGH"
+
+_HUMAN_UNAVAILABILITY: dict[str, str] = {
+    "UnavailabilitiesOfElectricityFacilities": "Generation Outage",
+    "UnavailabilitiesOfProductionAndGenerationUnits": "Production Unavailability",
+    "UnavailabilitiesOfConsumptionUnits": "Consumption Unavailability",
+}
 
 # -----------------------------------------------------------------------------
 # Logging — structured, Railway-friendly (stdout, no noisy libraries)
@@ -219,41 +226,84 @@ def _get_float(notice: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
+def humanise_unavailability_type(raw: str) -> str:
+    """Map REMIT API enums to short labels; otherwise insert spaces before capitals."""
+    if not raw:
+        return ""
+    if raw in _HUMAN_UNAVAILABILITY:
+        return _HUMAN_UNAVAILABILITY[raw]
+    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", raw)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    return s.strip()
+
+
+def format_event_time_utc(iso: str) -> str:
+    """Format ISO instant as 'HH:MM UTC DD MMM' (e.g. 21:00 UTC 10 Apr)."""
+    if not iso or not str(iso).strip():
+        return ""
+    s = str(iso).strip()
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(timezone.utc)
+        months = (
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        )
+        return f"{dt.strftime('%H:%M UTC')} {dt.day} {months[dt.month - 1]}"
+    except (ValueError, TypeError, OSError):
+        return ""
+
+
 def build_title(notice: dict[str, Any]) -> str:
-    """Human-readable title from REMIT dataset fields (assetName, messageType, etc.)."""
-    asset = _get_str(notice, "assetName", "affectedUnit")
+    """{assetName} — humanised unavailabilityType."""
+    asset = _get_str(notice, "assetName")
     if not asset:
-        asset = _get_str(notice, "assetId")
-    event = _get_str(notice, "messageType", "unavailabilityType")
-    if asset and event:
-        return f"{asset} — {event}"
+        asset = _get_str(notice, "affectedUnit", "assetId")
+    ut_raw = _get_str(notice, "unavailabilityType", "UnavailabilityType")
+    human = humanise_unavailability_type(ut_raw) if ut_raw else ""
+    if asset and human:
+        return f"{asset} — {human}"
     if asset:
         return asset
-    if event:
-        return event
+    if human:
+        return human
     return "REMIT notice"
 
 
 def build_description(notice: dict[str, Any]) -> str:
-    """Lines for whichever of the standard REMIT fields are present."""
-    parts: list[tuple[str, str]] = [
-        ("MRID", _get_str(notice, "mrid")),
-        ("Message type", _get_str(notice, "messageType")),
-        ("Revision", _get_str(notice, "revisionNumber")),
-        ("Publish time", _get_str(notice, "publishTime")),
-        ("Unavailability type", _get_str(notice, "unavailabilityType")),
-        ("Asset ID", _get_str(notice, "assetId")),
-        ("Asset name", _get_str(notice, "assetName")),
-        ("Affected unit", _get_str(notice, "affectedUnit")),
-        ("Unavailable capacity (MW)", _get_str(notice, "unavailableCapacity")),
-        ("Normal capacity (MW)", _get_str(notice, "normalCapacity")),
-        ("Event start", _get_str(notice, "eventStartTime")),
-        ("Event end", _get_str(notice, "eventEndTime")),
-    ]
-    lines = [f"{label}: {value}" for label, value in parts if value]
-    if not lines:
-        return json.dumps(notice, default=str)[:2000]
-    return "\n".join(lines)
+    """Two-sentence prose: capacity line + event window with humanised type."""
+    unit = _get_str(notice, "affectedUnit", "assetName") or "Unit"
+    ucap = _get_str(notice, "unavailableCapacity", "UnavailableCapacity")
+    ncap = _get_str(notice, "normalCapacity", "NormalCapacity")
+    ut_raw = _get_str(notice, "unavailabilityType", "UnavailabilityType")
+    ut_h = humanise_unavailability_type(ut_raw) if ut_raw else "Unavailability"
+    es = format_event_time_utc(_get_str(notice, "eventStartTime", "EventStartTime"))
+    ee = format_event_time_utc(_get_str(notice, "eventEndTime", "EventEndTime"))
+
+    s1 = f"{unit} derated by {ucap or '—'}MW ({ncap or '—'}MW normal)."
+    if es and ee:
+        s2 = f" {ut_h} from {es} to {ee}."
+    elif es:
+        s2 = f" {ut_h} from {es}."
+    elif ee:
+        s2 = f" {ut_h} until {ee}."
+    else:
+        s2 = f" {ut_h}."
+    return (s1 + s2).strip()
 
 
 def classify_direction(unavailable_mw: float | None) -> str:

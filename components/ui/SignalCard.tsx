@@ -42,6 +42,18 @@ const typeIcon: Record<NonNullable<SignalCardProps["type"]>, LucideIcon> = {
   generic: Activity,
 };
 
+/** Only surface discrete desk labels; hide garbage / accidental JSON dumps. */
+function normalizeConfidenceLabel(raw: string | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  if (t.length > 32 || /[{[\n]/.test(t)) return null;
+  const s = t.toLowerCase();
+  if (s === "high" || s === "confirmed") return "HIGH";
+  if (s === "medium" || s === "med" || s === "watch") return "MEDIUM";
+  if (s === "low") return "LOW";
+  return null;
+}
+
 export function SignalCard({
   tone,
   type = "generic",
@@ -54,6 +66,7 @@ export function SignalCard({
   className = "",
 }: SignalCardProps) {
   const Icon = typeIcon[type];
+  const confidenceLabel = normalizeConfidenceLabel(confidence);
 
   return (
     <motion.article
@@ -84,13 +97,13 @@ export function SignalCard({
             <h3 className="font-sans text-sm font-semibold leading-snug text-ink">
               {title}
             </h3>
-            {confidence ? (
+            {confidenceLabel ? (
               <span className="rounded-[2px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.1em] text-ink-mid">
-                {confidence}
+                {confidenceLabel}
               </span>
             ) : null}
           </div>
-          <p className="mt-1 text-sm leading-relaxed text-ink-mid">
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink-mid">
             {description}
           </p>
           {pnlImpact ? (
