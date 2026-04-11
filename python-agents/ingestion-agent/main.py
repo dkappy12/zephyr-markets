@@ -6,7 +6,7 @@ Polls the public BMRS API for active REMIT notices and inserts new rows into
 Supabase `signals` via the PostgREST HTTP API (no supabase-py client).
 
 Required Supabase columns (add via migration if missing):
-  - remit_message_id (text, unique) — deduplication key from REMIT messageId
+  - remit_message_id (text, unique) — deduplication key from REMIT dataset row id
   - type, title, description, direction, source, confidence, raw_data (jsonb)
 
 Example: add remit_message_id (text) and a unique index on it for deduplication.
@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -42,7 +42,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 
-REMIT_ACTIVE_URL = "https://data.elexon.co.uk/bmrs/api/v1/remit/list/active"
+REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -80,6 +80,14 @@ logger = logging.getLogger("bmrs-ingestion")
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _remit_publish_window_iso() -> tuple[str, str]:
+    """Return (publishDateTimeFrom, publishDateTimeTo) as ISO 8601 UTC strings."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(minutes=70)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return start.strftime(fmt), now.strftime(fmt)
 
 
 # -----------------------------------------------------------------------------
@@ -139,24 +147,28 @@ async def insert_signal_http(client: httpx.AsyncClient, row: dict[str, Any]) -> 
 # -----------------------------------------------------------------------------
 
 
-def _parse_json_list(payload: Any) -> list[dict[str, Any]]:
-    """Normalise BMRS JSON responses that may be a list or wrapped in an object."""
+def _parse_remit_dataset(payload: Any) -> list[dict[str, Any]]:
+    """Extract REMIT rows from Insights Solution JSON (primary: top-level 'data' array)."""
     if payload is None:
         return []
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
     if isinstance(payload, list):
         return [x for x in payload if isinstance(x, dict)]
     if isinstance(payload, dict):
-        for key in ("data", "results", "items", "messages", "content"):
+        for key in ("results", "items", "messages", "content"):
             inner = payload.get(key)
             if isinstance(inner, list):
                 return [x for x in inner if isinstance(x, dict)]
-        # Single object
         return [payload]
     return []
 
 
 def _get_message_id(notice: dict[str, Any]) -> str | None:
-    for key in ("messageId", "messageID", "MessageId", "MessageID", "id"):
+    """Unique key for dedup: REMIT dataset row id (then messageId as fallback)."""
+    for key in ("id", "messageId", "messageID", "MessageId", "MessageID"):
         val = notice.get(key)
         if val is not None and str(val).strip():
             return str(val).strip()
@@ -186,9 +198,10 @@ def _get_float(notice: dict[str, Any], *keys: str) -> float | None:
 def build_title(notice: dict[str, Any]) -> str:
     asset = _get_str(
         notice,
+        "assetName",
+        "affectedUnit",
         "affectedAssetName",
         "affectedAsset",
-        "assetName",
         "AssetName",
         "asset",
     )
@@ -199,6 +212,8 @@ def build_title(notice: dict[str, Any]) -> str:
         "event_type",
         "messageType",
         "MessageType",
+        "unavailabilityType",
+        "UnavailabilityType",
     )
     if asset and event:
         return f"{asset} — {event}"
@@ -212,7 +227,18 @@ def build_title(notice: dict[str, Any]) -> str:
 def build_description(notice: dict[str, Any]) -> str:
     parts = [
         ("Unavailability type", _get_str(notice, "unavailabilityType", "UnavailabilityType")),
-        ("Affected asset", _get_str(notice, "affectedAsset", "affectedAssetName", "AssetName")),
+        (
+            "Affected asset",
+            _get_str(
+                notice,
+                "assetName",
+                "affectedUnit",
+                "affectedAsset",
+                "affectedAssetName",
+                "AssetName",
+            ),
+        ),
+        ("Asset ID", _get_str(notice, "assetId", "AssetId")),
         (
             "Unavailable capacity (MW)",
             _get_str(notice, "unavailableCapacity", "UnavailableCapacity"),
@@ -243,7 +269,7 @@ def classify_direction(unavailable_mw: float | None) -> str:
 def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
     mid = _get_message_id(notice)
     if not mid:
-        logger.warning("Skipping notice without messageId: %s", str(notice)[:200])
+        logger.warning("Skipping notice without id/messageId: %s", str(notice)[:200])
         return None
 
     unavailable = _get_float(notice, "unavailableCapacity", "UnavailableCapacity")
@@ -261,8 +287,13 @@ def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def fetch_remit_notices_http(client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    """GET active REMIT list with exponential backoff on transport/5xx errors."""
-    params: dict[str, str] = {}
+    """GET REMIT dataset (publish window) with exponential backoff on transport/5xx errors."""
+    publish_from, publish_to = _remit_publish_window_iso()
+    params: dict[str, str] = {
+        "publishDateTimeFrom": publish_from,
+        "publishDateTimeTo": publish_to,
+        "format": "json",
+    }
     if ELEXON_API_KEY:
         params["APIKey"] = ELEXON_API_KEY
 
@@ -272,13 +303,13 @@ async def fetch_remit_notices_http(client: httpx.AsyncClient) -> list[dict[str, 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             resp = await client.get(
-                REMIT_ACTIVE_URL,
-                params=params or None,
+                REMIT_DATASET_URL,
+                params=params,
                 timeout=HTTP_TIMEOUT,
             )
             resp.raise_for_status()
             payload = resp.json()
-            notices = _parse_json_list(payload)
+            notices = _parse_remit_dataset(payload)
             return notices
         except httpx.HTTPStatusError as e:
             code = e.response.status_code
@@ -357,7 +388,7 @@ async def run_poll_cycle() -> None:
                 new_count += 1
                 logger.info("Inserted REMIT signal remit_message_id=%s title=%s", mid, row["title"][:120])
             except Exception:
-                logger.exception("Failed to process notice messageId=%s", mid)
+                logger.exception("Failed to process notice remit_message_id=%s", mid)
                 raise
 
         logger.info(
@@ -381,7 +412,7 @@ def main() -> None:
     logger.info(
         "BMRS ingestion agent starting | poll every %ss | REMIT URL=%s",
         POLL_INTERVAL_SECONDS,
-        REMIT_ACTIVE_URL,
+        REMIT_DATASET_URL,
     )
 
     # First run immediately, then every 60 seconds via schedule
