@@ -2,8 +2,8 @@
 """
 Elexon BMRS REMIT ingestion agent — Zephyr Markets.
 
-Polls the public BMRS API for active REMIT notices and upserts new rows into
-Supabase `signals`. Intended to run continuously on Railway.
+Polls the public BMRS API for active REMIT notices and inserts new rows into
+Supabase `signals` via the PostgREST HTTP API (no supabase-py client).
 
 Required Supabase columns (add via migration if missing):
   - remit_message_id (text, unique) — deduplication key from REMIT messageId
@@ -26,11 +26,11 @@ import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import schedule
 from dotenv import load_dotenv
-from supabase import Client, create_client
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -58,6 +58,7 @@ CONFIDENCE = "High"
 # Logging — structured, Railway-friendly (stdout, no noisy libraries)
 # -----------------------------------------------------------------------------
 
+
 class _UtcFormatter(logging.Formatter):
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
         dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
@@ -82,40 +83,55 @@ def _utc_now_iso() -> str:
 
 
 # -----------------------------------------------------------------------------
-# Supabase
+# Supabase PostgREST (direct httpx — no supabase Python package)
 # -----------------------------------------------------------------------------
 
 
-def create_supabase_client() -> Client:
+def _require_supabase_env() -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError(
             "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment."
         )
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
-def remit_message_exists(client: Client, message_id: str) -> bool:
+def _signals_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/signals"
+
+
+def _supabase_auth_headers() -> dict[str, str]:
+    key = SUPABASE_SERVICE_ROLE_KEY
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+    }
+
+
+async def remit_message_exists_http(client: httpx.AsyncClient, message_id: str) -> bool:
     """Return True if a signal with this REMIT message id is already stored."""
     if not message_id:
-        return True  # skip invalid
+        return True
     try:
-        res = (
-            client.table("signals")
-            .select("id")
-            .eq("remit_message_id", message_id)
-            .limit(1)
-            .execute()
-        )
-        rows = getattr(res, "data", None) or []
-        return len(rows) > 0
+        q = quote(message_id, safe="")
+        url = f"{_signals_rest_url()}?remit_message_id=eq.{q}&select=id"
+        resp = await client.get(url, headers=_supabase_auth_headers())
+        resp.raise_for_status()
+        rows = resp.json()
+        return isinstance(rows, list) and len(rows) > 0
     except Exception as e:
         logger.exception("Failed to query signals for remit_message_id=%s: %s", message_id, e)
         raise
 
 
-def insert_signal(client: Client, row: dict[str, Any]) -> None:
-    """Insert a signal row; PostgREST raises on constraint or permission errors."""
-    client.table("signals").insert(row).execute()
+async def insert_signal_http(client: httpx.AsyncClient, row: dict[str, Any]) -> None:
+    """Insert a signal row via PostgREST."""
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    resp = await client.post(_signals_rest_url(), headers=headers, json=row)
+    resp.raise_for_status()
 
 
 # -----------------------------------------------------------------------------
@@ -313,8 +329,9 @@ async def fetch_remit_notices_http(client: httpx.AsyncClient) -> list[dict[str, 
     raise last_error
 
 
-async def run_poll_cycle(supabase: Client) -> None:
+async def run_poll_cycle() -> None:
     """One poll: fetch notices, insert new signals, log summary."""
+    _require_supabase_env()
     ts = _utc_now_iso()
     new_count = 0
 
@@ -324,39 +341,38 @@ async def run_poll_cycle(supabase: Client) -> None:
     ) as http:
         notices = await fetch_remit_notices_http(http)
 
-    total = len(notices)
-    skipped = 0
+        total = len(notices)
+        skipped = 0
 
-    for notice in notices:
-        row = notice_to_row(notice)
-        if row is None:
-            skipped += 1
-            continue
-        mid = row["remit_message_id"]
-        try:
-            if remit_message_exists(supabase, mid):
+        for notice in notices:
+            row = notice_to_row(notice)
+            if row is None:
+                skipped += 1
                 continue
-            insert_signal(supabase, row)
-            new_count += 1
-            logger.info("Inserted REMIT signal remit_message_id=%s title=%s", mid, row["title"][:120])
-        except Exception:
-            logger.exception("Failed to process notice messageId=%s", mid)
-            raise
+            mid = row["remit_message_id"]
+            try:
+                if await remit_message_exists_http(http, mid):
+                    continue
+                await insert_signal_http(http, row)
+                new_count += 1
+                logger.info("Inserted REMIT signal remit_message_id=%s title=%s", mid, row["title"][:120])
+            except Exception:
+                logger.exception("Failed to process notice messageId=%s", mid)
+                raise
 
-    logger.info(
-        "poll_cycle ts=%s notices_total=%s new_inserted=%s skipped_no_id=%s",
-        ts,
-        total,
-        new_count,
-        skipped,
-    )
+        logger.info(
+            "poll_cycle ts=%s notices_total=%s new_inserted=%s skipped_no_id=%s",
+            ts,
+            total,
+            new_count,
+            skipped,
+        )
 
 
 def scheduled_poll() -> None:
     """Sync entrypoint for schedule — runs async poll in a fresh loop."""
     try:
-        supabase = create_supabase_client()
-        asyncio.run(run_poll_cycle(supabase))
+        asyncio.run(run_poll_cycle())
     except Exception as e:
         logger.error("Poll cycle aborted: %s", e, exc_info=True)
 
