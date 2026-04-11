@@ -271,10 +271,10 @@ export default function Home() {
           <p className="mt-10 text-center text-sm text-ink-light">
             Need more than 5 seats?{" "}
             <a
-              href="mailto:enterprise@zephyr.markets"
+              href="mailto:contact@zephyr.markets"
               className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
             >
-              enterprise@zephyr.markets
+              contact@zephyr.markets
             </a>
           </p>
         </div>
