@@ -4,7 +4,12 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { createBrowserClient } from "@/lib/supabase/client";
-import { type SignalRow, signalRowToCardProps } from "@/lib/signals";
+import {
+  dedupeSignalRowsByTitleDescription,
+  signalDedupeKey,
+  type SignalRow,
+  signalRowToCardProps,
+} from "@/lib/signals";
 
 const filters = [
   "All",
@@ -50,7 +55,9 @@ export default function SignalsPage() {
       return;
     }
     setError(null);
-    const rows = (data ?? []) as SignalRow[];
+    const rows = dedupeSignalRowsByTitleDescription(
+      (data ?? []) as SignalRow[],
+    );
     setSignals(rows.map(signalRowToCardProps));
   }, []);
 
@@ -75,9 +82,13 @@ export default function SignalsPage() {
         (payload) => {
           const row = payload.new as SignalRow;
           const mapped = signalRowToCardProps(row);
+          const k = signalDedupeKey(row);
           setSignals((prev) => {
             if (prev.some((s) => s.id === mapped.id)) return prev;
-            return [mapped, ...prev].slice(0, 50);
+            const rest = prev.filter(
+              (s) => signalDedupeKey(s) !== k,
+            );
+            return [mapped, ...rest].slice(0, 50);
           });
         },
       )

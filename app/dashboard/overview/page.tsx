@@ -6,7 +6,11 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { createBrowserClient } from "@/lib/supabase/client";
-import { type SignalRow, signalRowToCardProps } from "@/lib/signals";
+import {
+  dedupeSignalRowsByTitleDescription,
+  type SignalRow,
+  signalRowToCardProps,
+} from "@/lib/signals";
 
 type CardWithId = SignalCardProps & { id: string };
 
@@ -85,7 +89,7 @@ export default function OverviewPage() {
             "id, type, title, description, direction, source, confidence, created_at, raw_data",
           )
           .order("created_at", { ascending: false })
-          .limit(4),
+          .limit(32),
         supabase
           .from("signals")
           .select("*", { count: "exact", head: true })
@@ -123,7 +127,10 @@ export default function OverviewPage() {
       ]);
 
       if (!sigRes.error && sigRes.data) {
-        setPreview((sigRes.data as SignalRow[]).map(signalRowToCardProps));
+        const deduped = dedupeSignalRowsByTitleDescription(
+          sigRes.data as SignalRow[],
+        ).slice(0, 4);
+        setPreview(deduped.map(signalRowToCardProps));
       }
       if (countRes.error) {
         setRemit24h(null);

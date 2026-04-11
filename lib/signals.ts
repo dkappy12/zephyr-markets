@@ -15,6 +15,41 @@ export type SignalRow = {
   raw_data: unknown;
 };
 
+/** Normalised key for matching duplicate REMIT narratives (frontend-only dedupe). */
+export function signalDedupeKey(
+  row: Pick<SignalRow, "title" | "description">,
+): string {
+  const title = (row.title ?? "").trim();
+  const desc = (row.description ?? "").trim();
+  return `${title}\0${desc}`;
+}
+
+/**
+ * Same physical outage can appear as multiple REMIT rows (different message IDs).
+ * Keep one row per (title, description), preferring the latest created_at.
+ * Returns rows sorted by created_at descending.
+ */
+export function dedupeSignalRowsByTitleDescription(
+  rows: SignalRow[],
+): SignalRow[] {
+  const best = new Map<string, SignalRow>();
+  for (const row of rows) {
+    const k = signalDedupeKey(row);
+    const cur = best.get(k);
+    if (
+      !cur ||
+      new Date(row.created_at).getTime() >
+        new Date(cur.created_at).getTime()
+    ) {
+      best.set(k, row);
+    }
+  }
+  return Array.from(best.values()).sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+}
+
 /** Format `created_at` as UTC "HH:mm GMT" using date-fns + date-fns-tz. */
 export function formatSignalTimestamp(iso: string): string {
   const d = parseISO(iso);

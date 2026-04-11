@@ -103,7 +103,9 @@ STORAGE_SOURCE = "GIE AGSI"
 STORAGE_POLL_HOURS = 6
 # GB plus top EU storage markets (country=eu aggregate often returns no rows).
 STORAGE_COUNTRY_CODES = ("GB", "DE", "FR", "IT", "NL", "AT")
-WEATHER_START_DELAY_SECONDS = 10
+# First Open-Meteo fetch on startup uses asyncio.sleep(this many seconds) to avoid 429s when
+# a new deploy overlaps the previous instance's startup fetch.
+WEATHER_START_DELAY_SECONDS = 60
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -391,15 +393,23 @@ def scheduled_weather() -> None:
 
 def _schedule_weather_with_startup_delay() -> None:
     """
-    First weather run after WEATHER_START_DELAY_SECONDS (avoids Open-Meteo rate limits
-    on every deploy), then every WEATHER_POLL_MINUTES via the schedule loop.
+    First weather run after asyncio.sleep(WEATHER_START_DELAY_SECONDS) on a background
+    thread (avoids Open-Meteo rate limits on overlapping deploys), then every
+    WEATHER_POLL_MINUTES via the schedule loop. REMIT and other cycles are not delayed.
     """
 
     def _first_run_then_register_interval() -> None:
-        scheduled_weather()
+        async def _delayed_first() -> None:
+            await asyncio.sleep(WEATHER_START_DELAY_SECONDS)
+            logger.info(
+                "weather_cycle: startup delayed 60s to avoid rate limit",
+            )
+            await run_weather_cycle()
+
+        asyncio.run(_delayed_first())
         schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
 
-    threading.Timer(float(WEATHER_START_DELAY_SECONDS), _first_run_then_register_interval).start()
+    threading.Thread(target=_first_run_then_register_interval, daemon=True).start()
 
 
 # -----------------------------------------------------------------------------
