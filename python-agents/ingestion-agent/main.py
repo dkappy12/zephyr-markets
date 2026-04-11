@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
 Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECMWF)
-+ gas storage (GIE AGSI).
++ gas storage (GIE AGSI) + N2EX MID market prices.
 
 - REMIT: polls BMRS REMIT dataset → Supabase `signals` (PostgREST HTTP).
 - Weather: polls Open-Meteo forecast → Supabase `weather_forecasts` (upsert by
   forecast_time + location).
 - Storage: polls GIE AGSI (GB + DE/FR/IT/NL/AT) → Supabase `storage_levels`
   (upsert by report_date + location).
+- N2EX MID: polls BMRS MID dataset → Supabase `market_prices` (upsert by
+  price_date + settlement_period + market).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
     confidence, raw_data (jsonb)
   - weather_forecasts: see weather_forecasts.sql
   - storage_levels: see storage_levels.sql
+  - market_prices: see market_prices.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
@@ -34,6 +37,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import httpx
 import schedule
@@ -51,6 +55,10 @@ ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 GIE_API_KEY = os.environ.get("GIE_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
+MID_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
+MARKET_CODE_N2EX = "N2EX"
+MARKET_MID_SOURCE = "Elexon BMRS MID"
+MARKET_INDEX_POLL_MINUTES = 30
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_LAT = 54.0
@@ -141,6 +149,11 @@ def _weather_forecasts_rest_url() -> str:
 def _storage_levels_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/storage_levels"
+
+
+def _market_prices_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/market_prices"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -577,6 +590,123 @@ def scheduled_storage() -> None:
 
 
 # -----------------------------------------------------------------------------
+# Elexon BMRS MID → market_prices (N2EX, upsert on price_date + settlement_period + market)
+# -----------------------------------------------------------------------------
+
+
+def _parse_mid_dataset(payload: Any) -> list[dict[str, Any]]:
+    """Extract MID rows from BMRS Insights JSON (same envelope as REMIT)."""
+    return _parse_remit_dataset(payload)
+
+
+def _mid_row_to_record(
+    row: dict[str, Any],
+    query_date: str,
+    fetched_at: str,
+) -> dict[str, Any] | None:
+    """Map one MID row to PostgREST columns (settlementDate, settlementPeriod, price)."""
+    pdate = _get_str(row, "settlementDate", "SettlementDate", "settlement_date")
+    if not pdate:
+        pdate = query_date
+    if len(pdate) >= 10:
+        pdate = pdate[:10]
+
+    sp_raw = row.get("settlementPeriod")
+    if sp_raw is None:
+        sp_raw = row.get("SettlementPeriod") or row.get("settlement_period")
+    if sp_raw is None or str(sp_raw).strip() == "":
+        return None
+    try:
+        settlement_period = int(round(float(str(sp_raw).strip())))
+    except (TypeError, ValueError):
+        return None
+
+    price = _get_float(row, "price", "Price", "indexPrice", "marketIndexPrice")
+    if price is None:
+        return None
+
+    return {
+        "price_date": pdate,
+        "settlement_period": settlement_period,
+        "price_gbp_mwh": price,
+        "market": MARKET_CODE_N2EX,
+        "source": MARKET_MID_SOURCE,
+        "fetched_at": fetched_at,
+    }
+
+
+async def upsert_market_prices_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _market_prices_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "price_date,settlement_period,market"},
+    )
+    resp.raise_for_status()
+
+
+async def fetch_market_prices() -> None:
+    """Fetch today's MID dataset from Elexon and upsert into market_prices."""
+    _require_supabase_env()
+    settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    params: dict[str, str] = {
+        "settlementDate": settlement_date,
+        "format": "json",
+    }
+    if ELEXON_API_KEY:
+        params["APIKey"] = ELEXON_API_KEY
+
+    async with httpx.AsyncClient(
+        headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
+        follow_redirects=True,
+    ) as http:
+        resp = await http.get(MID_DATASET_URL, params=params, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        payload = resp.json()
+
+        raw_rows = _parse_mid_dataset(payload)
+        out: list[dict[str, Any]] = []
+        for r in raw_rows:
+            rec = _mid_row_to_record(r, settlement_date, fetched_at)
+            if rec:
+                out.append(rec)
+
+        if not out:
+            logger.warning(
+                "n2ex_cycle: no MID rows parsed for %s (raw count=%s)",
+                settlement_date,
+                len(raw_rows),
+            )
+            return
+
+        await upsert_market_prices_http(http, out)
+
+    logger.info(
+        "n2ex_cycle: upserted %s rows for %s",
+        len(out),
+        settlement_date,
+    )
+
+
+def scheduled_market_prices() -> None:
+    try:
+        asyncio.run(fetch_market_prices())
+    except Exception as e:
+        logger.error("Market prices cycle aborted: %s", e, exc_info=True)
+
+
+# -----------------------------------------------------------------------------
 # REMIT HTTP + parsing
 # -----------------------------------------------------------------------------
 
@@ -940,7 +1070,7 @@ def main() -> None:
 
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
-        "every %s min (%s) | GIE AGSI storage every %sh (%s)",
+        "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -948,13 +1078,17 @@ def main() -> None:
         OPEN_METEO_FORECAST_URL,
         STORAGE_POLL_HOURS,
         GIE_AGSI_API_URL,
+        MARKET_INDEX_POLL_MINUTES,
+        MID_DATASET_URL,
     )
 
     scheduled_poll()
     _schedule_weather_with_startup_delay()
     scheduled_storage()
+    scheduled_market_prices()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
+    schedule.every(MARKET_INDEX_POLL_MINUTES).minutes.do(scheduled_market_prices)
 
     while True:
         schedule.run_pending()
