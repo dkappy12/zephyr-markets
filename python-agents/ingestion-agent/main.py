@@ -6,8 +6,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
 - REMIT: polls BMRS REMIT dataset → Supabase `signals` (PostgREST HTTP).
 - Weather: polls Open-Meteo forecast → Supabase `weather_forecasts` (upsert by
   forecast_time + location).
-- Storage: polls GIE AGSI → Supabase `storage_levels` (upsert by report_date +
-  location).
+- Storage: polls GIE AGSI (GB + DE/FR/IT/NL/AT) → Supabase `storage_levels`
+  (upsert by report_date + location).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -29,6 +29,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -61,6 +62,9 @@ WEATHER_POLL_MINUTES = 30
 GIE_AGSI_API_URL = "https://agsi.gie.eu/api"
 STORAGE_SOURCE = "GIE AGSI"
 STORAGE_POLL_HOURS = 6
+# GB plus top EU storage markets (country=eu aggregate often returns no rows).
+STORAGE_COUNTRY_CODES = ("GB", "DE", "FR", "IT", "NL", "AT")
+WEATHER_START_DELAY_SECONDS = 10
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -326,16 +330,35 @@ def scheduled_weather() -> None:
         logger.error("Weather cycle aborted: %s", e, exc_info=True)
 
 
+def _schedule_weather_with_startup_delay() -> None:
+    """
+    First weather run after WEATHER_START_DELAY_SECONDS (avoids Open-Meteo rate limits
+    on every deploy), then every WEATHER_POLL_MINUTES via the schedule loop.
+    """
+
+    def _first_run_then_register_interval() -> None:
+        scheduled_weather()
+        schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
+
+    threading.Timer(float(WEATHER_START_DELAY_SECONDS), _first_run_then_register_interval).start()
+
+
 # -----------------------------------------------------------------------------
 # GIE AGSI → storage_levels (upsert on report_date + location)
 # -----------------------------------------------------------------------------
 
 
 def _agsi_parse_float(raw: Any) -> float | None:
+    """Parse AGSI numeric fields; API uses '-' (and similar) for missing values → None."""
     if raw is None:
         return None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
     s = str(raw).strip()
-    if not s or s == "-":
+    if not s or s in ("-", "—", "–") or s.lower() in ("n/a", "na"):
         return None
     try:
         return float(s)
@@ -351,7 +374,7 @@ def _agsi_row_to_storage_record(
 ) -> dict[str, Any] | None:
     """Map one AGSI row object to a PostgREST row (volumes as TWh per AGSI JSON)."""
     day = (item.get("gasDayStart") or gas_day_fallback or "").strip()
-    if not day:
+    if not day or day == "-":
         return None
 
     full = _agsi_parse_float(item.get("full"))
@@ -492,73 +515,46 @@ def _agsi_gas_day_fallback(payload: Any) -> str:
 
 
 async def run_storage_cycle() -> None:
-    """Fetch GB + EU aggregate from GIE AGSI and upsert into storage_levels."""
+    """Fetch GB + major EU markets from GIE AGSI and upsert into storage_levels."""
     _require_supabase_env()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
-        gb_payload = await fetch_agsi_json(http, country="GB", size=1, page=1)
-        eu_payload = await fetch_agsi_json(http, country="eu", size=1, page=1)
-
         rows: list[dict[str, Any]] = []
 
-        gb_items, gb_ok = _agsi_extract_items(gb_payload)
-        if not gb_ok:
-            logger.warning(
-                "storage_cycle: unexpected AGSI JSON structure for GB; raw=%s",
-                _agsi_json_for_log(gb_payload),
+        for country_code in STORAGE_COUNTRY_CODES:
+            payload = await fetch_agsi_json(
+                http, country=country_code, size=1, page=1
             )
-        gas_day_gb = _agsi_gas_day_fallback(gb_payload)
-        gb_item = _agsi_select_row(gb_items) if gb_ok else None
-        if gb_ok and gb_item is None:
-            logger.info(
-                "storage_cycle: no AGSI data rows for GB (gas_day=%s)",
-                gas_day_gb or "?",
-            )
-        elif gb_item is not None:
+            items, ok = _agsi_extract_items(payload)
+            if not ok:
+                logger.warning(
+                    "storage_cycle: unexpected AGSI JSON structure for %s; raw=%s",
+                    country_code,
+                    _agsi_json_for_log(payload),
+                )
+                continue
+
+            gas_day = _agsi_gas_day_fallback(payload)
+            item = _agsi_select_row(items)
+            if item is None:
+                logger.info(
+                    "storage_cycle: no AGSI data rows for %s (gas_day=%s)",
+                    country_code,
+                    gas_day or "?",
+                )
+                continue
+
             rec = _agsi_row_to_storage_record(
-                gb_item, "GB", gas_day_gb, fetched_at
+                item, country_code, gas_day, fetched_at
             )
             if rec:
                 rows.append(rec)
                 logger.info(
-                    "storage_cycle: GB gas_day=%s full_pct=%s working_volume_twh=%s "
-                    "injection_twh=%s withdrawal_twh=%s",
-                    rec["report_date"],
+                    "storage_cycle: %s full_pct=%s working_volume_twh=%s",
+                    country_code,
                     rec["full_pct"],
                     rec["working_volume_twh"],
-                    rec["injection_twh"],
-                    rec["withdrawal_twh"],
-                )
-
-        eu_items, eu_ok = _agsi_extract_items(eu_payload)
-        if not eu_ok:
-            logger.warning(
-                "storage_cycle: unexpected AGSI JSON structure for EU; raw=%s",
-                _agsi_json_for_log(eu_payload),
-            )
-        gas_day_eu = _agsi_gas_day_fallback(eu_payload)
-        eu_item = _agsi_select_row(eu_items) if eu_ok else None
-        if eu_ok and eu_item is None:
-            logger.info(
-                "storage_cycle: no AGSI data rows for EU aggregate "
-                "(country=eu, gas_day=%s)",
-                gas_day_eu or "?",
-            )
-        elif eu_item is not None:
-            rec_eu = _agsi_row_to_storage_record(
-                eu_item, "EU", gas_day_eu, fetched_at
-            )
-            if rec_eu:
-                rows.append(rec_eu)
-                logger.info(
-                    "storage_cycle: EU gas_day=%s full_pct=%s working_volume_twh=%s "
-                    "injection_twh=%s withdrawal_twh=%s",
-                    rec_eu["report_date"],
-                    rec_eu["full_pct"],
-                    rec_eu["working_volume_twh"],
-                    rec_eu["injection_twh"],
-                    rec_eu["withdrawal_twh"],
                 )
 
         if not rows:
@@ -943,10 +939,11 @@ def main() -> None:
     )
 
     logger.info(
-        "Ingestion agent starting | REMIT every %ss (%s) | weather every %s min (%s) "
-        "| GIE AGSI storage every %sh (%s)",
+        "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
+        "every %s min (%s) | GIE AGSI storage every %sh (%s)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
+        WEATHER_START_DELAY_SECONDS,
         WEATHER_POLL_MINUTES,
         OPEN_METEO_FORECAST_URL,
         STORAGE_POLL_HOURS,
@@ -954,10 +951,9 @@ def main() -> None:
     )
 
     scheduled_poll()
-    scheduled_weather()
+    _schedule_weather_with_startup_delay()
     scheduled_storage()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
-    schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
 
     while True:
