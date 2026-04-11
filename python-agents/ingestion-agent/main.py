@@ -882,6 +882,13 @@ def _parse_dt_flexible(raw: str) -> datetime | None:
     return None
 
 
+def _ttf_normalize_header_key(k: str | None) -> str:
+    """Strip BOM and whitespace from CSV header keys."""
+    if k is None:
+        return ""
+    return k.replace("\ufeff", "").strip()
+
+
 def _ttf_csv_dict_rows(text: str) -> list[dict[str, str]]:
     text = text.strip()
     if not text:
@@ -891,76 +898,54 @@ def _ttf_csv_dict_rows(text: str) -> list[dict[str, str]]:
     reader = csv.DictReader(io.StringIO(text), delimiter=delim)
     out: list[dict[str, str]] = []
     for row in reader:
-        out.append({(k or "").strip(): (v or "").strip() for k, v in row.items()})
+        out.append(
+            {
+                _ttf_normalize_header_key(k): (v or "").strip()
+                for k, v in row.items()
+            }
+        )
     return out
 
 
-def _ttf_resolve_columns(headers: list[str]) -> tuple[str | None, str | None, str | None, str | None]:
-    """Return (single_dt_col, date_col, time_col, price_col)."""
-    hl = [(h, h.lower()) for h in headers if h and str(h).strip()]
-    price_col = None
-    for h, low in hl:
-        if "ngp" in low:
-            price_col = h
-            break
-    if price_col is None:
-        for h, low in hl:
-            if "price" in low and "eur" in low:
-                price_col = h
-                break
-    if price_col is None:
-        for h, low in hl:
-            if "price" in low or "eur" in low:
-                price_col = h
-                break
-
-    dt_col = None
-    for h, low in hl:
-        if "delivery" in low and "start" in low:
-            dt_col = h
-            break
-    if dt_col is None:
-        for h, low in hl:
-            if low in ("timestamp", "datetime") or "time (utc)" in low or "time (gmt)" in low:
-                dt_col = h
-                break
-    date_col = None
-    time_col = None
-    if dt_col is None:
-        for h, low in hl:
-            if low == "date" or low.endswith(" day"):
-                date_col = h
-        for h, low in hl:
-            if low == "time" or low == "period":
-                time_col = h
-                break
-            if "time" in low and "price" not in low and "delivery" not in low:
-                time_col = h
-                break
-    return dt_col, date_col, time_col, price_col
+def _ttf_resolve_columns(
+    headers: list[str],
+) -> tuple[str | None, str | None, str | None]:
+    """EEX TTF NGP CSV: Gasday (date), IndexValue (€/MWh), optional Status."""
+    gasday_col = None
+    indexvalue_col = None
+    status_col = None
+    for h in headers:
+        low = h.lower()
+        if "gasday" in low:
+            gasday_col = h
+        if "indexvalue" in low:
+            indexvalue_col = h
+        if low == "status":
+            status_col = h
+    return gasday_col, indexvalue_col, status_col
 
 
-def _ttf_row_datetime_price(
-    row: dict[str, str],
-    dt_col: str | None,
-    date_col: str | None,
-    time_col: str | None,
-    price_col: str | None,
-) -> tuple[datetime | None, float | None]:
-    if not price_col or price_col not in row:
-        return None, None
-    ps = row.get(price_col, "").replace(" ", "").replace(",", ".")
+def _ttf_parse_gasday_dd_mm_yyyy(raw: str) -> datetime | None:
+    """Gasday values like 11/04/2026 → UTC midnight that calendar day."""
+    s = (raw or "").strip()
+    if not s:
+        return None
     try:
-        price = float(ps)
-    except (TypeError, ValueError):
-        return None, None
+        d = datetime.strptime(s, "%d/%m/%Y")
+        return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
-    dt: datetime | None = None
-    if dt_col and row.get(dt_col):
-        dt = _parse_dt_flexible(row[dt_col])
-    elif date_col and time_col:
-        dt = _parse_dt_flexible(f"{row.get(date_col, '')} {row.get(time_col, '')}")
-    return dt, price
+
+def _ttf_parse_index_value_eur(raw: str) -> float | None:
+    """IndexValue (€/MWh) cell → float."""
+    s = (raw or "").strip().replace(" ", "").replace(",", ".")
+    for ch in ("€", "\u20ac", "\xa3"):
+        s = s.replace(ch, "")
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
 
 
 async def upsert_gas_prices_http(
@@ -1010,23 +995,32 @@ async def fetch_ttf_price() -> None:
         return
 
     hdrs = list(rows[0].keys())
-    dt_col, date_col, time_col, price_col = _ttf_resolve_columns(hdrs)
-    if price_col is None:
-        logger.error("ttf_cycle: could not resolve price column in headers=%s", hdrs)
+    gasday_col, price_col, status_col = _ttf_resolve_columns(hdrs)
+    if price_col is None or gasday_col is None:
+        logger.error(
+            "ttf_cycle: could not resolve Gasday/IndexValue columns in headers=%s",
+            hdrs,
+        )
         return
 
-    parsed: list[tuple[datetime, float]] = []
+    parsed: list[tuple[datetime, float, str]] = []
     for row in rows:
-        dt, price = _ttf_row_datetime_price(row, dt_col, date_col, time_col, price_col)
-        if dt is not None and price is not None:
-            parsed.append((dt, price))
+        dt = _ttf_parse_gasday_dd_mm_yyyy(row.get(gasday_col, ""))
+        price = _ttf_parse_index_value_eur(row.get(price_col, ""))
+        if dt is None or price is None:
+            continue
+        status_txt = ""
+        if status_col and status_col in row:
+            status_txt = (row.get(status_col) or "").strip()
+        parsed.append((dt, price, status_txt))
 
     if not parsed:
         logger.warning("ttf_cycle: no parseable TTF rows (headers=%s)", hdrs)
         return
 
-    latest_dt, latest_price = max(parsed, key=lambda x: x[0])
+    latest_dt, latest_price, latest_status = max(parsed, key=lambda x: x[0])
     price_time_iso = latest_dt.astimezone(timezone.utc).isoformat()
+    gas_day_label = latest_dt.strftime("%Y-%m-%d")
 
     row = {
         "price_time": price_time_iso,
@@ -1040,9 +1034,10 @@ async def fetch_ttf_price() -> None:
         await upsert_gas_prices_http(http, [row])
 
     logger.info(
-        "ttf_cycle: TTF NGP = €%.2f/MWh at %s",
+        "ttf_cycle: TTF NGP = €%.2f/MWh for gas day %s (status: %s)",
         latest_price,
-        price_time_iso,
+        gas_day_label,
+        latest_status or "—",
     )
 
 
