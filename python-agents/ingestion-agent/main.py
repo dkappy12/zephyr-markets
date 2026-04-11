@@ -682,9 +682,9 @@ def _parse_mid_http_body(text: str) -> Any:
 
 async def fetch_market_prices() -> None:
     """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
+    # TEMP: one-shot debug — log full body at INFO, then exit (no parse / upsert).
     _require_supabase_env()
     settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
-    fetched_at = datetime.now(timezone.utc).isoformat()
 
     base_params: dict[str, str] = {
         "from": settlement_date,
@@ -694,7 +694,6 @@ async def fetch_market_prices() -> None:
         base_params["APIKey"] = ELEXON_API_KEY
 
     dataset_params = {**base_params, "format": "json"}
-    stream_params = dict(base_params)
 
     async with httpx.AsyncClient(
         headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
@@ -704,80 +703,11 @@ async def fetch_market_prices() -> None:
             MID_DATASET_URL, params=dataset_params, timeout=HTTP_TIMEOUT
         )
         logger.info(
-            "n2ex_cycle: GET %s status=%s",
-            MID_DATASET_URL,
-            resp.status_code,
-        )
-        logger.debug(
-            "n2ex_cycle: raw response body (before parse) url=%s status=%s: %s",
-            MID_DATASET_URL,
+            "n2ex_cycle: full MID raw response status=%s body=%s",
             resp.status_code,
             resp.text,
         )
-
-        if resp.status_code == 404:
-            resp = await http.get(
-                MID_STREAM_URL, params=stream_params, timeout=HTTP_TIMEOUT
-            )
-            logger.info(
-                "n2ex_cycle: GET %s status=%s",
-                MID_STREAM_URL,
-                resp.status_code,
-            )
-            logger.debug(
-                "n2ex_cycle: raw response body (before parse) url=%s status=%s: %s",
-                MID_STREAM_URL,
-                resp.status_code,
-                resp.text,
-            )
-
-        if resp.status_code == 404:
-            logger.error(
-                "n2ex_cycle: MID dataset and stream both returned 404 date=%s",
-                settlement_date,
-            )
-            return
-
-        try:
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                "n2ex_cycle: MID HTTP error status=%s url=%s",
-                e.response.status_code if e.response is not None else "?",
-                str(e.request.url) if e.request else "?",
-            )
-            return
-
-        try:
-            payload = resp.json()
-        except json.JSONDecodeError:
-            payload = _parse_mid_http_body(resp.text)
-        if payload is None:
-            logger.error("n2ex_cycle: could not parse MID response as JSON date=%s", settlement_date)
-            return
-
-        raw_rows = _parse_mid_dataset(payload)
-        out: list[dict[str, Any]] = []
-        for r in raw_rows:
-            rec = _mid_row_to_record(r, settlement_date, fetched_at)
-            if rec:
-                out.append(rec)
-
-        if not out:
-            logger.warning(
-                "n2ex_cycle: no MID rows parsed for %s (raw count=%s)",
-                settlement_date,
-                len(raw_rows),
-            )
-            return
-
-        await upsert_market_prices_http(http, out)
-
-    logger.info(
-        "n2ex_cycle: upserted %s rows for %s",
-        len(out),
-        settlement_date,
-    )
+        return
 
 
 def scheduled_market_prices() -> None:
