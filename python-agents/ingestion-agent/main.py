@@ -8,8 +8,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   forecast_time + location).
 - Storage: polls GIE AGSI (GB + DE/FR/IT/NL/AT) → Supabase `storage_levels`
   (upsert by report_date + location).
-- N2EX MID: polls BMRS MID dataset → Supabase `market_prices` (upsert by
-  price_date + settlement_period + market).
+- N2EX MID: polls BMRS `balancing/pricing/market-index` → Supabase `market_prices`
+  (upsert by price_date + settlement_period + market).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -55,7 +55,9 @@ ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 GIE_API_KEY = os.environ.get("GIE_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
-MID_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
+MARKET_INDEX_URL = (
+    "https://data.elexon.co.uk/bmrs/api/v1/balancing/pricing/market-index"
+)
 MARKET_CODE_N2EX = "N2EX"
 MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
@@ -655,7 +657,7 @@ async def upsert_market_prices_http(
 
 
 async def fetch_market_prices() -> None:
-    """Fetch today's MID dataset from Elexon and upsert into market_prices."""
+    """Fetch today's market index from Elexon BMRS and upsert into market_prices."""
     _require_supabase_env()
     settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
     fetched_at = datetime.now(timezone.utc).isoformat()
@@ -671,7 +673,13 @@ async def fetch_market_prices() -> None:
         headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
         follow_redirects=True,
     ) as http:
-        resp = await http.get(MID_DATASET_URL, params=params, timeout=HTTP_TIMEOUT)
+        resp = await http.get(MARKET_INDEX_URL, params=params, timeout=HTTP_TIMEOUT)
+        logger.debug(
+            "n2ex_cycle: raw market-index API response settlementDate=%s status=%s body=%s",
+            settlement_date,
+            resp.status_code,
+            resp.text,
+        )
         resp.raise_for_status()
         payload = resp.json()
 
@@ -1079,7 +1087,7 @@ def main() -> None:
         STORAGE_POLL_HOURS,
         GIE_AGSI_API_URL,
         MARKET_INDEX_POLL_MINUTES,
-        MID_DATASET_URL,
+        MARKET_INDEX_URL,
     )
 
     scheduled_poll()
