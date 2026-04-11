@@ -12,3 +12,6 @@ export function createClient() {
 
   return createBrowserClient(url, key);
 }
+
+/** Alias for callers that prefer the explicit browser-client name. */
+export { createClient as createBrowserClient };

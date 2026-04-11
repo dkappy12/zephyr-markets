@@ -1,54 +1,51 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
-import { SignalCard } from "@/components/ui/SignalCard";
+import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
+import { createBrowserClient } from "@/lib/supabase/client";
+import { type SignalRow, signalRowToCardProps } from "@/lib/signals";
 
-const signals = [
-  {
-    tone: "bull" as const,
-    type: "flow" as const,
-    title: "GB: Nemo +180 MW vs day-ahead",
-    description:
-      "Imports through Nemo tighten the GB baseload stack. IFA2 ramp on schedule. Watch wind into peak for spark drag.",
-    source: "National Grid",
-    timestamp: "09:14 GMT",
-    confidence: "High",
-  },
-  {
-    tone: "bear" as const,
-    type: "weather" as const,
-    title: "Wind +1.2 GW vs run",
-    description:
-      "Met desk revision lifts front-weighted wind from hour 12 to 18. CCGT peak load factor under pressure.",
-    source: "ECMWF blend",
-    timestamp: "08:47 GMT",
-    confidence: "Med",
-  },
-  {
-    tone: "watch" as const,
-    type: "lng" as const,
-    title: "DES offers thin, NW Europe queue",
-    description:
-      "Three vessels inside three days of UK terminals. NBP TTF spread the clean read on marginal LNG.",
-    source: "AIS + brokers",
-    timestamp: "Yesterday",
-    confidence: "Watch",
-  },
-  {
-    tone: "neutral" as const,
-    type: "alert" as const,
-    title: "REMIT: 460 MW CCGT derate",
-    description:
-      "Unit partially offline. Return window not filed. Peak UK Power and spark spreads bid on uncertainty.",
-    source: "REMIT",
-    timestamp: "07:02 GMT",
-    confidence: "Confirmed",
-  },
-];
+type CardWithId = SignalCardProps & { id: string };
 
 export default function OverviewPage() {
+  const [preview, setPreview] = useState<CardWithId[]>([]);
+  const [remit24h, setRemit24h] = useState<number | null>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    async function load() {
+      const [sigRes, countRes] = await Promise.all([
+        supabase
+          .from("signals")
+          .select(
+            "id, type, title, description, direction, source, confidence, created_at, raw_data",
+          )
+          .order("created_at", { ascending: false })
+          .limit(4),
+        supabase
+          .from("signals")
+          .select("*", { count: "exact", head: true })
+          .gte("created_at", since),
+      ]);
+
+      if (!sigRes.error && sigRes.data) {
+        setPreview((sigRes.data as SignalRow[]).map(signalRowToCardProps));
+      }
+      if (countRes.error) {
+        setRemit24h(null);
+      } else {
+        setRemit24h(countRes.count ?? 0);
+      }
+    }
+
+    load();
+  }, []);
+
   return (
     <div className="space-y-10">
       <div>
@@ -75,7 +72,18 @@ export default function OverviewPage() {
           trend="flat"
         />
         <MetricCard label="LNG vessels" value="14" unit="in region" />
-        <MetricCard label="REMIT alerts" value="3" unit="open" trend="up" />
+        <MetricCard
+          label="REMIT alerts"
+          value={remit24h === null ? "—" : String(remit24h)}
+          unit="last 24h"
+          trend={
+            remit24h === null
+              ? undefined
+              : remit24h > 0
+                ? "up"
+                : "flat"
+          }
+        />
       </div>
 
       <motion.section
@@ -115,9 +123,15 @@ export default function OverviewPage() {
           </div>
         </div>
         <div className="grid gap-3">
-          {signals.map((s) => (
-            <SignalCard key={s.title} {...s} />
-          ))}
+          {preview.length === 0 ? (
+            <p className="text-sm text-ink-mid">
+              No signals yet. The ingestion pipeline is running.
+            </p>
+          ) : (
+            preview.map(({ id, ...card }) => (
+              <SignalCard key={id} {...card} />
+            ))
+          )}
         </div>
       </section>
 

@@ -15,7 +15,8 @@ export type SignalBorderTone = "bull" | "bear" | "watch" | "neutral";
 
 export type SignalCardProps = {
   tone: SignalBorderTone;
-  type?: "flow" | "weather" | "lng" | "alert" | "generic";
+  /** DB `type` (e.g. remit → warning icon); drives Lucide icon. */
+  type?: "flow" | "weather" | "lng" | "alert" | "generic" | "remit";
   title: string;
   description: string;
   source?: string;
@@ -37,6 +38,7 @@ const typeIcon: Record<NonNullable<SignalCardProps["type"]>, LucideIcon> = {
   weather: Cloud,
   lng: Anchor,
   alert: AlertTriangle,
+  remit: AlertTriangle,
   generic: Activity,
 };
 
