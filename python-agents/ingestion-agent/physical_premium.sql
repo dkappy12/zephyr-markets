@@ -33,4 +33,12 @@ CREATE POLICY "Allow anon read physical_premium"
   TO anon
   USING (true);
 
+-- Logged-in dashboard users use the authenticated role (JWT), not anon.
+CREATE POLICY "Allow authenticated read physical_premium"
+  ON public.physical_premium
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
 GRANT SELECT ON public.physical_premium TO anon;
+GRANT SELECT ON public.physical_premium TO authenticated;

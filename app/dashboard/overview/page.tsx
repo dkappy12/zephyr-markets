@@ -41,6 +41,16 @@ const PREMIUM_DIRECTION_LABEL: Record<string, string> = {
   STABLE: "Stable",
 };
 
+/** PostgREST may return numeric columns as number or string. */
+function parsePhysicalPremiumScore(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return Number.NaN;
+}
+
 export default function OverviewPage() {
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
@@ -157,10 +167,17 @@ export default function OverviewPage() {
         setWindGw(null);
       }
 
+      console.log(
+        "[physical_premium] raw data:",
+        premiumRes.data,
+        "error:",
+        premiumRes.error,
+      );
+      const nsRaw = premiumRes.data?.normalised_score;
+      const score = parsePhysicalPremiumScore(nsRaw);
+      console.log("[physical_premium] parsed normalised_score:", score);
+
       if (!premiumRes.error && premiumRes.data) {
-        const ns = premiumRes.data.normalised_score;
-        const score =
-          typeof ns === "number" ? ns : ns != null ? Number(ns) : Number.NaN;
         const dirRaw = premiumRes.data.direction;
         const dir =
           typeof dirRaw === "string" ? dirRaw.trim().toUpperCase() : "";
