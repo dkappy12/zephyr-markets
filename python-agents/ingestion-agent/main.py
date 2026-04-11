@@ -8,8 +8,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   forecast_time + location).
 - Storage: polls GIE AGSI (GB + DE/FR/IT/NL/AT) → Supabase `storage_levels`
   (upsert by report_date + location).
-- N2EX MID: polls BMRS `balancing/pricing/market-index` → Supabase `market_prices`
-  (upsert by price_date + settlement_period + market).
+- N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
+  `market_prices` (upsert by price_date + settlement_period + market).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -55,9 +55,8 @@ ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 GIE_API_KEY = os.environ.get("GIE_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
-MARKET_INDEX_URL = (
-    "https://data.elexon.co.uk/bmrs/api/v1/balancing/pricing/market-index"
-)
+MID_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
+MID_STREAM_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID/stream"
 MARKET_CODE_N2EX = "N2EX"
 MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
@@ -656,32 +655,106 @@ async def upsert_market_prices_http(
     resp.raise_for_status()
 
 
+def _parse_mid_http_body(text: str) -> Any:
+    """Parse JSON body or newline-delimited JSON (stream) into a structure _parse_mid_dataset accepts."""
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                rows.append(obj)
+        except json.JSONDecodeError:
+            continue
+    if rows:
+        return {"data": rows}
+    return None
+
+
 async def fetch_market_prices() -> None:
-    """Fetch today's market index from Elexon BMRS and upsert into market_prices."""
+    """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
     _require_supabase_env()
     settlement_date = datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
     fetched_at = datetime.now(timezone.utc).isoformat()
 
-    params: dict[str, str] = {
-        "settlementDate": settlement_date,
-        "format": "json",
+    base_params: dict[str, str] = {
+        "from": settlement_date,
+        "to": settlement_date,
     }
     if ELEXON_API_KEY:
-        params["APIKey"] = ELEXON_API_KEY
+        base_params["APIKey"] = ELEXON_API_KEY
+
+    dataset_params = {**base_params, "format": "json"}
+    stream_params = dict(base_params)
 
     async with httpx.AsyncClient(
         headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
         follow_redirects=True,
     ) as http:
-        resp = await http.get(MARKET_INDEX_URL, params=params, timeout=HTTP_TIMEOUT)
+        resp = await http.get(
+            MID_DATASET_URL, params=dataset_params, timeout=HTTP_TIMEOUT
+        )
+        logger.info(
+            "n2ex_cycle: GET %s status=%s",
+            MID_DATASET_URL,
+            resp.status_code,
+        )
         logger.debug(
-            "n2ex_cycle: raw market-index API response settlementDate=%s status=%s body=%s",
-            settlement_date,
+            "n2ex_cycle: raw response body (before parse) url=%s status=%s: %s",
+            MID_DATASET_URL,
             resp.status_code,
             resp.text,
         )
-        resp.raise_for_status()
-        payload = resp.json()
+
+        if resp.status_code == 404:
+            resp = await http.get(
+                MID_STREAM_URL, params=stream_params, timeout=HTTP_TIMEOUT
+            )
+            logger.info(
+                "n2ex_cycle: GET %s status=%s",
+                MID_STREAM_URL,
+                resp.status_code,
+            )
+            logger.debug(
+                "n2ex_cycle: raw response body (before parse) url=%s status=%s: %s",
+                MID_STREAM_URL,
+                resp.status_code,
+                resp.text,
+            )
+
+        if resp.status_code == 404:
+            logger.error(
+                "n2ex_cycle: MID dataset and stream both returned 404 date=%s",
+                settlement_date,
+            )
+            return
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "n2ex_cycle: MID HTTP error status=%s url=%s",
+                e.response.status_code if e.response is not None else "?",
+                str(e.request.url) if e.request else "?",
+            )
+            return
+
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError:
+            payload = _parse_mid_http_body(resp.text)
+        if payload is None:
+            logger.error("n2ex_cycle: could not parse MID response as JSON date=%s", settlement_date)
+            return
 
         raw_rows = _parse_mid_dataset(payload)
         out: list[dict[str, Any]] = []
@@ -1087,7 +1160,7 @@ def main() -> None:
         STORAGE_POLL_HOURS,
         GIE_AGSI_API_URL,
         MARKET_INDEX_POLL_MINUTES,
-        MARKET_INDEX_URL,
+        MID_DATASET_URL,
     )
 
     scheduled_poll()
