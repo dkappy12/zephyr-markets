@@ -968,7 +968,7 @@ async def upsert_gas_prices_http(
 
 
 async def fetch_ttf_price() -> None:
-    """Fetch EEX TTF NGP CSV and upsert the latest row into gas_prices."""
+    """Fetch EEX TTF NGP CSV; upsert today's UTC gas day if present, else latest Gasday."""
     _require_supabase_env()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
@@ -1018,7 +1018,15 @@ async def fetch_ttf_price() -> None:
         logger.warning("ttf_cycle: no parseable TTF rows (headers=%s)", hdrs)
         return
 
-    latest_dt, latest_price, latest_status = max(parsed, key=lambda x: x[0])
+    today_utc = datetime.now(timezone.utc).date()
+    today_rows = [t for t in parsed if t[0].date() == today_utc]
+    if today_rows:
+        latest_dt, latest_price, _latest_status = today_rows[0]
+        selection = "today"
+    else:
+        latest_dt, latest_price, _latest_status = max(parsed, key=lambda x: x[0])
+        selection = "fallback"
+
     price_time_iso = latest_dt.astimezone(timezone.utc).isoformat()
     gas_day_label = latest_dt.strftime("%Y-%m-%d")
 
@@ -1034,10 +1042,10 @@ async def fetch_ttf_price() -> None:
         await upsert_gas_prices_http(http, [row])
 
     logger.info(
-        "ttf_cycle: TTF NGP = €%.2f/MWh for gas day %s (status: %s)",
+        "ttf_cycle: TTF NGP = €%.2f/MWh for gas day %s (%s)",
         latest_price,
         gas_day_label,
-        latest_status or "—",
+        selection,
     )
 
 
