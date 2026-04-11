@@ -1,5 +1,11 @@
-# Pinned for a clean resolve without optional heavy deps (e.g. pyiceberg on newer supabase).
-httpx==0.25.2
-supabase==2.4.0
+# Pinned for httpx/supabase compatibility (avoids Client proxy kwarg mismatch).
+# Note: gotrue 2.3.4 is not published on PyPI — 2.4.1 satisfies supabase 2.3.4 (gotrue>=1.3,<3).
+# Note: postgrest 0.16.1 conflicts with supabase 2.3.4 (requires postgrest<0.16.0) — 0.15.1 is the latest compatible.
+supabase==2.3.4
+httpx==0.24.1
 python-dotenv==1.0.0
 schedule==1.2.1
+gotrue==2.4.1
+postgrest==0.15.1
+storage3==0.7.0
+realtime==1.0.6
