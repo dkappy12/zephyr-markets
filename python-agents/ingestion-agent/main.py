@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECMWF).
+Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECMWF)
++ gas storage (GIE AGSI).
 
 - REMIT: polls BMRS REMIT dataset → Supabase `signals` (PostgREST HTTP).
 - Weather: polls Open-Meteo forecast → Supabase `weather_forecasts` (upsert by
   forecast_time + location).
+- Storage: polls GIE AGSI → Supabase `storage_levels` (upsert by report_date +
+  location).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
     confidence, raw_data (jsonb)
   - weather_forecasts: see weather_forecasts.sql
+  - storage_levels: see storage_levels.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
@@ -51,6 +55,12 @@ WEATHER_LON = -2.0
 WEATHER_LOCATION = "GB"
 WEATHER_SOURCE = "Open-Meteo ECMWF"
 WEATHER_POLL_MINUTES = 30
+
+GIE_AGSI_API_URL = "https://agsi.gie.eu/api"
+STORAGE_SOURCE = "GIE AGSI"
+STORAGE_POLL_HOURS = 6
+# AGSI reports injection/withdrawal as GWh/d; store as TWh (÷ 1000).
+AGSI_GWH_TO_TWH = 0.001
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
@@ -122,6 +132,11 @@ def _signals_rest_url() -> str:
 def _weather_forecasts_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/weather_forecasts"
+
+
+def _storage_levels_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/storage_levels"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -309,6 +324,179 @@ def scheduled_weather() -> None:
         asyncio.run(run_weather_cycle())
     except Exception as e:
         logger.error("Weather cycle aborted: %s", e, exc_info=True)
+
+
+# -----------------------------------------------------------------------------
+# GIE AGSI → storage_levels (upsert on report_date + location)
+# -----------------------------------------------------------------------------
+
+
+def _agsi_parse_float(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s == "-":
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _agsi_row_to_storage_record(
+    item: dict[str, Any],
+    location: str,
+    gas_day_fallback: str,
+    fetched_at: str,
+) -> dict[str, Any] | None:
+    """Map one AGSI `data` object to a PostgREST row."""
+    day = (item.get("gasDayStart") or gas_day_fallback or "").strip()
+    if not day:
+        return None
+
+    full = _agsi_parse_float(item.get("full"))
+    wgv = _agsi_parse_float(item.get("workingGasVolume"))
+    inj_gwh = _agsi_parse_float(item.get("injection"))
+    wd_gwh = _agsi_parse_float(item.get("withdrawal"))
+
+    inj_twh = inj_gwh * AGSI_GWH_TO_TWH if inj_gwh is not None else None
+    wd_twh = wd_gwh * AGSI_GWH_TO_TWH if wd_gwh is not None else None
+
+    return {
+        "report_date": day,
+        "location": location,
+        "full_pct": full,
+        "working_volume_twh": wgv,
+        "injection_twh": inj_twh,
+        "withdrawal_twh": wd_twh,
+        "source": STORAGE_SOURCE,
+        "fetched_at": fetched_at,
+    }
+
+
+def _agsi_pick_row(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Use the first list entry (latest gas day for default sort)."""
+    data = payload.get("data")
+    if not isinstance(data, list) or not data:
+        return None
+    first = data[0]
+    return first if isinstance(first, dict) else None
+
+
+async def fetch_agsi_json(
+    client: httpx.AsyncClient, *, country: str, size: int, page: int
+) -> dict[str, Any]:
+    resp = await client.get(
+        GIE_AGSI_API_URL,
+        params={"country": country, "size": str(size), "page": str(page)},
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    raw = resp.json()
+    return raw if isinstance(raw, dict) else {}
+
+
+async def upsert_storage_levels_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _storage_levels_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "report_date,location"},
+    )
+    resp.raise_for_status()
+
+
+async def run_storage_cycle() -> None:
+    """Fetch GB + EU aggregate from GIE AGSI and upsert into storage_levels."""
+    _require_supabase_env()
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "ZephyrMarkets-Storage-Ingestion/1.0",
+        },
+        follow_redirects=True,
+    ) as http:
+        gb_payload = await fetch_agsi_json(http, country="GB", size=10, page=1)
+        eu_payload = await fetch_agsi_json(http, country="eu", size=1, page=1)
+
+        rows: list[dict[str, Any]] = []
+        gas_day_gb = str(gb_payload.get("gas_day") or "").strip()
+
+        gb_item = _agsi_pick_row(gb_payload)
+        if gb_item is None:
+            logger.warning(
+                "storage_cycle: no AGSI data rows for GB (gas_day=%s)",
+                gas_day_gb or "?",
+            )
+        else:
+            rec = _agsi_row_to_storage_record(
+                gb_item, "GB", gas_day_gb, fetched_at
+            )
+            if rec:
+                rows.append(rec)
+                logger.info(
+                    "storage_cycle: GB gas_day=%s full_pct=%s working_volume_twh=%s "
+                    "injection_twh=%s withdrawal_twh=%s",
+                    rec["report_date"],
+                    rec["full_pct"],
+                    rec["working_volume_twh"],
+                    rec["injection_twh"],
+                    rec["withdrawal_twh"],
+                )
+
+        gas_day_eu = str(eu_payload.get("gas_day") or "").strip()
+        eu_item = _agsi_pick_row(eu_payload)
+        if eu_item is None:
+            logger.info(
+                "storage_cycle: no AGSI data rows for EU aggregate "
+                "(country=eu, gas_day=%s, total=%s)",
+                gas_day_eu or "?",
+                eu_payload.get("total"),
+            )
+        else:
+            rec_eu = _agsi_row_to_storage_record(
+                eu_item, "EU", gas_day_eu, fetched_at
+            )
+            if rec_eu:
+                rows.append(rec_eu)
+                logger.info(
+                    "storage_cycle: EU gas_day=%s full_pct=%s working_volume_twh=%s "
+                    "injection_twh=%s withdrawal_twh=%s",
+                    rec_eu["report_date"],
+                    rec_eu["full_pct"],
+                    rec_eu["working_volume_twh"],
+                    rec_eu["injection_twh"],
+                    rec_eu["withdrawal_twh"],
+                )
+
+        if not rows:
+            logger.info("storage_cycle: nothing to upsert (no AGSI rows)")
+            return
+
+        await upsert_storage_levels_http(http, rows)
+        logger.info(
+            "storage_cycle: upserted %s storage level row(s) (source=%s)",
+            len(rows),
+            STORAGE_SOURCE,
+        )
+
+
+def scheduled_storage() -> None:
+    try:
+        asyncio.run(run_storage_cycle())
+    except Exception as e:
+        logger.error("Storage cycle aborted: %s", e, exc_info=True)
 
 
 # -----------------------------------------------------------------------------
@@ -669,17 +857,22 @@ def main() -> None:
     supabase_startup_check()
 
     logger.info(
-        "Ingestion agent starting | REMIT every %ss (%s) | weather every %s min (%s)",
+        "Ingestion agent starting | REMIT every %ss (%s) | weather every %s min (%s) "
+        "| GIE AGSI storage every %sh (%s)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_POLL_MINUTES,
         OPEN_METEO_FORECAST_URL,
+        STORAGE_POLL_HOURS,
+        GIE_AGSI_API_URL,
     )
 
     scheduled_poll()
     scheduled_weather()
+    scheduled_storage()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
+    schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
 
     while True:
         schedule.run_pending()
