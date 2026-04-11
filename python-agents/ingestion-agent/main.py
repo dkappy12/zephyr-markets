@@ -18,6 +18,7 @@ Required Supabase:
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
   ELEXON_API_KEY — optional; sent as APIKey query param when set
+  GIE_API_KEY — optional; sent as request header x-key for GIE AGSI (required for production API)
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
+GIE_API_KEY = os.environ.get("GIE_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
 
@@ -430,12 +432,24 @@ def _agsi_select_row(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     return items[0]
 
 
+def _agsi_request_headers() -> dict[str, str]:
+    """Headers for GET https://agsi.gie.eu/api — API key must be x-key, not a query param."""
+    h: dict[str, str] = {
+        "Accept": "application/json",
+        "User-Agent": "ZephyrMarkets-Storage-Ingestion/1.0",
+    }
+    if GIE_API_KEY:
+        h["x-key"] = GIE_API_KEY
+    return h
+
+
 async def fetch_agsi_json(
     client: httpx.AsyncClient, *, country: str, size: int, page: int
 ) -> Any:
     resp = await client.get(
         GIE_AGSI_API_URL,
         params={"country": country, "size": str(size), "page": str(page)},
+        headers=_agsi_request_headers(),
         timeout=HTTP_TIMEOUT,
     )
     resp.raise_for_status()
@@ -482,13 +496,7 @@ async def run_storage_cycle() -> None:
     _require_supabase_env()
     fetched_at = datetime.now(timezone.utc).isoformat()
 
-    async with httpx.AsyncClient(
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "ZephyrMarkets-Storage-Ingestion/1.0",
-        },
-        follow_redirects=True,
-    ) as http:
+    async with httpx.AsyncClient(follow_redirects=True) as http:
         gb_payload = await fetch_agsi_json(http, country="GB", size=1, page=1)
         eu_payload = await fetch_agsi_json(http, country="eu", size=1, page=1)
 
@@ -928,6 +936,11 @@ def supabase_startup_check() -> None:
 
 def main() -> None:
     supabase_startup_check()
+
+    logger.info(
+        "GIE_API_KEY %s",
+        "is set" if GIE_API_KEY else "is missing (AGSI requests may fail)",
+    )
 
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather every %s min (%s) "
