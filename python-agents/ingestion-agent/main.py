@@ -74,8 +74,12 @@ _handler.setFormatter(
         datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
 )
-logging.basicConfig(level=logging.INFO, handlers=[_handler])
+logging.basicConfig(level=logging.DEBUG, handlers=[_handler])
+# Suppress verbose third-party DEBUG logs when the root level is DEBUG
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("bmrs-ingestion")
+logger.setLevel(logging.DEBUG)
 
 
 def _utc_now_iso() -> str:
@@ -115,6 +119,13 @@ def _supabase_auth_headers() -> dict[str, str]:
     }
 
 
+def _header_preview(value: str, max_len: int = 20) -> str:
+    """First max_len characters only (for logging secrets)."""
+    if not value:
+        return ""
+    return value[:max_len]
+
+
 async def remit_message_exists_http(client: httpx.AsyncClient, message_id: str) -> bool:
     """Return True if a signal with this remit_message_id (mrid) is already stored."""
     if not message_id:
@@ -122,7 +133,14 @@ async def remit_message_exists_http(client: httpx.AsyncClient, message_id: str) 
     try:
         q = quote(message_id, safe="")
         url = f"{_signals_rest_url()}?remit_message_id=eq.{q}&select=id"
-        resp = await client.get(url, headers=_supabase_auth_headers())
+        headers = _supabase_auth_headers()
+        logger.debug(
+            "remit_message_exists_http request: url=%s apikey_prefix=%r authorization_prefix=%r",
+            url,
+            _header_preview(headers.get("apikey", "")),
+            _header_preview(headers.get("Authorization", "")),
+        )
+        resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         rows = resp.json()
         return isinstance(rows, list) and len(rows) > 0
@@ -395,7 +413,32 @@ def scheduled_poll() -> None:
         logger.error("Poll cycle aborted: %s", e, exc_info=True)
 
 
+def supabase_startup_check() -> None:
+    """
+    Verify PostgREST is reachable with the service role key before polling.
+    GET {SUPABASE_URL}/rest/v1/signals?select=id&limit=1
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.error(
+            "Supabase startup check skipped: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set"
+        )
+        return
+    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/signals?select=id&limit=1"
+    headers = _supabase_auth_headers()
+    try:
+        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            resp = client.get(url, headers=headers)
+        if resp.is_success:
+            logger.info("Supabase startup check succeeded: HTTP %s", resp.status_code)
+        else:
+            logger.error("Supabase startup check failed: HTTP %s", resp.status_code)
+    except httpx.HTTPError as e:
+        logger.error("Supabase startup check failed: %s", e, exc_info=True)
+
+
 def main() -> None:
+    supabase_startup_check()
+
     logger.info(
         "BMRS ingestion agent starting | poll every %ss | REMIT URL=%s",
         POLL_INTERVAL_SECONDS,
