@@ -1443,19 +1443,39 @@ async def calculate_physical_premium() -> None:
             srmc_gbp_mwh = gas_component + carbon_component + VOM_GBP_PER_MWH
 
         implied_price_gbp_mwh: float | None = None
-        remit_price_adder = 0.0
-        if srmc_gbp_mwh is not None:
-            remit_gw = remit_total_mw / 1000.0
-            available_margin_gw = BASE_DEMAND_GW - residual_demand_gw - remit_gw
-            adder_per_gw = _remit_adder_per_gw(available_margin_gw)
-            remit_price_adder = remit_gw * adder_per_gw
-            implied_price_gbp_mwh = (
-                srmc_gbp_mwh
-                + (residual_demand_gw * 2.5)
-                + (residual_demand_gw**2 * 0.15)
-                + remit_price_adder
-            )
-            implied_price_gbp_mwh = max(implied_price_gbp_mwh, -60.0)
+        premium_regime: str | None = None
+        remit_gw = remit_total_mw / 1000.0
+        available_margin_gw = BASE_DEMAND_GW - residual_demand_gw - remit_gw
+        adder_per_gw = _remit_adder_per_gw(available_margin_gw)
+        remit_price_adder = remit_gw * adder_per_gw
+
+        rd = residual_demand_gw
+        if rd < 15.0:
+            premium_regime = "renewable"
+            renewable_surplus_gw = 15.0 - rd
+            implied = -2.0 * renewable_surplus_gw + 10.0
+            implied = implied + remit_price_adder
+            implied_price_gbp_mwh = max(implied, -60.0)
+        elif rd < 22.0:
+            premium_regime = "transitional"
+            if srmc_gbp_mwh is not None:
+                transition_factor = (rd - 15.0) / 7.0
+                renewable_price = -2.0 * (15.0 - rd) + 10.0
+                gas_price = (
+                    srmc_gbp_mwh + (rd * 2.5) + (rd**2 * 0.15)
+                )
+                implied = (
+                    renewable_price * (1.0 - transition_factor)
+                    + gas_price * transition_factor
+                )
+                implied = implied + remit_price_adder
+                implied_price_gbp_mwh = max(implied, -60.0)
+        else:
+            premium_regime = "gas-dominated"
+            if srmc_gbp_mwh is not None:
+                implied = srmc_gbp_mwh + (rd * 2.5) + (rd**2 * 0.15)
+                implied = implied + remit_price_adder
+                implied_price_gbp_mwh = max(implied, -60.0)
 
         premium_value: float | None = None
         normalised_score: float | None = None
@@ -1517,7 +1537,7 @@ async def calculate_physical_premium() -> None:
         sr_s = f"{sr:.2f}" if sr is not None else "n/a"
         logger.info(
             "premium_cycle: implied=£%s market=£%s premium=%s score=%s wind=%sGW solar=%sGW "
-            "residual=%sGW SRMC=£%s REMIT=%.0fMW direction=%s confidence=%s",
+            "residual=%sGW SRMC=£%s REMIT=%.0fMW direction=%s confidence=%s regime=%s",
             ip_s,
             mp_s,
             prem_s,
@@ -1529,6 +1549,7 @@ async def calculate_physical_premium() -> None:
             remit_total_mw,
             direction,
             confidence,
+            premium_regime or "n/a",
         )
 
 
