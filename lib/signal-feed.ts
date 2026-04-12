@@ -62,6 +62,8 @@ const WIND_TAGS = [
   "MOWEO",
   "MOWWO",
   "MORAY",
+  "SOFWO",
+  "SHERINGHAM",
 ] as const;
 
 const NUCLEAR_TAGS = ["HEYM", "TORN", "WYLF", "SIZI", "HRTL"] as const;
