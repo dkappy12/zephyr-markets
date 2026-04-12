@@ -24,6 +24,7 @@ type BriefRow = {
   weather_watch: string | null;
   one_risk: string | null;
   watch_list: string | null;
+  /** Still stored / generated; hidden in UI until P&L attribution is live. */
   book_touchpoints: string | null;
   articles: BriefArticle[] | null;
 };
@@ -84,52 +85,66 @@ function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
   const [thumbFailed, setThumbFailed] = useState(false);
   const thumbUrl = a.thumbnail_url?.trim();
   const showImage = Boolean(thumbUrl) && !thumbFailed;
+  const href =
+    typeof a.url === "string" && a.url.trim() !== "" ? a.url.trim() : "";
+
+  const cardInner = (
+    <>
+      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
+        {showImage ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={thumbUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={() => setThumbFailed(true)}
+            />
+          </>
+        ) : (
+          <BriefArticleThumbnailPlaceholder />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-row items-start justify-between gap-2">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+            {a.publication}
+          </span>
+          {a.published_date ? (
+            <span className="shrink-0 text-right text-[11px] text-ink-light">
+              {a.published_date}
+            </span>
+          ) : null}
+        </div>
+        <span className="font-serif text-lg leading-snug text-ink underline-offset-[3px] group-hover:underline">
+          {a.headline}
+        </span>
+        <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
+          {a.snippet}
+        </p>
+        {a.author ? (
+          <p className="text-[11px] text-ink-light">{a.author}</p>
+        ) : null}
+      </div>
+    </>
+  );
 
   return (
     <li>
-      <a
-        href={a.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="group flex cursor-pointer flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-inherit no-underline transition-shadow hover:shadow-md"
-      >
-        <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
-          {showImage ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={thumbUrl}
-                alt=""
-                className="h-full w-full object-cover"
-                onError={() => setThumbFailed(true)}
-              />
-            </>
-          ) : (
-            <BriefArticleThumbnailPlaceholder />
-          )}
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex cursor-pointer flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-inherit no-underline transition-[border-color,background-color] duration-200 hover:border-[#b5aa96] hover:bg-[#faf7f2]"
+        >
+          {cardInner}
+        </a>
+      ) : (
+        <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 opacity-80">
+          {cardInner}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex flex-row items-start justify-between gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-              {a.publication}
-            </span>
-            {a.published_date ? (
-              <span className="shrink-0 text-right text-[11px] text-ink-light">
-                {a.published_date}
-              </span>
-            ) : null}
-          </div>
-          <span className="font-serif text-lg leading-snug text-ink underline-offset-2 group-hover:underline">
-            {a.headline}
-          </span>
-          <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
-            {a.snippet}
-          </p>
-          {a.author ? (
-            <p className="text-[11px] text-ink-light">{a.author}</p>
-          ) : null}
-        </div>
-      </a>
+      )}
     </li>
   );
 }
@@ -232,30 +247,44 @@ export default function BriefPage() {
           </p>
         </section>
 
-        <section>
-          <h3 className={sectionLabelClass}>Watch list</h3>
-          <ul className="mt-3 space-y-2 font-serif text-base leading-relaxed text-ink">
+        <section className="border-y-[0.5px] border-ivory-border py-6">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className={sectionLabelClass}>Watch list</h3>
+            {!loading && watchItems.length > 0 ? (
+              <span className="text-[10px] text-ink-light">
+                {watchItems.length} item{watchItems.length === 1 ? "" : "s"} to
+                watch
+              </span>
+            ) : null}
+          </div>
+          <ul className="mt-4">
             {loading ? (
-              <li>…</li>
+              <li className="font-serif text-[15px] leading-relaxed text-ink">
+                …
+              </li>
             ) : watchItems.length > 0 ? (
-              watchItems.map((item) => <li key={item}>{item}</li>)
+              watchItems.map((item, idx) => (
+                <li
+                  key={item}
+                  className={`flex gap-3 border-ivory-border py-3 font-serif text-[15px] leading-relaxed text-ink transition-colors hover:bg-[#f7f2ea] ${
+                    idx < watchItems.length - 1
+                      ? "border-b-[0.5px]"
+                      : ""
+                  }`}
+                >
+                  <span
+                    className="mt-0.5 shrink-0 text-bull"
+                    aria-hidden
+                  >
+                    →
+                  </span>
+                  <span className="min-w-0 flex-1">{item}</span>
+                </li>
+              ))
             ) : (
-              <li className="text-ink-mid">—</li>
+              <li className="py-2 text-ink-mid">—</li>
             )}
           </ul>
-        </section>
-
-        <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Book touchpoints
-          </p>
-          <p className="mt-2 font-serif text-base leading-relaxed text-ink">
-            {loading
-              ? "…"
-              : row?.book_touchpoints?.trim()
-                ? row.book_touchpoints
-                : "—"}
-          </p>
         </section>
 
         <div className="border-t-[0.5px] border-ivory-border pt-8">
