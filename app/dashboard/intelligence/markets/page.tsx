@@ -101,10 +101,8 @@ type PhysicalPremiumRow = {
   residual_demand_gw: number | null;
   wind_gw: number | null;
   solar_gw: number | null;
-  /** From latest row; Python agent — not summed from raw REMIT signals. */
+  /** Latest physical_premium row (ingestion). */
   remit_mw_lost: number | null;
-  remit_planned_mw: number | null;
-  remit_unplanned_mw: number | null;
 };
 
 type GasRow = {
@@ -243,42 +241,6 @@ function formatRemitMw(n: number): string {
   return new Intl.NumberFormat("en-GB", {
     maximumFractionDigits: 0,
   }).format(n);
-}
-
-/** First numeric value found for any of the given keys (ingestion may use aliases). */
-function numFromKeys(row: Record<string, unknown>, keys: string[]): number | null {
-  for (const k of keys) {
-    if (!(k in row)) continue;
-    const n = parseNum(row[k]);
-    if (n != null && Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-/**
- * REMIT planned/unplanned from physical_premium row; keys vary by migration / agent version.
- */
-function parseRemitSplitFromPremiumRow(row: Record<string, unknown>): {
-  plannedMw: number | null;
-  unplannedMw: number | null;
-  totalMw: number | null;
-} {
-  const plannedMw = numFromKeys(row, [
-    "remit_planned_mw",
-    "remit_mw_planned_active",
-    "remit_mw_planned",
-  ]);
-  const unplannedMw = numFromKeys(row, [
-    "remit_unplanned_mw",
-    "remit_mw_unplanned_active",
-    "remit_mw_unplanned",
-  ]);
-  const totalMw =
-    numFromKeys(row, ["remit_mw_lost", "remit_total_mw"]) ??
-    (plannedMw != null && unplannedMw != null
-      ? plannedMw + unplannedMw
-      : null);
-  return { plannedMw, unplannedMw, totalMw };
 }
 
 function formatVolumeMwh(v: unknown): string {
@@ -458,9 +420,6 @@ export default function MarketsPage() {
           setPhysicalPremium(null);
         } else if (ppRes.data) {
           const p = ppRes.data as Record<string, unknown>;
-          // eslint-disable-next-line no-console
-          console.log("physical_premium columns:", Object.keys(p));
-          const remit = parseRemitSplitFromPremiumRow(p);
           setPhysicalPremium({
             normalised_score: parseNum(p.normalised_score),
             direction:
@@ -468,9 +427,7 @@ export default function MarketsPage() {
             residual_demand_gw: parseNum(p.residual_demand_gw),
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
-            remit_mw_lost: remit.totalMw,
-            remit_planned_mw: remit.plannedMw,
-            remit_unplanned_mw: remit.unplannedMw,
+            remit_mw_lost: parseNum(p.remit_mw_lost),
           });
         } else {
           setPhysicalPremium(null);
@@ -911,16 +868,9 @@ export default function MarketsPage() {
     ttfEur != null ? coalSrmcGbpMwh(ttfEur) : null;
 
   const remitBarDisplay = useMemo(() => {
-    const pp = physicalPremium;
-    const ppP = pp?.remit_planned_mw;
-    const ppU = pp?.remit_unplanned_mw;
-    if (ppP != null && ppU != null) {
-      return `REMIT: ${formatRemitMw(ppP)} MW planned · ${formatRemitMw(ppU)} MW unplanned`;
-    }
-    if (pp?.remit_mw_lost != null) {
-      return `REMIT: ${formatRemitMw(pp.remit_mw_lost)} MW offline`;
-    }
-    return null;
+    const mw = physicalPremium?.remit_mw_lost;
+    if (mw == null) return null;
+    return `REMIT: ${formatRemitMw(mw)} MW active outages`;
   }, [physicalPremium]);
 
   return (
@@ -1654,30 +1604,49 @@ export default function MarketsPage() {
             icFlows.rows.map((r) => {
               const imp = r.flowMw > 0;
               const exp = r.flowMw < 0;
-              const arrow = imp ? "←" : exp ? "→" : "·";
               const cap = Math.max(r.capacityMw, 1);
               const barPct = Math.min(
                 100,
                 (Math.abs(r.flowMw) / cap) * 100,
               );
+              const absMw = Math.abs(Math.round(r.flowMw));
+              const mwFmt = absMw.toLocaleString("en-GB");
+              const flowLabel = imp
+                ? `+${mwFmt} MW ←`
+                : exp
+                  ? `${mwFmt} MW →`
+                  : `0 MW`;
+              const barColor = imp ? "#1D6B4E" : exp ? "#D97706" : "rgba(107,103,96,0.45)";
               return (
                 <div key={r.id}>
                   <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
                     <span className="text-ink">
-                      {r.label}{" "}
-                      <span className="text-ink-mid">({r.country})</span>
+                      {r.label}
+                      <span className="text-ink-mid"> · {r.country}</span>
                     </span>
-                    <span className="tabular-nums text-ink">
-                      {Math.round(r.flowMw).toLocaleString("en-GB")} MW{" "}
-                      <span className="text-ink-mid" title={imp ? "Importing to GB" : exp ? "Exporting from GB" : ""}>
-                        {arrow}
-                      </span>
+                    <span
+                      className={`tabular-nums ${
+                        imp ? "text-[#1D6B4E]" : exp ? "text-[#D97706]" : "text-ink"
+                      }`}
+                      title={
+                        imp
+                          ? "Importing to GB"
+                          : exp
+                            ? "Exporting from GB"
+                            : "No net flow"
+                      }
+                    >
+                      {flowLabel}
                     </span>
                   </div>
                   <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-ivory-border/60">
                     <div
-                      className="h-full rounded-sm bg-[#1D6B4E]/70"
-                      style={{ width: `${barPct}%` }}
+                      className="h-full rounded-sm"
+                      style={{
+                        width: `${barPct}%`,
+                        backgroundColor: barColor,
+                        opacity: imp || exp ? 1 : 0.5,
+                      }}
                     />
                   </div>
                 </div>

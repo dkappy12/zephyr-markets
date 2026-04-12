@@ -77,7 +77,7 @@ export async function GET() {
     const rows = [
       {
         id: "ifa_fr",
-        label: "IFA (France)",
+        label: "IFA",
         country: "France",
         flowMw: gv("INTFR") + gv("INTIFA2"),
         capacityMw: IC_CAPACITY_MW_REF.IFA_FR,
