@@ -63,6 +63,7 @@ export default function OverviewPage() {
     Partial<Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>>
   >({});
   const [windGw, setWindGw] = useState<number | null>(null);
+  const [solarGw, setSolarGw] = useState<number | null>(null);
   const [premiumLoading, setPremiumLoading] = useState(true);
   const [premiumRow, setPremiumRow] = useState<{
     normalised_score: number;
@@ -81,6 +82,7 @@ export default function OverviewPage() {
         deStorageRes,
         euStorageRes,
         windRes,
+        solarRes,
         premiumRes,
       ] = await Promise.all([
         supabase
@@ -114,6 +116,12 @@ export default function OverviewPage() {
           .eq("location", "GB")
           .lte("forecast_time", nowIso)
           .order("forecast_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("solar_outturn")
+          .select("solar_mw, datetime_gmt")
+          .order("datetime_gmt", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
@@ -172,6 +180,15 @@ export default function OverviewPage() {
         setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
       } else {
         setWindGw(null);
+      }
+
+      if (!solarRes.error && solarRes.data) {
+        const sm = solarRes.data.solar_mw;
+        const mw =
+          typeof sm === "number" ? sm : sm != null ? Number(sm) : Number.NaN;
+        setSolarGw(Number.isFinite(mw) ? mw / 1000 : null);
+      } else {
+        setSolarGw(null);
       }
 
       console.log(
@@ -247,9 +264,9 @@ export default function OverviewPage() {
           hoverDetail={euTooltip}
         />
         <MetricCard
-          label="vessel tracking"
-          value="Coming soon"
-          valueClassName="font-sans text-lg font-medium leading-snug text-ink-light md:text-xl"
+          label="SOLAR GENERATION"
+          value={solarGw === null ? "—" : solarGw.toFixed(1)}
+          unit="GW"
         />
         <MetricCard
           label="REMIT alerts"
