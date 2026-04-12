@@ -169,6 +169,36 @@ function formatVolumeMwh(v: unknown): string {
   return `${new Intl.NumberFormat("en-GB").format(Math.round(n))} MWh`;
 }
 
+const MP_COLS_BASE =
+  "price_gbp_mwh, settlement_period, price_date, market, fetched_at" as const;
+const MP_COLS_WITH_VOLUME =
+  "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume" as const;
+
+function isMissingColumnError(
+  err: { message?: string } | null | undefined,
+  column: string,
+): boolean {
+  const m = (err?.message ?? "").toLowerCase();
+  const c = column.toLowerCase();
+  return m.includes(c) && (m.includes("does not exist") || m.includes("schema cache"));
+}
+
+/** Avoid absurd % when prior price is near zero (e.g. £13 → £99). */
+const TREND_PCT_CAP = 250;
+const TREND_MIN_PRIOR_GBP = 8;
+
+function n2exTapeTrendPct(
+  latest: number | null,
+  priorRowPrice: number | null,
+  enoughRows: boolean,
+): number | null {
+  if (latest == null || priorRowPrice == null || !enoughRows) return null;
+  if (!Number.isFinite(latest) || !Number.isFinite(priorRowPrice)) return null;
+  if (Math.abs(priorRowPrice) < TREND_MIN_PRIOR_GBP) return null;
+  const raw = ((latest - priorRowPrice) / priorRowPrice) * 100;
+  return Math.max(-TREND_PCT_CAP, Math.min(TREND_PCT_CAP, raw));
+}
+
 export default function MarketsPage() {
   const [loading, setLoading] = useState(true);
   const [midRows, setMidRows] = useState<MidRow[]>([]);
@@ -189,6 +219,17 @@ export default function MarketsPage() {
     async function load() {
       setLoadError(null);
       try {
+        const volProbe = await supabase
+          .from("market_prices")
+          .select("volume")
+          .limit(1);
+        const mpCols =
+          volProbe.error && isMissingColumnError(volProbe.error, "volume")
+            ? MP_COLS_BASE
+            : MP_COLS_WITH_VOLUME;
+        /** Schema types may lag behind DB; assert so `volume` is selectable when present. */
+        const mpSel = mpCols as typeof MP_COLS_WITH_VOLUME;
+
         const [
           ppRes,
           mpRes,
@@ -208,18 +249,14 @@ export default function MarketsPage() {
             .maybeSingle(),
           supabase
             .from("market_prices")
-            .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
-            )
+            .select(mpSel)
             .or("market.eq.N2EX,market.eq.APX")
             .order("price_date", { ascending: false })
             .order("settlement_period", { ascending: false })
             .limit(96),
           supabase
             .from("market_prices")
-            .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
-            )
+            .select(mpSel)
             .or("market.eq.N2EX,market.eq.APX")
             .eq("price_date", today)
             .order("settlement_period", { ascending: true }),
@@ -248,9 +285,7 @@ export default function MarketsPage() {
             .limit(120),
           supabase
             .from("market_prices")
-            .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
-            )
+            .select(mpSel)
             .or("market.eq.N2EX,market.eq.APX")
             .eq("price_date", today)
             .order("settlement_period", { ascending: false })
@@ -389,13 +424,11 @@ export default function MarketsPage() {
   const latestN2ex = midRows[0]?.price_gbp_mwh ?? null;
   const sixAgo = midRows[6]?.price_gbp_mwh ?? null;
 
-  const trendPct =
-    latestN2ex != null &&
-    sixAgo != null &&
-    sixAgo !== 0 &&
-    midRows.length > 6
-      ? ((latestN2ex - sixAgo) / sixAgo) * 100
-      : null;
+  const trendPct = n2exTapeTrendPct(
+    latestN2ex,
+    sixAgo,
+    midRows.length > 6,
+  );
 
   const spark =
     latestN2ex != null && ttfEur != null
@@ -658,7 +691,7 @@ export default function MarketsPage() {
               >
                 {trendPct >= 0 ? "↑" : "↓"}{" "}
                 {trendPct >= 0 ? "+" : ""}
-                {trendPct.toFixed(1)}% vs 6 SPs ago
+                {trendPct.toFixed(1)}% vs 6 rows back
               </span>
             ) : null}
           </div>

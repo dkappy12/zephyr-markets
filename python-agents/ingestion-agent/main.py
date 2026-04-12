@@ -708,6 +708,21 @@ def scheduled_storage() -> None:
 # -----------------------------------------------------------------------------
 
 
+def _mid_volume_mwh(row: dict[str, Any]) -> float | None:
+    """Optional traded / accepted volume (MWh) from a BMRS MID row when present."""
+    for k in ("volume", "Volume", "totalVolume", "volumeMWh", "acceptedVolume"):
+        v = row.get(k)
+        if v is None or v == "":
+            continue
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            continue
+        if x > 0:
+            return x
+    return None
+
+
 def _mid_utc_day_bounds_iso() -> tuple[str, str, str]:
     """Return (from, to) ISO 8601 Z for the current UTC calendar day, and YYYY-MM-DD."""
     today = datetime.now(timezone.utc).date()
@@ -747,6 +762,8 @@ def _mid_build_upsert_rows(
         rows = by_sp[sp]
         n2ex_p: float | None = None
         apx_p: float | None = None
+        n2ex_vol: float | None = None
+        apx_vol: float | None = None
         pdate = fallback_date
         for r in rows:
             dp = r.get("dataProvider")
@@ -756,28 +773,35 @@ def _mid_build_upsert_rows(
                 pdate = str(rd).strip()[:10]
             if dp == "N2EXMIDP":
                 n2ex_p = pr
+                if pr is not None and pr > 0:
+                    n2ex_vol = _mid_volume_mwh(r)
             elif dp == "APXMIDP":
                 apx_p = pr
+                if pr is not None and pr > 0:
+                    apx_vol = _mid_volume_mwh(r)
 
         if n2ex_p is not None and n2ex_p > 0:
             market = MARKET_CODE_N2EX
             price = n2ex_p
+            vol_mwh = n2ex_vol
         elif apx_p is not None and apx_p > 0:
             market = MARKET_CODE_APX
             price = apx_p
+            vol_mwh = apx_vol
         else:
             continue
 
-        out.append(
-            {
-                "price_date": pdate,
-                "settlement_period": sp,
-                "price_gbp_mwh": price,
-                "market": market,
-                "source": MARKET_MID_SOURCE,
-                "fetched_at": fetched_at,
-            }
-        )
+        row_out: dict[str, Any] = {
+            "price_date": pdate,
+            "settlement_period": sp,
+            "price_gbp_mwh": price,
+            "market": market,
+            "source": MARKET_MID_SOURCE,
+            "fetched_at": fetched_at,
+        }
+        if vol_mwh is not None:
+            row_out["volume"] = vol_mwh
+        out.append(row_out)
     return out
 
 
@@ -1269,7 +1293,10 @@ def _remit_parse_outage_end_utc(description: str, now: datetime) -> datetime | N
 def _remit_active_planned_unplanned_mw(
     descriptions: list[str], now: datetime
 ) -> tuple[float, float, int, int]:
-    """Sum MW for outages still active (end in future). Unparseable end → include.
+    """Sum MW for outages verified active: parsed end time must be in the future.
+
+    Signals with no parseable end are skipped (they were inflating totals by treating
+    every historical REMIT in the 24h window as still active).
 
     Returns (planned_mw, unplanned_mw, active_outage_count, total_signals_24h).
     """
@@ -1288,7 +1315,9 @@ def _remit_active_planned_unplanned_mw(
         except ValueError:
             continue
         end_dt = _remit_parse_outage_end_utc(desc, now)
-        if end_dt is not None and end_dt <= now:
+        if end_dt is None:
+            continue
+        if end_dt <= now:
             continue
         low = desc.lower()
         if "unplanned" in low:
