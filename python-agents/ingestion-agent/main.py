@@ -1775,13 +1775,30 @@ Return ONLY a JSON array with no other text:
         json=body,
         timeout=60.0,
     )
-    logger.debug(
-        "further reading: raw API response status=%s body=%s",
-        resp.status_code,
-        resp.text,
-    )
+    logger.debug("articles_search: HTTP status=%s", resp.status_code)
+    logger.debug("articles_search: raw response=%s", resp.text[:2000])
     resp.raise_for_status()
     data = resp.json()
+    blocks = data.get("content")
+    if isinstance(blocks, list):
+        for i, b in enumerate(blocks):
+            if isinstance(b, dict):
+                logger.debug(
+                    "articles_search: content block[%s] type=%s",
+                    i,
+                    b.get("type"),
+                )
+            else:
+                logger.debug(
+                    "articles_search: content block[%s] non-dict=%r",
+                    i,
+                    b,
+                )
+    else:
+        logger.debug(
+            "articles_search: content blocks missing or not a list: %r",
+            blocks,
+        )
     out, parsed_ok = _parse_articles_json_from_anthropic_response(data)
     if not parsed_ok:
         logger.warning(
