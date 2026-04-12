@@ -128,6 +128,20 @@ CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
 # Further reading step 2 (JSON format only, no tools).
 CLAUDE_ARTICLES_FORMAT_MODEL = "claude-haiku-4-5-20251001"
 BRIEF_SOURCE = "Claude claude-sonnet-4-20250514"
+
+# Further reading: strip articles from these URL substrings before storing (backend guardrail).
+BLOCKED_DOMAINS = [
+    "wafa.ps",
+    "aljazeera",
+    "presstv",
+    "rt.com",
+    "sputnik",
+    "middleeasteye",
+    "electronicintifada",
+    "mondoweiss",
+    "memo.co.uk",
+    "palestinechronicle",
+]
 _ANTHROPIC_RAW = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_API_KEY = _normalize_anthropic_api_key(_ANTHROPIC_RAW)
 if ANTHROPIC_API_KEY:
@@ -2052,6 +2066,8 @@ async def _anthropic_further_reading_articles(
     }
     search_prompt = f"""Search for news articles published in the last 7 days. Today's date is {_today_long}. Do not include any articles older than 7 days. Prioritise the most recent articles first in how you order and emphasise your findings (newest and most relevant at the top). If you cannot find suitable articles on a topic within that window, skip it rather than returning out-of-date pieces. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources: BBC News, The Guardian, Carbon Brief, Energy Monitor, Recharge News, Energy Voice, PV Magazine, Wind Power Monthly, Montel News, Cornwall Insight blog, NESO blog (nationalgrideso.com), Ofgem news (ofgem.gov.uk), GOV.UK press releases. Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
 
+STRICTLY EXCLUDE articles from these sources and domains: wafa.ps, WAFA, Palestine News Agency, Al Jazeera, Press TV, RT (Russia Today), Sputnik, any state-controlled media, any news agency affiliated with a government or political organisation, any activist or advocacy publication. Only include editorially independent journalism and official regulatory/government sources (Ofgem, NESO, GOV.UK).
+
 Use this context for relevance:
 - Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
 - TTF: €{ttf_eur:.2f}/MWh, N2EX: £{n2ex_price:.2f}/MWh
@@ -2122,6 +2138,8 @@ Summarise your findings in plain English. For each piece, include headline, publ
 
 Only include articles published within the last 7 days. Today is {_today_short}. Exclude any article that appears older than 7 days. Order the array with the most recently published articles first.
 
+Do not include entries whose URL points to excluded domains (e.g. state-controlled or activist outlets listed in the search instructions). Prefer editorially independent news and official regulatory sources (Ofgem, NESO, GOV.UK).
+
 CRITICAL for "url":
 - Copy each URL exactly as it appears in the summaries below (https://...).
 - NEVER use example.com, example.org, test.com, placeholder domains, or invented URLs.
@@ -2178,6 +2196,14 @@ Required JSON format:
             "further reading: formatter returned no usable URLs; %s URLs were in search but lost in JSON",
             len(extracted_urls),
         )
+    articles = [
+        a
+        for a in articles
+        if not any(
+            blocked in (a.get("url") or "").lower() for blocked in BLOCKED_DOMAINS
+        )
+    ]
+    logger.info("articles after domain filter: %d articles remaining", len(articles))
     return articles
 
 
