@@ -40,9 +40,23 @@ function parseWatchList(watchList: string | null): string[] {
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
 
-/** SVG markup for img onError fallback (innerHTML replace on thumbnail container). */
-const TURBINE_SVG_MARKUP =
-  '<svg viewBox="0 0 80 100" width="48" height="60" fill="none" stroke="#9ca3af" stroke-width="1.5"><line x1="40" y1="15" x2="40" y2="90"/><line x1="40" y1="90" x2="28" y2="100"/><line x1="40" y1="90" x2="52" y2="100"/><line x1="40" y1="15" x2="15" y2="40"/><line x1="40" y1="15" x2="65" y2="28"/><line x1="40" y1="15" x2="36" y2="0"/></svg>';
+/**
+ * Bare domains (e.g. indexbox.com/foo) must be https — otherwise the browser
+ * treats them as paths on the current origin.
+ */
+function normalizeArticleHref(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const u = raw.trim();
+  if (!u) return null;
+  const lower = u.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return u;
+  if (u.startsWith("//")) return `https:${u}`;
+  const host = u.split("/")[0] ?? "";
+  if (host.includes(".") && !host.startsWith(".")) {
+    return `https://${u.replace(/^\/+/, "")}`;
+  }
+  return null;
+}
 
 const snippetClampStyle: CSSProperties = {
   fontSize: "13px",
@@ -53,6 +67,119 @@ const snippetClampStyle: CSSProperties = {
   WebkitBoxOrient: "vertical",
   overflow: "hidden",
 };
+
+function TurbinePlaceholderSvg() {
+  return (
+    <svg
+      viewBox="0 0 80 100"
+      width="48"
+      height="60"
+      fill="none"
+      stroke="#9ca3af"
+      strokeWidth="1.5"
+      aria-hidden
+    >
+      <line x1="40" y1="15" x2="40" y2="90" />
+      <line x1="40" y1="90" x2="28" y2="100" />
+      <line x1="40" y1="90" x2="52" y2="100" />
+      <line x1="40" y1="15" x2="15" y2="40" />
+      <line x1="40" y1="15" x2="65" y2="28" />
+      <line x1="40" y1="15" x2="36" y2="0" />
+    </svg>
+  );
+}
+
+function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const href = normalizeArticleHref(article.url);
+  const thumb = article.thumbnail_url?.trim();
+  const showImg = Boolean(thumb) && !imgFailed;
+
+  const cardClass =
+    "flex gap-4 rounded-lg border border-stone-200 p-4 transition-all duration-150 hover:border-stone-400 hover:shadow-md";
+
+  const content = (
+    <>
+      <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+        {showImg ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={thumb}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            onError={() => setImgFailed(true)}
+          />
+        ) : null}
+        {!showImg ? <TurbinePlaceholderSvg /> : null}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-start justify-between">
+          <span
+            style={{
+              fontSize: "10px",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "#9ca3af",
+            }}
+          >
+            {article.publication}
+          </span>
+          <span
+            style={{
+              fontSize: "11px",
+              color: "#9ca3af",
+              flexShrink: 0,
+              marginLeft: "8px",
+            }}
+          >
+            {article.published_date || ""}
+          </span>
+        </div>
+        <div
+          style={{
+            fontSize: "16px",
+            fontFamily: "Cormorant Garamond, serif",
+            color: "#1a1a0e",
+            marginBottom: "6px",
+            lineHeight: 1.3,
+          }}
+        >
+          {article.headline}
+        </div>
+        <div style={snippetClampStyle}>{article.snippet}</div>
+      </div>
+    </>
+  );
+
+  if (!href) {
+    return (
+      <div
+        className={`${cardClass} cursor-default opacity-90`}
+        title="Missing or invalid article URL"
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        textDecoration: "none",
+        color: "inherit",
+        cursor: "pointer",
+      }}
+      className={cardClass}
+    >
+      {content}
+    </a>
+  );
+}
 
 export default function BriefPage() {
   const [loading, setLoading] = useState(true);
@@ -212,86 +339,13 @@ export default function BriefPage() {
               <p className="text-ink-mid">…</p>
             ) : articles.length > 0 ? (
               articles.map((article, index) => (
-                <a
-                  key={index}
-                  href={article.url || "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    textDecoration: "none",
-                    color: "inherit",
-                    cursor: "pointer",
-                  }}
-                  className="flex gap-4 rounded-lg border border-stone-200 p-4 transition-all duration-150 hover:border-stone-400 hover:shadow-md"
-                >
-                  <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
-                    {article.thumbnail_url ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={article.thumbnail_url}
-                        alt=""
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        onError={(e) => {
-                          const el = e.currentTarget.parentElement;
-                          if (el) el.innerHTML = TURBINE_SVG_MARKUP;
-                        }}
-                      />
-                    ) : (
-                      <svg
-                        viewBox="0 0 80 100"
-                        width="48"
-                        height="60"
-                        fill="none"
-                        stroke="#9ca3af"
-                        strokeWidth="1.5"
-                        aria-hidden
-                      >
-                        <line x1="40" y1="15" x2="40" y2="90" />
-                        <line x1="40" y1="90" x2="28" y2="100" />
-                        <line x1="40" y1="90" x2="52" y2="100" />
-                        <line x1="40" y1="15" x2="15" y2="40" />
-                        <line x1="40" y1="15" x2="65" y2="28" />
-                        <line x1="40" y1="15" x2="36" y2="0" />
-                      </svg>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex items-start justify-between">
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                          color: "#9ca3af",
-                        }}
-                      >
-                        {article.publication}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          color: "#9ca3af",
-                          flexShrink: 0,
-                          marginLeft: "8px",
-                        }}
-                      >
-                        {article.published_date || ""}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "16px",
-                        fontFamily: "Cormorant Garamond, serif",
-                        color: "#1a1a0e",
-                        marginBottom: "6px",
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {article.headline}
-                    </div>
-                    <div style={snippetClampStyle}>{article.snippet}</div>
-                  </div>
-                </a>
+                <FurtherReadingArticleCard
+                  key={
+                    normalizeArticleHref(article.url) ??
+                    `article-${index}-${article.headline?.slice(0, 24)}`
+                  }
+                  article={article}
+                />
               ))
             ) : (
               <p className="text-[13px] text-ink-mid">No articles linked yet.</p>

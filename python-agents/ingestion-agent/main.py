@@ -48,7 +48,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -1807,12 +1807,47 @@ async def _brief_already_generated_today(http: httpx.AsyncClient) -> bool:
     return dt.date() == today
 
 
+def _resolve_to_absolute_url(page_url: str, raw: str) -> str:
+    """Resolve og:image / twitter:image to an absolute http(s) URL."""
+    raw = raw.strip()
+    if not raw:
+        return raw
+    if raw.startswith("//"):
+        return "https:" + raw
+    parsed = urlparse(raw)
+    if parsed.scheme in ("http", "https"):
+        return raw
+    base = page_url.strip()
+    if not base.endswith("/"):
+        base = base + "/"
+    return urljoin(base, raw)
+
+
+def _normalize_article_url(url: str | None) -> str | None:
+    """Ensure article links are absolute https URLs (avoids same-origin relative paths)."""
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not u:
+        return None
+    if u.lower().startswith("http://") or u.lower().startswith("https://"):
+        return u
+    if u.startswith("//"):
+        return "https:" + u
+    # "example.com/path" or "www.example.com/..." → https://...
+    host = u.split("/")[0]
+    if "." in host and not host.startswith("."):
+        return "https://" + u.lstrip("/")
+    return None
+
+
 async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
-    if not url or not isinstance(url, str) or not url.strip():
+    page_url = url.strip() if isinstance(url, str) else ""
+    if not page_url:
         return None
     try:
         resp = await http.get(
-            url.strip(),
+            page_url,
             timeout=8.0,
             follow_redirects=True,
             headers={
@@ -1842,8 +1877,15 @@ async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
                 html,
                 re.IGNORECASE,
             )
+        if not match:
+            match = re.search(
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+                html,
+                re.IGNORECASE,
+            )
         if match:
-            return match.group(1).strip()
+            raw_img = match.group(1).strip()
+            return _resolve_to_absolute_url(page_url, raw_img)
     except Exception as e:
         logger.debug("og:image fetch failed for %s: %s", url, e)
     return None
@@ -1943,7 +1985,7 @@ Required JSON format:
     "snippet": "First 150-200 characters of article body text...",
     "author": "Author name or null",
     "publication": "Publication name",
-    "url": "Full article URL",
+    "url": "Full article URL starting with https:// (required — never omit the scheme)",
     "thumbnail_url": "og:image URL or null",
     "published_date": "e.g. 12 April 2026 or null if unknown"
   }}
@@ -2379,8 +2421,19 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             remit_count=remit_count,
         )
 
+        # Normalize article URLs to absolute https (bare domains break browser href resolution)
+        for article in articles:
+            if not isinstance(article, dict):
+                continue
+            raw_u = article.get("url")
+            nu = _normalize_article_url(raw_u) if isinstance(raw_u, str) else None
+            if nu:
+                article["url"] = nu
+
         # Fetch og:image for each article with a URL; set thumbnail_url before insert
         for article in articles:
+            if not isinstance(article, dict):
+                continue
             u = article.get("url")
             if isinstance(u, str) and u.strip():
                 og = await _fetch_og_image(http, u.strip())
