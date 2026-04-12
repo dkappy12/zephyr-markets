@@ -1760,6 +1760,7 @@ Return ONLY a JSON array with no other text:
     headers = {
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05",
         "content-type": "application/json",
     }
     body: dict[str, Any] = {
@@ -1773,6 +1774,11 @@ Return ONLY a JSON array with no other text:
         headers=headers,
         json=body,
         timeout=60.0,
+    )
+    logger.debug(
+        "further reading: raw API response status=%s body=%s",
+        resp.status_code,
+        resp.text,
     )
     resp.raise_for_status()
     data = resp.json()
