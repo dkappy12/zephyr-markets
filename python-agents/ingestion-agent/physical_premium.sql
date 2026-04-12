@@ -49,3 +49,7 @@ GRANT SELECT ON public.physical_premium TO authenticated;
 
 -- Existing deployments: add regime column if missing.
 ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS regime text;
+
+-- Planned vs unplanned REMIT capacity (MW) for dashboard copy; run in Supabase if missing.
+ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_planned_mw numeric;
+ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_unplanned_mw numeric;

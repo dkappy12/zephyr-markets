@@ -1625,6 +1625,8 @@ async def calculate_physical_premium() -> None:
             "ttf_eur_mwh": ttf_eur_mwh,
             "srmc_gbp_mwh": srmc_gbp_mwh,
             "remit_mw_lost": remit_total_mw,
+            "remit_planned_mw": remit_planned_mw,
+            "remit_unplanned_mw": remit_unplanned_mw,
             "regime": premium_regime,
             "source": PHYSICAL_PREMIUM_SOURCE,
         }

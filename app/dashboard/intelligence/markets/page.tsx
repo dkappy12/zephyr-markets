@@ -7,12 +7,13 @@ import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   XAxis,
@@ -34,8 +35,36 @@ const CO2_INTENSITY = 0.9;
 const CO2_PRICE = 71;
 const COAL_EFF = 0.36;
 
+/** Matches ingestion wind scaling (17 GW / 8 m/s). */
+const WIND_MS_TO_GW = 2.125;
+
+/** EU storage seasonal reference benchmarks (not live DB values). */
+const REF_STORAGE_SAME_WEEK_LAST_YEAR_PCT = 28;
+const REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT = 35;
+
+const WIND_LINE = "#5c6b2e";
+const YDAY_GREY = "#94a3b8";
+
 function utcTodayStr(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function utcYesterdayStr(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function utcTomorrowStr(todayYmd: string): string {
+  const d = new Date(`${todayYmd}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function utcDateMinusDays(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 function parseNum(v: unknown): number | null {
@@ -77,11 +106,19 @@ type PhysicalPremiumRow = {
   solar_gw: number | null;
   /** From latest row; Python agent — not summed from raw REMIT signals. */
   remit_mw_lost: number | null;
+  remit_planned_mw: number | null;
+  remit_unplanned_mw: number | null;
 };
 
 type GasRow = {
   price_eur_mwh: number;
   price_time: string;
+  fetched_at: string | null;
+};
+
+type WeatherRow = {
+  forecast_time: string;
+  wind_speed_100m: number | null;
 };
 
 type StorageRow = {
@@ -90,6 +127,14 @@ type StorageRow = {
   working_volume_twh: number | null;
   injection_twh: number | null;
   report_date: string;
+};
+
+type IcFlowRow = {
+  id: string;
+  label: string;
+  country: string;
+  flowMw: number;
+  capacityMw: number;
 };
 
 function dedupeMidBySettlement(rows: MidRow[]): MidRow[] {
@@ -158,9 +203,36 @@ function avgPriceForSpRange(rows: MidRow[], sps: number[]): number | null {
 const X_TICK_MINUTES = [360, 540, 720, 900, 1080, 1260];
 
 function priceCellClass(price: number): string {
-  if (price > 50) return "text-watch";
-  if (price < 0) return "text-bear/85";
+  if (price > 100) return "font-semibold text-[#B45309]";
+  if (price > 50) return "text-[#D97706]";
+  if (price < 0) return "text-[#8B3A3A]";
   return "text-ink";
+}
+
+function windGwForSp(
+  sp: number,
+  rows: WeatherRow[],
+  todayYmd: string,
+): number | null {
+  if (rows.length === 0) return null;
+  const midMin = (sp - 1) * 30 + 15;
+  const t0 =
+    parseISO(`${todayYmd}T00:00:00.000Z`).getTime() + midMin * 60 * 1000;
+  let best: WeatherRow | null = null;
+  let bestDiff = Infinity;
+  for (const r of rows) {
+    const w = parseNum(r.wind_speed_100m);
+    if (w == null) continue;
+    const ft = parseISO(r.forecast_time).getTime();
+    const d = Math.abs(ft - t0);
+    if (d < bestDiff) {
+      bestDiff = d;
+      best = r;
+    }
+  }
+  if (best == null) return null;
+  const w = parseNum(best.wind_speed_100m);
+  return w == null ? null : w * WIND_MS_TO_GW;
 }
 
 function formatVolumeMwh(v: unknown): string {
@@ -227,10 +299,23 @@ export default function MarketsPage() {
   const [physicalPremium, setPhysicalPremium] =
     useState<PhysicalPremiumRow | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [yesterdayRows, setYesterdayRows] = useState<MidRow[]>([]);
+  const [weatherRows, setWeatherRows] = useState<WeatherRow[]>([]);
+  const [marketPrices7d, setMarketPrices7d] = useState<MidRow[]>([]);
+  const [icFlows, setIcFlows] = useState<{
+    rows: IcFlowRow[];
+    settlementDate: string | null;
+    settlementPeriod: number | null;
+    publishTime: string | null;
+  } | null>(null);
+  const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
     const today = utcTodayStr();
+    const yesterday = utcYesterdayStr();
+    const sevenAgo = utcDateMinusDays(7);
+    const tomorrow = utcTomorrowStr(today);
 
     async function load() {
       setLoadError(null);
@@ -246,23 +331,40 @@ export default function MarketsPage() {
         /** Schema types may lag behind DB; assert so `volume` is selectable when present. */
         const mpSel = mpCols as typeof MP_COLS_WITH_VOLUME;
 
-        const [
-          ppRes,
-          mpRes,
-          todayRes,
-          gasRes,
-          stRes,
-          stHistRes,
-          tapeRes,
-        ] = await Promise.all([
-          supabase
+        let ppRes = await supabase
+          .from("physical_premium")
+          .select(
+            "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost, remit_planned_mw, remit_unplanned_mw",
+          )
+          .order("calculated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (
+          ppRes.error &&
+          (isMissingColumnError(ppRes.error, "remit_planned_mw") ||
+            isMissingColumnError(ppRes.error, "remit_unplanned_mw"))
+        ) {
+          ppRes = await supabase
             .from("physical_premium")
             .select(
               "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost",
             )
             .order("calculated_at", { ascending: false })
             .limit(1)
-            .maybeSingle(),
+            .maybeSingle();
+        }
+
+        const [
+          mpRes,
+          todayRes,
+          gasRes,
+          stRes,
+          stHistRes,
+          tapeRes,
+          ydayRes,
+          wxRes,
+          mp7dRes,
+        ] = await Promise.all([
           supabase
             .from("market_prices")
             .select(mpSel)
@@ -278,7 +380,7 @@ export default function MarketsPage() {
             .order("settlement_period", { ascending: true }),
           supabase
             .from("gas_prices")
-            .select("price_eur_mwh, price_time")
+            .select("price_eur_mwh, price_time, fetched_at")
             .eq("hub", "TTF")
             .order("price_time", { ascending: false })
             .limit(1)
@@ -306,6 +408,27 @@ export default function MarketsPage() {
             .eq("price_date", today)
             .order("settlement_period", { ascending: false })
             .limit(10),
+          supabase
+            .from("market_prices")
+            .select(mpSel)
+            .or("market.eq.N2EX,market.eq.APX")
+            .eq("price_date", yesterday)
+            .order("settlement_period", { ascending: true }),
+          supabase
+            .from("weather_forecasts")
+            .select("forecast_time, wind_speed_100m")
+            .eq("location", "GB")
+            .gte("forecast_time", `${today}T00:00:00.000Z`)
+            .lt("forecast_time", `${tomorrow}T00:00:00.000Z`)
+            .order("forecast_time", { ascending: true }),
+          supabase
+            .from("market_prices")
+            .select(mpSel)
+            .or("market.eq.N2EX,market.eq.APX")
+            .gte("price_date", sevenAgo)
+            .order("price_date", { ascending: true })
+            .order("settlement_period", { ascending: true })
+            .limit(2500),
         ]);
 
         if (ppRes.error) {
@@ -320,6 +443,8 @@ export default function MarketsPage() {
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
             remit_mw_lost: parseNum(p.remit_mw_lost),
+            remit_planned_mw: parseNum(p.remit_planned_mw),
+            remit_unplanned_mw: parseNum(p.remit_unplanned_mw),
           });
         } else {
           setPhysicalPremium(null);
@@ -370,10 +495,44 @@ export default function MarketsPage() {
             setGasRow({
               price_eur_mwh: pe,
               price_time: String(g.price_time ?? ""),
+              fetched_at:
+                g.fetched_at != null ? String(g.fetched_at) : null,
             });
           } else {
             setGasRow(null);
           }
+        }
+
+        if (ydayRes.error) {
+          setYesterdayRows([]);
+        } else {
+          setYesterdayRows(
+            dedupeMidBySettlement(
+              mapMid((ydayRes.data ?? []) as Record<string, unknown>[]),
+            ),
+          );
+        }
+
+        if (wxRes.error) {
+          setWeatherRows([]);
+        } else {
+          setWeatherRows(
+            (wxRes.data ?? []).map((r) => {
+              const row = r as Record<string, unknown>;
+              return {
+                forecast_time: String(row.forecast_time ?? ""),
+                wind_speed_100m: parseNum(row.wind_speed_100m),
+              };
+            }),
+          );
+        }
+
+        if (mp7dRes.error) {
+          setMarketPrices7d([]);
+        } else {
+          setMarketPrices7d(
+            mapMid((mp7dRes.data ?? []) as Record<string, unknown>[]),
+          );
         }
 
         if (stRes.error) {
@@ -431,6 +590,45 @@ export default function MarketsPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/bmrs/interconnector-flows")
+      .then((r) => r.json())
+      .then((j: Record<string, unknown>) => {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.log("[BMRS interconnector-flows raw]", j);
+        if (j.ok === true && Array.isArray(j.rows)) {
+          setIcFlowsError(null);
+          setIcFlows({
+            rows: j.rows as IcFlowRow[],
+            settlementDate:
+              typeof j.settlementDate === "string" ? j.settlementDate : null,
+            settlementPeriod:
+              typeof j.settlementPeriod === "number"
+                ? j.settlementPeriod
+                : null,
+            publishTime:
+              typeof j.publishTime === "string" ? j.publishTime : null,
+          });
+        } else {
+          setIcFlows(null);
+          setIcFlowsError(
+            typeof j.error === "string" ? j.error : "Flow data unavailable",
+          );
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setIcFlows(null);
+          setIcFlowsError(e instanceof Error ? e.message : String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const ttfEur = gasRow?.price_eur_mwh ?? null;
 
   /** GB Power chart dashed line: same TTF-derived SRMC as the cost stack (no legacy £108.41 / DB SRMC). */
@@ -451,16 +649,62 @@ export default function MarketsPage() {
       ? sparkSpreadGbpMwh(latestN2ex, ttfEur)
       : null;
 
-  const gbChartData = useMemo(() => {
+  const gbMergedData = useMemo(() => {
+    const yMap = new Map<number, number>();
+    for (const r of yesterdayRows) {
+      yMap.set(r.settlement_period, r.price_gbp_mwh);
+    }
     return [...todayRows]
       .sort((a, b) => a.settlement_period - b.settlement_period)
-      .map((r) => ({
-        sp: r.settlement_period,
-        minutes: spToMinutesFromMidnight(r.settlement_period),
-        timeLabel: spToUtcHHMM(r.settlement_period),
-        price: r.price_gbp_mwh,
-      }));
+      .map((r) => {
+        const sp = r.settlement_period;
+        const minutes = spToMinutesFromMidnight(sp);
+        return {
+          sp,
+          minutes,
+          timeLabel: spToUtcHHMM(sp),
+          priceToday: r.price_gbp_mwh,
+          priceYesterday: yMap.get(sp) ?? null,
+          windGw: windGwForSp(sp, weatherRows, todayDateStr),
+        };
+      });
+  }, [todayRows, yesterdayRows, weatherRows, todayDateStr]);
+
+  const gbHighDot = useMemo(() => {
+    if (gbMergedData.length === 0) return null;
+    let best = gbMergedData[0];
+    for (const d of gbMergedData) {
+      if (d.priceToday > best.priceToday) best = d;
+    }
+    return {
+      minutes: best.minutes,
+      price: best.priceToday,
+      sp: best.sp,
+    };
+  }, [gbMergedData]);
+
+  const negativePricingToday = useMemo(() => {
+    const neg = todayRows
+      .filter((r) => r.price_gbp_mwh < 0)
+      .sort((a, b) => a.settlement_period - b.settlement_period);
+    return neg;
   }, [todayRows]);
+
+  const sparkMerit7d = useMemo(() => {
+    if (ttfEur == null || marketPrices7d.length === 0) return null;
+    const rows = dedupeMidBySettlement(marketPrices7d);
+    let inMerit = 0;
+    let outMerit = 0;
+    for (const r of rows) {
+      const sp = sparkSpreadGbpMwh(r.price_gbp_mwh, ttfEur);
+      if (sp > 0) inMerit += 1;
+      else outMerit += 1;
+    }
+    const total = inMerit + outMerit;
+    const pctInMerit =
+      total > 0 ? Math.round((inMerit / total) * 1000) / 10 : null;
+    return { inMerit, outMerit, total, pctInMerit };
+  }, [marketPrices7d, ttfEur]);
 
   const bucketRows = todayRows;
 
@@ -512,6 +756,15 @@ export default function MarketsPage() {
     if (pcts.length === 0) return null;
     return pcts.reduce((a, b) => a + b, 0) / pcts.length;
   }, [storageByLoc]);
+
+  /** vs 5-year April reference: green above ref, amber within 10% below ref, red well below. */
+  const storageSeasonalBarColor = useMemo(() => {
+    if (storageAvg == null) return INK_MID;
+    const ref = REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT;
+    if (storageAvg >= ref) return BRAND_GREEN;
+    if (storageAvg >= ref * 0.9) return "#D97706";
+    return "#8B3A3A";
+  }, [storageAvg]);
 
   const injectionRateTwhDay = useMemo(() => {
     const inj = LOC_ORDER.map((l) => storageByLoc[l]?.injection_twh).filter(
@@ -589,10 +842,13 @@ export default function MarketsPage() {
       : "—";
 
   const gasUpdated =
-    gasRow?.price_time != null && gasRow.price_time !== ""
-      ? formatInTimeZone(parseISO(gasRow.price_time), "UTC", "dd MMM yyyy HH:mm") +
+    gasRow?.fetched_at != null && gasRow.fetched_at !== ""
+      ? formatInTimeZone(parseISO(gasRow.fetched_at), "UTC", "dd MMM yyyy HH:mm") +
         " UTC"
-      : null;
+      : gasRow?.price_time != null && gasRow.price_time !== ""
+        ? formatInTimeZone(parseISO(gasRow.price_time), "UTC", "dd MMM yyyy HH:mm") +
+          " UTC"
+        : null;
 
   const residualGw = physicalPremium?.residual_demand_gw;
 
@@ -615,8 +871,8 @@ export default function MarketsPage() {
           Markets
         </motion.h1>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-mid">
-          Trading intelligence for GB power, gas cost stack, spark spreads, and
-          continental storage — dense, legible, Zephyr.
+          Live physical intelligence for GB power, European gas, and cross-border
+          flows.
         </p>
       </div>
 
@@ -670,9 +926,12 @@ export default function MarketsPage() {
           <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
             {loading
               ? "…"
-              : physicalPremium?.remit_mw_lost != null
-                ? `${physicalPremium.remit_mw_lost.toFixed(0)} MW offline`
-                : "—"}
+              : physicalPremium?.remit_planned_mw != null &&
+                  physicalPremium?.remit_unplanned_mw != null
+                ? `${physicalPremium.remit_planned_mw.toFixed(0)} MW planned · ${physicalPremium.remit_unplanned_mw.toFixed(0)} MW unplanned`
+                : physicalPremium?.remit_mw_lost != null
+                  ? `${physicalPremium.remit_mw_lost.toFixed(0)} MW offline`
+                  : "—"}
           </p>
         </div>
       </motion.div>
@@ -713,12 +972,12 @@ export default function MarketsPage() {
           <p className="mt-1 text-[11px] text-ink-light">
             Settlement date {todayDateStr} UTC
           </p>
-          <div className="mt-4 h-[150px] w-full min-h-[150px]">
-            {gbChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={150}>
-                <AreaChart
-                  data={gbChartData}
-                  margin={{ top: 8, right: 8, bottom: 8, left: 0 }}
+          <div className="mt-4 h-[180px] w-full min-h-[180px]">
+            {gbMergedData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <ComposedChart
+                  data={gbMergedData}
+                  margin={{ top: 8, right: 12, bottom: 8, left: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -740,15 +999,41 @@ export default function MarketsPage() {
                     tickLine={false}
                   />
                   <YAxis
+                    yAxisId="left"
                     tick={{ fontSize: 10, fill: INK_MID }}
                     tickFormatter={(v) => `£${v}`}
                     axisLine={false}
                     tickLine={false}
                     width={44}
                     domain={["auto", "auto"]}
+                    label={{
+                      value: "£/MWh",
+                      angle: -90,
+                      position: "insideLeft",
+                      fill: INK_MID,
+                      fontSize: 10,
+                    }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    tick={{ fontSize: 10, fill: INK_MID }}
+                    tickFormatter={(v) => `${v}`}
+                    axisLine={false}
+                    tickLine={false}
+                    width={36}
+                    domain={["auto", "auto"]}
+                    label={{
+                      value: "GW",
+                      angle: 90,
+                      position: "insideRight",
+                      fill: INK_MID,
+                      fontSize: 10,
+                    }}
                   />
                   {srmcRef != null ? (
                     <ReferenceLine
+                      yAxisId="left"
                       y={srmcRef}
                       stroke={INK_MID}
                       strokeDasharray="4 4"
@@ -756,25 +1041,76 @@ export default function MarketsPage() {
                     />
                   ) : null}
                   <Area
+                    yAxisId="left"
                     type="monotone"
-                    dataKey="price"
+                    dataKey="priceToday"
                     stroke={BRAND_GREEN}
                     strokeWidth={1.5}
                     fill={BRAND_GREEN}
                     fillOpacity={0.18}
                     isAnimationActive={false}
                   />
-                </AreaChart>
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="priceYesterday"
+                    stroke={YDAY_GREY}
+                    strokeWidth={1.25}
+                    strokeDasharray="5 4"
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="windGw"
+                    stroke={WIND_LINE}
+                    strokeWidth={1}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                  {gbHighDot != null ? (
+                    <ReferenceDot
+                      yAxisId="left"
+                      x={gbHighDot.minutes}
+                      y={gbHighDot.price}
+                      r={4}
+                      fill={BRAND_GREEN}
+                      stroke="#fff"
+                      strokeWidth={1}
+                      label={{
+                        value: `£${gbHighDot.price.toFixed(0)} · SP${gbHighDot.sp}`,
+                        position: "top",
+                        fill: INK,
+                        fontSize: 10,
+                      }}
+                    />
+                  ) : null}
+                </ComposedChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-[150px] items-center text-xs text-ink-light">
+              <div className="flex h-[180px] items-center text-xs text-ink-light">
                 No intraday curve for this session
               </div>
             )}
           </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-mid">
+            <span>
+              <span className="text-[#1D6B4E]">—</span> Today
+              <span className="mx-1 text-ink-light">·</span>
+              <span className="text-[#94a3b8]">··</span> Yesterday
+            </span>
+            <span>
+              <span className="text-[#1D6B4E]">—</span> Price
+              <span className="mx-1 text-ink-light">·</span>
+              <span className="text-[#5c6b2e]">—</span> Wind GW
+            </span>
+          </div>
           <p className="mt-1 text-[10px] text-ink-light">
             {srmcRef != null
-              ? `Dashed line: SRMC £${srmcRef.toFixed(2)}/MWh`
+              ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind from GB ECMWF 100 m × ${WIND_MS_TO_GW} GW/(m/s)`
               : "No SRMC reference (no TTF or stored SRMC)"}
           </p>
           <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3 text-[11px] text-ink-mid">
@@ -809,6 +1145,27 @@ export default function MarketsPage() {
                 </tr>
               </tbody>
             </table>
+            <p className="mt-3 text-[10px] leading-relaxed text-ink-mid">
+              {negativePricingToday.length > 0 ? (
+                <>
+                  <span className="font-medium text-ink">
+                    Negative pricing: {negativePricingToday.length} settlement period
+                    {negativePricingToday.length === 1 ? "" : "s"} today
+                  </span>
+                  <br />
+                  <span className="text-[#8B3A3A]">
+                    {negativePricingToday.map((r, i) => (
+                      <span key={r.settlement_period}>
+                        {i > 0 ? " · " : ""}
+                        SP{r.settlement_period} (£{r.price_gbp_mwh.toFixed(2)})
+                      </span>
+                    ))}
+                  </span>
+                </>
+              ) : (
+                <span>No negative pricing today</span>
+              )}
+            </p>
           </div>
         </motion.div>
 
@@ -829,8 +1186,9 @@ export default function MarketsPage() {
           </p>
           <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
           <p className="mt-1 text-[10px] text-ink-light">
-            TTF quote time follows gas-market / gas-day reporting; power panels use
-            electricity settlement date.
+            &quot;Updated&quot; uses ingestion time from the database (
+            <code className="text-[9px]">fetched_at</code>
+            ), not the gas-day index hour.
           </p>
           <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
             <div className="flex justify-between gap-4">
@@ -903,6 +1261,22 @@ export default function MarketsPage() {
               </span>
             ) : null}
           </div>
+          <p className="mt-2 text-[11px] text-ink-mid">
+            {sparkMerit7d != null && sparkMerit7d.total > 0 ? (
+              <>
+                Last 7 days: {sparkMerit7d.inMerit} SPs in merit ·{" "}
+                {sparkMerit7d.outMerit} SPs out of merit (
+                {sparkMerit7d.pctInMerit != null
+                  ? `${sparkMerit7d.pctInMerit}%`
+                  : "—"}
+                )
+              </>
+            ) : (
+              <span className="text-ink-light">
+                7-day merit summary needs TTF + MID history
+              </span>
+            )}
+          </p>
           <p className="mt-2 text-xs leading-relaxed text-ink-mid">
             {spark != null && spark < 0 && srmcRef != null
               ? `CCGT generation is currently uneconomic. Gas plant requires prices above £${srmcRef.toFixed(2)}/MWh to recover costs.`
@@ -948,7 +1322,7 @@ export default function MarketsPage() {
                     type="monotone"
                     dataKey="sparkPos"
                     stroke={BRAND_GREEN}
-                    strokeWidth={1.5}
+                    strokeWidth={2.5}
                     dot={false}
                     connectNulls
                     isAnimationActive={false}
@@ -957,7 +1331,7 @@ export default function MarketsPage() {
                     type="monotone"
                     dataKey="sparkNeg"
                     stroke={SPARK_NEG}
-                    strokeWidth={1.5}
+                    strokeWidth={2.5}
                     dot={false}
                     connectNulls
                     isAnimationActive={false}
@@ -1039,6 +1413,55 @@ export default function MarketsPage() {
               </ResponsiveContainer>
             ) : null}
           </div>
+          <div className="mt-5 border-t-[0.5px] border-ivory-border pt-4">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+              Seasonal comparison (EU avg % full)
+            </p>
+            <p className="mt-1 text-[10px] text-ink-light">
+              References labelled below are illustrative 5-year-style benchmarks — not
+              live database series.
+            </p>
+            <div className="mt-3 space-y-3">
+              {[
+                {
+                  key: "cur",
+                  label: "Current (live)",
+                  pct: storageAvg,
+                  barColor: storageSeasonalBarColor,
+                },
+                {
+                  key: "swly",
+                  label: "Same week last year (5yr reference)",
+                  pct: REF_STORAGE_SAME_WEEK_LAST_YEAR_PCT,
+                  barColor: INK_MID,
+                },
+                {
+                  key: "apr5",
+                  label: "5-year April average (reference)",
+                  pct: REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT,
+                  barColor: INK_MID,
+                },
+              ].map((row) => (
+                <div key={row.key}>
+                  <div className="flex justify-between text-[11px] text-ink-mid">
+                    <span>{row.label}</span>
+                    <span className="tabular-nums text-ink">
+                      {row.pct == null ? "—" : `${row.pct.toFixed(1)}%`}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
+                    <div
+                      className="h-full rounded-sm transition-[width]"
+                      style={{
+                        width: `${row.pct == null ? 0 : Math.min(100, Math.max(0, row.pct))}%`,
+                        backgroundColor: row.barColor,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </motion.div>
       </div>
 
@@ -1115,21 +1538,68 @@ export default function MarketsPage() {
         </div>
       </motion.section>
 
-      {/* Interconnector panel */}
+      {/* Interconnector flows (BMRS FUELINST) */}
       <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.25 }}
-        className="rounded-[4px] border-[0.5px] border-dashed border-ivory-border bg-ivory-dark/40 px-5 py-4"
+        className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
       >
-        <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-          Interconnector context · static reference
+        <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+          GB interconnectors · Elexon BMRS FUELINST
         </p>
-        <p className="mt-2 text-sm leading-relaxed text-ink-mid">
-          GB interconnector capacity: 8.4 GW total (IFA1 2 GW · IFA2 1 GW · BritNed
-          1 GW · NSL 1.4 GW · NEMO 1 GW · ElecLink 1 GW · Viking 1.4 GW · EWIC 0.5
-          GW). Live flow data coming soon.
+        <p className="mt-1 text-[10px] text-ink-light">
+          Signed MW: positive = import to GB, negative = export from GB. Capacities
+          for bar width are reference MW (not live operational limits).
         </p>
+        {icFlows?.publishTime != null ? (
+          <p className="mt-1 text-[10px] text-ink-light">
+            Latest publish {icFlows.publishTime}
+            {icFlows.settlementDate != null && icFlows.settlementPeriod != null
+              ? ` · SP${icFlows.settlementPeriod} (${icFlows.settlementDate})`
+              : ""}
+          </p>
+        ) : null}
+        <div className="mt-4 space-y-4">
+          {icFlowsError != null ? (
+            <p className="text-sm text-bear">{icFlowsError}</p>
+          ) : icFlows == null ? (
+            <p className="text-sm text-ink-mid">Loading flows…</p>
+          ) : (
+            icFlows.rows.map((r) => {
+              const imp = r.flowMw > 0;
+              const exp = r.flowMw < 0;
+              const arrow = imp ? "←" : exp ? "→" : "·";
+              const cap = Math.max(r.capacityMw, 1);
+              const barPct = Math.min(
+                100,
+                (Math.abs(r.flowMw) / cap) * 100,
+              );
+              return (
+                <div key={r.id}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                    <span className="text-ink">
+                      {r.label}{" "}
+                      <span className="text-ink-mid">({r.country})</span>
+                    </span>
+                    <span className="tabular-nums text-ink">
+                      {Math.round(r.flowMw).toLocaleString("en-GB")} MW{" "}
+                      <span className="text-ink-mid" title={imp ? "Importing to GB" : exp ? "Exporting from GB" : ""}>
+                        {arrow}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-ivory-border/60">
+                    <div
+                      className="h-full rounded-sm bg-[#1D6B4E]/70"
+                      style={{ width: `${barPct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </motion.section>
     </div>
   );
