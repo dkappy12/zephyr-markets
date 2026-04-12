@@ -1588,8 +1588,10 @@ def scheduled_physical_premium() -> None:
 # Morning brief (Claude) → brief_entries (INSERT history)
 # -----------------------------------------------------------------------------
 
-BRIEF_SECTION_RE = re.compile(
-    r"(?is)EXECUTIVE\s+SUMMARY\s*(.*?)\s*WATCH\s+LIST\s*(.*?)\s*BOOK\s+TOUCHPOINTS\s*(.*)"
+BRIEF_FIVE_RE = re.compile(
+    r"(?is)OVERNIGHT\s+SUMMARY\s*(.*?)\s*WEATHER\s+WATCH\s*(.*?)\s*"
+    r"ONE\s+RISK\s+THE\s+MARKET\s+MAY\s+BE\s+UNDERPRICING\s*(.*?)\s*"
+    r"WATCH\s+LIST\s*(.*?)\s*BOOK\s+TOUCHPOINTS\s*(.*)"
 )
 
 
@@ -1629,17 +1631,166 @@ def _normalize_watch_list_block(text: str) -> str:
     return "\n".join(lines)
 
 
-def parse_brief_sections(raw: str) -> tuple[str, str, str]:
-    m = BRIEF_SECTION_RE.search(raw)
+def parse_brief_sections(raw: str) -> tuple[str, str, str, str, str]:
+    """Split on five section headers; returns overnight, weather, one_risk, watch, book."""
+    m = BRIEF_FIVE_RE.search(raw)
     if not m:
-        return raw.strip(), "", ""
-    exec_s = m.group(1).strip()
-    watch_s = _normalize_watch_list_block(m.group(2).strip())
-    book_s = m.group(3).strip()
-    return exec_s, watch_s, book_s
+        lump = raw.strip()
+        return lump, "", "", "", ""
+    overnight = m.group(1).strip()
+    weather = m.group(2).strip()
+    one_risk = m.group(3).strip()
+    watch_s = _normalize_watch_list_block(m.group(4).strip())
+    book_s = m.group(5).strip()
+    return overnight, weather, one_risk, watch_s, book_s
 
 
-async def _anthropic_morning_brief(system: str, user: str) -> str:
+def _float_for_prompt(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_iso_dt(v: Any) -> datetime | None:
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _extract_json_array_string(s: str) -> str:
+    i = s.find("[")
+    if i < 0:
+        return ""
+    depth = 0
+    for j in range(i, len(s)):
+        c = s[j]
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return s[i : j + 1]
+    return ""
+
+
+def _parse_articles_json_from_anthropic_response(
+    data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Returns (articles, parsed_ok). parsed_ok False means text existed but no JSON array."""
+    blocks = data.get("content")
+    if not isinstance(blocks, list):
+        return [], True
+    text_chunks: list[str] = []
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "text":
+            t = b.get("text")
+            if isinstance(t, str) and t.strip():
+                text_chunks.append(t.strip())
+    if not text_chunks:
+        return [], True
+    for raw in reversed(text_chunks):
+        s = raw.strip()
+        if s.startswith("```"):
+            lines = s.split("\n")
+            if len(lines) >= 2:
+                inner = "\n".join(lines[1:])
+                if inner.rstrip().endswith("```"):
+                    inner = inner.rstrip()[:-3].rstrip()
+                s = inner.strip()
+        for candidate in (s, _extract_json_array_string(s)):
+            if not candidate:
+                continue
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, list):
+                    return [x for x in parsed if isinstance(x, dict)], True
+            except json.JSONDecodeError:
+                continue
+    return [], False
+
+
+async def _anthropic_further_reading_articles(
+    http: httpx.AsyncClient,
+    *,
+    wind_gw: float,
+    solar_gw: float,
+    ttf_eur: float,
+    n2ex_price: float,
+    direction: str,
+    remit_count: int,
+) -> list[dict[str, Any]]:
+    if not ANTHROPIC_API_KEY:
+        return []
+    user_content = f"""Search for 3-5 recent news articles (published in the last 48 hours) relevant to GB and European energy markets based on today's physical conditions:
+- Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
+- TTF: €{ttf_eur:.2f}/MWh, N2EX: £{n2ex_price:.2f}/MWh
+- Physical premium direction: {direction}
+- Active REMIT outages: {remit_count} outages
+
+Search for articles about: GB power prices, REMIT outages, European gas markets, wind generation, energy storage, UK electricity market. Prioritise articles from Reuters, Bloomberg, Financial Times, S&P Global Platts, ICIS, Montel, Argus Media, The Guardian energy section, BBC News energy.
+
+Return ONLY a JSON array with no other text:
+[
+  {{
+    "headline": "Full article headline",
+    "snippet": "First 150-200 characters of article body text followed by...",
+    "author": "Author name or null if not found",
+    "publication": "Publication name",
+    "url": "Full article URL",
+    "thumbnail_url": "Article thumbnail/og:image URL or null if not found"
+  }}
+]"""
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    body: dict[str, Any] = {
+        "model": CLAUDE_BRIEF_MODEL,
+        "max_tokens": 2000,
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    resp = await http.post(
+        ANTHROPIC_MESSAGES_URL,
+        headers=headers,
+        json=body,
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    out, parsed_ok = _parse_articles_json_from_anthropic_response(data)
+    if not parsed_ok:
+        logger.warning(
+            "further reading: could not parse articles JSON from Claude response",
+        )
+    return out
+
+
+async def _anthropic_morning_brief(
+    system: str,
+    user: str,
+    *,
+    max_tokens: int = 3500,
+    http: httpx.AsyncClient | None = None,
+) -> str:
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
     headers = {
@@ -1649,26 +1800,36 @@ async def _anthropic_morning_brief(system: str, user: str) -> str:
     }
     body: dict[str, Any] = {
         "model": CLAUDE_BRIEF_MODEL,
-        "max_tokens": 1000,
+        "max_tokens": max_tokens,
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
-    async with httpx.AsyncClient(follow_redirects=True) as http:
-        resp = await http.post(
+
+    async def _post(client: httpx.AsyncClient) -> dict[str, Any]:
+        resp = await client.post(
             ANTHROPIC_MESSAGES_URL,
             headers=headers,
             json=body,
             timeout=120.0,
         )
         resp.raise_for_status()
-        data = resp.json()
+        return resp.json()
+
+    if http is not None:
+        data = await _post(http)
+    else:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            data = await _post(client)
     blocks = data.get("content")
     if not isinstance(blocks, list) or not blocks:
         raise RuntimeError("Claude response missing content")
-    first = blocks[0]
-    if isinstance(first, dict) and first.get("type") == "text":
-        return str(first.get("text") or "")
-    raise RuntimeError("Unexpected Claude content shape")
+    parts: list[str] = []
+    for b in blocks:
+        if isinstance(b, dict) and b.get("type") == "text":
+            parts.append(str(b.get("text") or ""))
+    if not parts:
+        raise RuntimeError("Claude response has no text blocks")
+    return "\n".join(parts).strip()
 
 
 async def insert_brief_entry_http(
@@ -1716,7 +1877,7 @@ async def generate_morning_brief() -> None:
         )
         pp_resp.raise_for_status()
         pp_rows = pp_resp.json()
-        pp: dict[str, Any] = pp_rows[0] if isinstance(pp_rows, list) and pp_rows else {}
+        pp = pp_rows[0] if isinstance(pp_rows, list) and pp_rows else {}
 
         gas_resp = await http.get(
             _gas_prices_rest_url(),
@@ -1761,7 +1922,7 @@ async def generate_morning_brief() -> None:
                 "type": "eq.remit",
                 "select": "title,description",
                 "order": "created_at.desc",
-                "limit": "5",
+                "limit": "20",
             },
             timeout=HTTP_TIMEOUT,
         )
@@ -1775,6 +1936,7 @@ async def generate_morning_brief() -> None:
                 t = str(s.get("title") or "").strip()
                 d = str(s.get("description") or "").strip()
                 remit_lines.append(f"- {t}: {d}" if t else f"- {d}")
+        remit_count = len(remit_lines)
 
         st_resp = await http.get(
             _storage_levels_rest_url(),
@@ -1810,7 +1972,7 @@ async def generate_morning_brief() -> None:
             headers=_supabase_auth_headers(),
             params=[
                 ("location", "eq.GB"),
-                ("select", "wind_speed_100m"),
+                ("select", "wind_speed_100m,temperature_2m,forecast_time"),
                 ("forecast_time", f"gte.{iso_lo}"),
                 ("forecast_time", f"lte.{iso_hi}"),
             ],
@@ -1818,133 +1980,220 @@ async def generate_morning_brief() -> None:
         )
         wf_resp.raise_for_status()
         wf_rows = wf_resp.json()
-        wind_speeds: list[float] = []
+        parsed_w: list[tuple[datetime, float, float | None]] = []
         if isinstance(wf_rows, list):
             for r in wf_rows:
                 if not isinstance(r, dict):
                     continue
+                ft = _parse_iso_dt(r.get("forecast_time"))
+                if ft is None:
+                    continue
                 w = r.get("wind_speed_100m")
                 try:
-                    if w is not None:
-                        wind_speeds.append(float(w))
+                    wms = float(w) if w is not None else None
                 except (TypeError, ValueError):
-                    pass
+                    wms = None
+                if wms is None:
+                    continue
+                t2 = r.get("temperature_2m")
+                try:
+                    t2f = float(t2) if t2 is not None else None
+                except (TypeError, ValueError):
+                    t2f = None
+                parsed_w.append((ft, wms, t2f))
+        parsed_w.sort(key=lambda x: x[0])
+        wind_speeds = [x[1] for x in parsed_w]
         w_min = min(wind_speeds) if wind_speeds else None
         w_max = max(wind_speeds) if wind_speeds else None
+        wind_gw_low = w_min * WIND_MS_TO_GW if w_min is not None else None
+        wind_gw_high = w_max * WIND_MS_TO_GW if w_max is not None else None
+        current_temp_c: float | None = None
+        closest_w_ms: float | None = None
+        best_age: float | None = None
+        for ft, wms, t2f in parsed_w:
+            age = abs((ft - now).total_seconds())
+            if best_age is None or age < best_age:
+                best_age = age
+                current_temp_c = t2f
+                closest_w_ms = wms
+        wind_trend_note = "n/a"
+        if len(parsed_w) >= 4:
+            mid = len(parsed_w) // 2
+            first = parsed_w[:mid]
+            second = parsed_w[mid:]
+            a = sum(x[1] for x in first) / len(first)
+            b = sum(x[1] for x in second) / len(second)
+            if b > a * 1.05:
+                wind_trend_note = (
+                    "wind speeds higher in the second half of the 24h window vs the first"
+                )
+            elif b < a * 0.95:
+                wind_trend_note = (
+                    "wind speeds lower in the second half of the 24h window vs the first"
+                )
+            else:
+                wind_trend_note = "wind speeds relatively steady across the 24h window"
+        temps_24h = [x[2] for x in parsed_w if x[2] is not None]
+        t_min_c = min(temps_24h) if temps_24h else None
+        t_max_c = max(temps_24h) if temps_24h else None
 
-    ns = pp.get("normalised_score")
-    direction = pp.get("direction") or "n/a"
-    implied = pp.get("implied_price_gbp_mwh")
-    market_p = pp.get("market_price_gbp_mwh")
-    gap = pp.get("premium_value")
-    r_reg = pp.get("regime")
-    regime = _regime_plain_english(
-        str(r_reg) if r_reg is not None else None
-    )
-    srmc = pp.get("srmc_gbp_mwh")
-    wind_gw = pp.get("wind_gw")
-    solar_gw = pp.get("solar_gw")
-    residual = pp.get("residual_demand_gw")
+        ns = pp.get("normalised_score")
+        direction = str(pp.get("direction") or "n/a")
+        implied = pp.get("implied_price_gbp_mwh")
+        market_p = pp.get("market_price_gbp_mwh")
+        gap = pp.get("premium_value")
+        r_reg = pp.get("regime")
+        regime = _regime_plain_english(
+            str(r_reg) if r_reg is not None else None
+        )
+        srmc = pp.get("srmc_gbp_mwh")
+        remit_mw_lost = pp.get("remit_mw_lost")
+        wind_gw = pp.get("wind_gw")
+        solar_gw = pp.get("solar_gw")
+        residual = pp.get("residual_demand_gw")
 
-    remit_block = "\n".join(remit_lines) if remit_lines else "(none in last 5 signals)"
+        remit_block = (
+            "\n".join(remit_lines)
+            if remit_lines
+            else "(no recent REMIT signals in feed)"
+        )
 
-    system_prompt = (
-        "You are Zephyr's market intelligence engine. You write concise, professional "
-        "morning briefs for GB and NW European energy traders. Your tone is direct, "
-        "precise, and analytical — like a senior trader explaining the physical picture "
-        "to a colleague. Never use filler phrases. Every sentence should contain a "
-        "tradeable insight or relevant context. Write in present tense."
-    )
+        system_prompt = (
+            "You are Zephyr's market intelligence engine. You write concise, professional "
+            "morning briefs for GB and NW European energy traders. Your tone is direct, "
+            "precise, and analytical — like a senior trader explaining the physical picture "
+            "to a colleague. Never use filler phrases. Every sentence should contain a "
+            "tradeable insight or relevant context. Write in present tense."
+        )
 
-    user_prompt = f"""Generate a morning brief for GB energy traders based on these physical conditions as of {ts_label}:
+        implied_vs_mkt = (
+            f"market £{_brief_fmt_num(market_p)}/MWh vs physically implied "
+            f"£{_brief_fmt_num(implied)}/MWh"
+        )
+
+        user_prompt = f"""Generate a morning brief for GB energy traders based on these physical conditions as of {ts_label}.
+
+DATA (use concrete numbers from below in your answer):
 
 PHYSICAL PREMIUM MODEL:
-- Normalised score: {_brief_fmt_num(ns, 1)} ({direction})
+- Normalised score: {_brief_fmt_num(ns, 1)} (direction: {direction})
 - Implied price: £{_brief_fmt_num(implied)}/MWh | Market price: £{_brief_fmt_num(market_p)}/MWh | Premium gap: £{_brief_fmt_num(gap)}/MWh
-- Regime: {regime} (renewable-dominated / transitional / gas-dominated)
+- {implied_vs_mkt}
+- Regime: {regime}
 - SRMC anchor: £{_brief_fmt_num(srmc)}/MWh
+- REMIT capacity impact (model): {_brief_fmt_num(remit_mw_lost)} MW (if shown)
 
-GENERATION & WEATHER:
-- Wind: {_brief_fmt_num(wind_gw, 1)}GW | Solar: {_brief_fmt_num(solar_gw, 1)}GW | Residual demand: {_brief_fmt_num(residual, 1)}GW
-- 24h wind forecast range: {_brief_fmt_num(w_min, 1)}-{_brief_fmt_num(w_max, 1)} m/s
+GENERATION:
+- Wind (model): {_brief_fmt_num(wind_gw, 1)} GW | Solar: {_brief_fmt_num(solar_gw, 1)} GW | Residual demand: {_brief_fmt_num(residual, 1)} GW
+- 24h wind speed range at 100m: {_brief_fmt_num(w_min, 1)}–{_brief_fmt_num(w_max, 1)} m/s → implied wind generation range ≈ {_brief_fmt_num(wind_gw_low, 1)}–{_brief_fmt_num(wind_gw_high, 1)} GW (use scaling {WIND_MS_TO_GW:.4f} GW per m/s).
+- Nearest forecast hour to now: wind {_brief_fmt_num(closest_w_ms, 1)} m/s; temperature {_brief_fmt_num(current_temp_c, 1)} °C (current conditions).
+- 24h temperature span: {_brief_fmt_num(t_min_c, 1)}–{_brief_fmt_num(t_max_c, 1)} °C.
+- Wind profile (24h window, first vs second half): {wind_trend_note}
 
-GAS & CARBON:
-- TTF NGP: €{_brief_fmt_num(ttf_eur)}/MWh (today)
-- N2EX latest: £{_brief_fmt_num(n2ex_price)}/MWh (SP{n2ex_sp if n2ex_sp is not None else "n/a"})
+GAS & POWER PRICE:
+- TTF: €{_brief_fmt_num(ttf_eur)}/MWh
+- N2EX: £{_brief_fmt_num(n2ex_price)}/MWh (SP{n2ex_sp if n2ex_sp is not None else "n/a"})
 
-REMIT (active outages):
+REMIT SIGNALS (recent; {remit_count} items):
 {remit_block}
 
 EU STORAGE:
 - Germany: {(_brief_fmt_num(de_pct, 1) if de_pct is not None else "n/a")}% full
 - France: {(_brief_fmt_num(fr_pct, 1) if fr_pct is not None else "n/a")}% full
 
-Write a morning brief with exactly these three sections:
+Write the brief with EXACTLY these section headers on their own lines, in this order, and nothing else before the first header:
 
-EXECUTIVE SUMMARY
-[2-3 sentences capturing the single most important physical read for today's session. Be specific about prices, GW figures, and what they mean for the market.]
+OVERNIGHT SUMMARY
+What the physical world has done since the previous close. Reference the physical premium score direction, wind and solar generation levels, any significant REMIT outages that came in overnight, and how the market price compares to the physically-implied price. Be specific with numbers. 2-3 sentences.
+
+WEATHER WATCH
+Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. 2-3 sentences.
+
+ONE RISK THE MARKET MAY BE UNDERPRICING
+The single most important contrarian physical signal in the current data. Look for disconnects between the market price and the physical implied price, REMIT capacity that could clear and tighten the system, wind forecast drops that would switch regime from renewable to gas-dominated, or storage levels that signal supply tightness. Be specific and quantified. 2-3 sentences.
 
 WATCH LIST
-- [Specific thing to watch #1 — one line]
-- [Specific thing to watch #2 — one line]
-- [Specific thing to watch #3 — one line]
+Exactly three bullet lines starting with • (bullet character). Each one line, specific, and actionable. Reference actual asset names, prices, or GW figures from the data.
 
 BOOK TOUCHPOINTS
-[1-2 sentences connecting the physical picture to how a generic long/short GB power or gas position would be affected today.]
+1-2 sentences connecting today's physical picture to how a generic long or short GB power or gas position would be affected. Be direct about the P&L implication.
 
-Do not add any other sections or headers. Do not use markdown formatting."""
+Do not use markdown bold or headings other than the exact headers above. Do not add extra sections."""
 
-    raw_text = await _anthropic_morning_brief(system_prompt, user_prompt)
-    exec_s, watch_s, book_s = parse_brief_sections(raw_text)
+        raw_text = await _anthropic_morning_brief(
+            system_prompt, user_prompt, max_tokens=3500, http=http
+        )
+        overnight_s, weather_s, one_risk_s, watch_s, book_s = parse_brief_sections(
+            raw_text
+        )
+        exec_s = overnight_s if overnight_s else raw_text.strip()
 
-    score_store = None
-    try:
-        if ns is not None:
-            score_store = float(ns)
-    except (TypeError, ValueError):
-        pass
-    wind_store = None
-    try:
-        if wind_gw is not None:
-            wind_store = float(wind_gw)
-    except (TypeError, ValueError):
-        pass
-    ttf_store = None
-    try:
-        if ttf_eur is not None:
-            ttf_store = float(ttf_eur)
-    except (TypeError, ValueError):
-        pass
-    mkt_store = None
-    try:
-        if n2ex_price is not None:
-            mkt_store = float(n2ex_price)
-    except (TypeError, ValueError):
-        pass
+        score_store = None
+        try:
+            if ns is not None:
+                score_store = float(ns)
+        except (TypeError, ValueError):
+            pass
+        wind_store = None
+        try:
+            if wind_gw is not None:
+                wind_store = float(wind_gw)
+        except (TypeError, ValueError):
+            pass
+        ttf_store = None
+        try:
+            if ttf_eur is not None:
+                ttf_store = float(ttf_eur)
+        except (TypeError, ValueError):
+            pass
+        mkt_store = None
+        try:
+            if n2ex_price is not None:
+                mkt_store = float(n2ex_price)
+        except (TypeError, ValueError):
+            pass
 
-    row = {
-        "executive_summary": exec_s,
-        "watch_list": watch_s,
-        "book_touchpoints": book_s,
-        "raw_response": raw_text,
-        "physical_premium_score": score_store,
-        "wind_gw": wind_store,
-        "ttf_eur_mwh": ttf_store,
-        "market_price_gbp_mwh": mkt_store,
-        "source": BRIEF_SOURCE,
-    }
+        articles = await _anthropic_further_reading_articles(
+            http,
+            wind_gw=_float_for_prompt(wind_gw),
+            solar_gw=_float_for_prompt(solar_gw),
+            ttf_eur=_float_for_prompt(ttf_eur),
+            n2ex_price=_float_for_prompt(n2ex_price),
+            direction=direction,
+            remit_count=remit_count,
+        )
 
-    async with httpx.AsyncClient(follow_redirects=True) as http:
+        row = {
+            "executive_summary": exec_s,
+            "overnight_summary": overnight_s,
+            "weather_watch": weather_s,
+            "one_risk": one_risk_s,
+            "watch_list": watch_s,
+            "book_touchpoints": book_s,
+            "articles": articles,
+            "raw_response": raw_text,
+            "physical_premium_score": score_store,
+            "wind_gw": wind_store,
+            "ttf_eur_mwh": ttf_store,
+            "market_price_gbp_mwh": mkt_store,
+            "source": BRIEF_SOURCE,
+        }
+
         await insert_brief_entry_http(http, row)
 
-    preview = (exec_s or "").replace("\n", " ")[:100]
-    logger.info(
-        "brief_cycle: generated brief score=%s wind=%sGW ttf=€%s | executive_summary preview: %s",
-        _brief_fmt_num(ns, 1) if ns is not None else "n/a",
-        _brief_fmt_num(wind_gw, 1) if wind_gw is not None else "n/a",
-        _brief_fmt_num(ttf_eur) if ttf_eur is not None else "n/a",
-        preview,
-    )
+        preview = (overnight_s or exec_s or "").replace("\n", " ")[:100]
+        logger.info(
+            "brief_cycle: generated brief score=%s wind=%sGW ttf=€%s | "
+            "overnight_summary preview: %s",
+            _brief_fmt_num(ns, 1) if ns is not None else "n/a",
+            _brief_fmt_num(wind_gw, 1) if wind_gw is not None else "n/a",
+            _brief_fmt_num(ttf_eur) if ttf_eur is not None else "n/a",
+            preview,
+        )
+        logger.info(
+            "brief_cycle: found %s articles for further reading",
+            len(articles),
+        )
 
 
 def scheduled_morning_brief() -> None:

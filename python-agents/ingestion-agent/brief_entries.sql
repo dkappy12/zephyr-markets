@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS public.brief_entries (
   wind_gw numeric,
   ttf_eur_mwh numeric,
   market_price_gbp_mwh numeric,
+  overnight_summary text,
+  weather_watch text,
+  one_risk text,
+  articles jsonb,
   source text NOT NULL DEFAULT 'Claude claude-sonnet-4-20250514'
 );
 
@@ -37,3 +41,9 @@ CREATE POLICY "Allow authenticated read brief_entries"
 
 GRANT SELECT ON public.brief_entries TO anon;
 GRANT SELECT ON public.brief_entries TO authenticated;
+
+-- Existing deployments (v2 five-section brief + further reading):
+ALTER TABLE public.brief_entries ADD COLUMN IF NOT EXISTS overnight_summary text;
+ALTER TABLE public.brief_entries ADD COLUMN IF NOT EXISTS weather_watch text;
+ALTER TABLE public.brief_entries ADD COLUMN IF NOT EXISTS one_risk text;
+ALTER TABLE public.brief_entries ADD COLUMN IF NOT EXISTS articles jsonb;
