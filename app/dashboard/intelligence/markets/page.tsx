@@ -45,15 +45,16 @@ function utcTodayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function utcYesterdayStr(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
 function utcDateMinusDays(days: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Previous calendar day in UTC for a YYYY-MM-DD string (use noon to avoid edge cases). */
+function utcDateMinusOneDayFromYmd(ymd: string): string {
+  const d = parseISO(`${ymd}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -244,6 +245,42 @@ function formatRemitMw(n: number): string {
   }).format(n);
 }
 
+/** First numeric value found for any of the given keys (ingestion may use aliases). */
+function numFromKeys(row: Record<string, unknown>, keys: string[]): number | null {
+  for (const k of keys) {
+    if (!(k in row)) continue;
+    const n = parseNum(row[k]);
+    if (n != null && Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * REMIT planned/unplanned from physical_premium row; keys vary by migration / agent version.
+ */
+function parseRemitSplitFromPremiumRow(row: Record<string, unknown>): {
+  plannedMw: number | null;
+  unplannedMw: number | null;
+  totalMw: number | null;
+} {
+  const plannedMw = numFromKeys(row, [
+    "remit_planned_mw",
+    "remit_mw_planned_active",
+    "remit_mw_planned",
+  ]);
+  const unplannedMw = numFromKeys(row, [
+    "remit_unplanned_mw",
+    "remit_mw_unplanned_active",
+    "remit_mw_unplanned",
+  ]);
+  const totalMw =
+    numFromKeys(row, ["remit_mw_lost", "remit_total_mw"]) ??
+    (plannedMw != null && unplannedMw != null
+      ? plannedMw + unplannedMw
+      : null);
+  return { plannedMw, unplannedMw, totalMw };
+}
+
 function formatVolumeMwh(v: unknown): string {
   const n = parseNum(v);
   if (n == null || n === 0) return "—";
@@ -321,7 +358,6 @@ export default function MarketsPage() {
   useEffect(() => {
     const supabase = createBrowserClient();
     const today = utcTodayStr();
-    const yesterday = utcYesterdayStr();
     const sevenAgo = utcDateMinusDays(7);
     /** Cover settlement-date vs UTC midnight mismatches vs weather rows. */
     const wxRangeStart = `${utcDateMinusDays(1)}T00:00:00.000Z`;
@@ -355,7 +391,6 @@ export default function MarketsPage() {
           stRes,
           stHistRes,
           tapeRes,
-          ydayRes,
           wxRes,
           mp7dRes,
         ] = await Promise.all([
@@ -403,12 +438,6 @@ export default function MarketsPage() {
             .order("settlement_period", { ascending: false })
             .limit(10),
           supabase
-            .from("market_prices")
-            .select(mpSel)
-            .or("market.eq.N2EX,market.eq.APX")
-            .eq("price_date", yesterday)
-            .order("settlement_period", { ascending: true }),
-          supabase
             .from("weather_forecasts")
             .select("forecast_time, wind_speed_100m")
             .eq("location", "GB")
@@ -429,6 +458,9 @@ export default function MarketsPage() {
           setPhysicalPremium(null);
         } else if (ppRes.data) {
           const p = ppRes.data as Record<string, unknown>;
+          // eslint-disable-next-line no-console
+          console.log("physical_premium columns:", Object.keys(p));
+          const remit = parseRemitSplitFromPremiumRow(p);
           setPhysicalPremium({
             normalised_score: parseNum(p.normalised_score),
             direction:
@@ -436,15 +468,9 @@ export default function MarketsPage() {
             residual_demand_gw: parseNum(p.residual_demand_gw),
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
-            remit_mw_lost: parseNum(p.remit_mw_lost),
-            remit_planned_mw:
-              parseNum(p.remit_mw_planned_active) ??
-              parseNum(p.remit_planned_mw) ??
-              parseNum(p.remit_mw_planned),
-            remit_unplanned_mw:
-              parseNum(p.remit_mw_unplanned_active) ??
-              parseNum(p.remit_unplanned_mw) ??
-              parseNum(p.remit_mw_unplanned),
+            remit_mw_lost: remit.totalMw,
+            remit_planned_mw: remit.plannedMw,
+            remit_unplanned_mw: remit.unplannedMw,
           });
         } else {
           setPhysicalPremium(null);
@@ -472,6 +498,7 @@ export default function MarketsPage() {
         let todayParsed = dedupeMidBySettlement(
           mapMid((todayRes.data ?? []) as Record<string, unknown>[]),
         );
+        let displayDateStr = today;
         if (todayParsed.length === 0 && mpRes.data?.length) {
           const all = dedupeMidBySettlement(
             mapMid(mpRes.data as Record<string, unknown>[]),
@@ -479,12 +506,30 @@ export default function MarketsPage() {
           const maxDate = all[0]?.price_date;
           if (maxDate) {
             todayParsed = all.filter((r) => r.price_date === maxDate);
-            setTodayDateStr(maxDate);
+            displayDateStr = maxDate;
           }
-        } else {
-          setTodayDateStr(today);
         }
+        setTodayDateStr(displayDateStr);
         setTodayRows(todayParsed);
+
+        /** Compare to prior settlement calendar day (not fixed UTC “yesterday”), or SP alignment breaks. */
+        const priorSettlementDay = utcDateMinusOneDayFromYmd(displayDateStr);
+        const ydayRes = await supabase
+          .from("market_prices")
+          .select(mpSel)
+          .or("market.eq.N2EX,market.eq.APX")
+          .eq("price_date", priorSettlementDay)
+          .order("settlement_period", { ascending: true });
+
+        if (ydayRes.error) {
+          setYesterdayRows([]);
+        } else {
+          setYesterdayRows(
+            dedupeMidBySettlement(
+              mapMid((ydayRes.data ?? []) as Record<string, unknown>[]),
+            ),
+          );
+        }
 
         if (gasRes.error || !gasRes.data) {
           setGasRow(null);
@@ -501,16 +546,6 @@ export default function MarketsPage() {
           } else {
             setGasRow(null);
           }
-        }
-
-        if (ydayRes.error) {
-          setYesterdayRows([]);
-        } else {
-          setYesterdayRows(
-            dedupeMidBySettlement(
-              mapMid((ydayRes.data ?? []) as Record<string, unknown>[]),
-            ),
-          );
         }
 
         if (wxRes.error) {
@@ -657,21 +692,32 @@ export default function MarketsPage() {
     for (const r of yesterdayRows) {
       yMap.set(r.settlement_period, r.price_gbp_mwh);
     }
-    return [...todayRows]
+    const chartData = [...todayRows]
       .sort((a, b) => a.settlement_period - b.settlement_period)
       .map((r) => {
         const sp = r.settlement_period;
         const minutes = spToMinutesFromMidnight(sp);
         const windImpliedGw = windImpliedGwForSp(sp, weatherRows, todayDateStr);
+        const yPrice = yMap.has(sp) ? yMap.get(sp)! : null;
         return {
           sp,
           minutes,
           timeLabel: spToUtcHHMM(sp),
           today_price: r.price_gbp_mwh,
-          yesterday_price: yMap.get(sp) ?? null,
+          yesterday_price: yPrice,
           wind_implied_gw: windImpliedGw,
         };
       });
+    // eslint-disable-next-line no-console
+    console.log(
+      "yesterday data sample:",
+      chartData.slice(0, 3).map((d) => ({
+        sp: d.sp,
+        today: d.today_price,
+        yesterday: d.yesterday_price,
+      })),
+    );
+    return chartData;
   }, [todayRows, yesterdayRows, weatherRows, todayDateStr]);
 
   const gbHighDot = useMemo(() => {
@@ -872,7 +918,7 @@ export default function MarketsPage() {
       return `REMIT: ${formatRemitMw(ppP)} MW planned · ${formatRemitMw(ppU)} MW unplanned`;
     }
     if (pp?.remit_mw_lost != null) {
-      return `${formatRemitMw(pp.remit_mw_lost)} MW offline`;
+      return `REMIT: ${formatRemitMw(pp.remit_mw_lost)} MW offline`;
     }
     return null;
   }, [physicalPremium]);
@@ -1068,11 +1114,11 @@ export default function MarketsPage() {
                     type="monotone"
                     dataKey="yesterday_price"
                     name="Yesterday"
-                    stroke="#9ca3af"
-                    strokeWidth={1.5}
-                    strokeDasharray="5 3"
+                    stroke="#6b7280"
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
                     dot={false}
-                    connectNulls
+                    connectNulls={false}
                     isAnimationActive={false}
                   />
                   <Line
@@ -1126,9 +1172,9 @@ export default function MarketsPage() {
                   y1="1.5"
                   x2="22"
                   y2="1.5"
-                  stroke="#9ca3af"
-                  strokeWidth="1.5"
-                  strokeDasharray="5 3"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeDasharray="6 3"
                 />
               </svg>
               <span className="text-ink">Yesterday</span>
