@@ -69,15 +69,10 @@ type SolarRow = {
 function mapWfRaw(r: Record<string, unknown>): WfRow {
   return {
     forecast_time: String(r.forecast_time ?? ""),
-    wind_speed_10m:
-      parseNum(r.wind_speed_10m) ?? parseNum(r.windspeed_10m),
-    wind_speed_100m:
-      parseNum(r.wind_speed_100m) ?? parseNum(r.windspeed_100m),
+    wind_speed_10m: parseNum(r.wind_speed_10m),
+    wind_speed_100m: parseNum(r.wind_speed_100m),
     temperature_2m: parseNum(r.temperature_2m),
-    solar_radiation:
-      parseNum(r.direct_radiation) ??
-      parseNum(r.solar_radiation) ??
-      parseNum((r as { solar?: unknown }).solar),
+    solar_radiation: parseNum(r.solar_radiation),
   };
 }
 
@@ -248,7 +243,7 @@ export default function WeatherPage() {
     async function load() {
       setLoadError(null);
       const wfSel =
-        "forecast_time, wind_speed_10m, wind_speed_100m, temperature_2m, solar_radiation, direct_radiation";
+        "forecast_time, wind_speed_10m, wind_speed_100m, temperature_2m, solar_radiation";
 
       const [
         wfRes,
@@ -301,11 +296,11 @@ export default function WeatherPage() {
             "solar data sample:",
             mapped168.slice(0, 24).map((d, i) => {
               const r = raw168[i] ?? {};
-              const direct = parseNum(r.direct_radiation);
+              const rad = parseNum(r.solar_radiation);
               return {
                 time: d.forecast_time,
-                radiation: direct,
-                solar_gw: (direct ?? 0) * 0.000065,
+                radiation: rad,
+                solar_gw: (rad ?? 0) * 0.000065,
               };
             }),
           );
