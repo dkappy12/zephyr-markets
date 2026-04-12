@@ -24,7 +24,6 @@ type BriefRow = {
   weather_watch: string | null;
   one_risk: string | null;
   watch_list: string | null;
-  /** Still stored / generated; hidden in UI until P&L attribution is live. */
   book_touchpoints: string | null;
   articles: BriefArticle[] | null;
 };
@@ -40,111 +39,108 @@ function parseWatchList(watchList: string | null): string[] {
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
 
-function BriefArticleThumbnailPlaceholder() {
+function WindTurbineThumbPlaceholder() {
   return (
     <svg
-      viewBox="0 0 224 128"
-      className="h-full w-full"
+      viewBox="0 0 100 120"
+      className="h-20 w-16 text-stone-400"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
       aria-hidden
     >
-      <rect width="224" height="128" fill="#F5F0E8" />
-      <line
-        x1="8"
-        y1="102"
-        x2="216"
-        y2="102"
-        stroke="#3D3D2E"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-      />
-      <line
-        x1="112"
-        y1="102"
-        x2="112"
-        y2="46"
-        stroke="#3D3D2E"
-        strokeWidth="2.25"
-        strokeLinecap="round"
-      />
-      <circle cx="112" cy="42" r="3.5" fill="#3D3D2E" />
-      <g
-        stroke="#3D3D2E"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        fill="none"
-      >
-        <line x1="112" y1="42" x2="112" y2="14" />
-        <line x1="112" y1="42" x2="142" y2="58" />
-        <line x1="112" y1="42" x2="82" y2="58" />
-      </g>
+      <line x1="50" y1="20" x2="50" y2="110" />
+      <line x1="50" y1="110" x2="35" y2="120" />
+      <line x1="50" y1="110" x2="65" y2="120" />
+      <line x1="50" y1="20" x2="20" y2="50" />
+      <line x1="50" y1="20" x2="80" y2="35" />
+      <line x1="50" y1="20" x2="45" y2="0" />
     </svg>
   );
 }
 
-function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const thumbUrl = a.thumbnail_url?.trim();
-  const showImage = Boolean(thumbUrl) && !thumbFailed;
+function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
   const href =
-    typeof a.url === "string" && a.url.trim() !== "" ? a.url.trim() : "";
+    article.url != null &&
+    typeof article.url === "string" &&
+    article.url.trim() !== ""
+      ? article.url.trim()
+      : null;
 
-  const cardInner = (
+  const thumbBlock = (
     <>
-      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
-        {showImage ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={thumbUrl}
-              alt=""
-              className="h-full w-full object-cover"
-              onError={() => setThumbFailed(true)}
-            />
-          </>
-        ) : (
-          <BriefArticleThumbnailPlaceholder />
-        )}
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-row items-start justify-between gap-2">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-            {a.publication}
-          </span>
-          {a.published_date ? (
-            <span className="shrink-0 text-right text-[11px] text-ink-light">
-              {a.published_date}
-            </span>
-          ) : null}
-        </div>
-        <span className="font-serif text-lg leading-snug text-ink underline-offset-[3px] group-hover:underline">
-          {a.headline}
-        </span>
-        <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
-          {a.snippet}
-        </p>
-        {a.author ? (
-          <p className="text-[11px] text-ink-light">{a.author}</p>
-        ) : null}
+      {article.thumbnail_url ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={article.thumbnail_url}
+          alt={article.headline}
+          className="h-32 w-32 flex-shrink-0 rounded-lg object-cover"
+          onError={(e) => {
+            const target = e.currentTarget;
+            target.style.display = "none";
+            const placeholder = target.nextElementSibling as HTMLElement;
+            if (placeholder) placeholder.style.display = "flex";
+          }}
+        />
+      ) : null}
+      <div
+        className="flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-lg bg-stone-100"
+        style={{
+          display: article.thumbnail_url ? "none" : "flex",
+        }}
+      >
+        <WindTurbineThumbPlaceholder />
       </div>
     </>
   );
 
+  const body = (
+    <div className="flex gap-4">
+      <div className="shrink-0">{thumbBlock}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-row items-start justify-between gap-2">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+            {article.publication}
+          </span>
+          {article.published_date ? (
+            <span className="shrink-0 text-right text-[11px] text-ink-light">
+              {article.published_date}
+            </span>
+          ) : null}
+        </div>
+        <span className="font-serif text-lg leading-snug text-ink">
+          {article.headline}
+        </span>
+        <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
+          {article.snippet}
+        </p>
+        {article.author ? (
+          <p className="text-[11px] text-ink-light">{article.author}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (!href) {
+    return (
+      <li>
+        <div className="block cursor-default rounded border border-stone-200 p-4 no-underline opacity-80">
+          {body}
+        </div>
+      </li>
+    );
+  }
+
   return (
     <li>
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group flex cursor-pointer flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-inherit no-underline transition-[border-color,background-color] duration-200 hover:border-[#b5aa96] hover:bg-[#faf7f2]"
-        >
-          {cardInner}
-        </a>
-      ) : (
-        <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 opacity-80">
-          {cardInner}
-        </div>
-      )}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block border border-stone-200 rounded p-4 hover:border-stone-400 hover:shadow-sm transition-all cursor-pointer no-underline"
+      >
+        {body}
+      </a>
     </li>
   );
 }
@@ -175,6 +171,19 @@ export default function BriefPage() {
     load();
   }, []);
 
+  const articles: BriefArticle[] = Array.isArray(row?.articles)
+    ? row!.articles!
+    : [];
+
+  useEffect(() => {
+    articles.forEach((article, i) => {
+      console.log(
+        `[brief] article[${i}] thumbnail_url:`,
+        article.thumbnail_url,
+      );
+    });
+  }, [articles]);
+
   const headerTime =
     row?.generated_at != null
       ? formatInTimeZone(parseISO(row.generated_at), "UTC", "HH:mm")
@@ -191,10 +200,6 @@ export default function BriefPage() {
   const weatherBody = loading ? "…" : row?.weather_watch?.trim() || "—";
 
   const oneRiskBody = loading ? "…" : row?.one_risk?.trim() || "—";
-
-  const articles: BriefArticle[] = Array.isArray(row?.articles)
-    ? row!.articles!
-    : [];
 
   return (
     <>
@@ -287,6 +292,17 @@ export default function BriefPage() {
           </ul>
         </section>
 
+        <section>
+          <h2 className={sectionLabelClass}>Book touchpoints</h2>
+          <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
+            <p className="text-sm italic leading-relaxed text-ink-light">
+              Book-native P&L attribution coming soon. Import your positions to
+              see how today&apos;s physical signals impact your specific
+              exposures.
+            </p>
+          </div>
+        </section>
+
         <div className="border-t-[0.5px] border-ivory-border pt-8">
           <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-light">
             Further reading
@@ -295,10 +311,14 @@ export default function BriefPage() {
             {loading ? (
               <li className="text-ink-mid">…</li>
             ) : articles.length > 0 ? (
-              articles.map((a, i) => (
+              articles.map((article, i) => (
                 <FurtherReadingArticleCard
-                  key={`${a.url}-${i}`}
-                  a={a}
+                  key={
+                    article.url
+                      ? `${article.url}-${i}`
+                      : `article-${i}-${article.headline?.slice(0, 12)}`
+                  }
+                  article={article}
                 />
               ))
             ) : (
