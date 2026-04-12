@@ -53,3 +53,7 @@ ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS regime text;
 -- Planned vs unplanned REMIT capacity (MW) for dashboard copy; run in Supabase if missing.
 ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_planned_mw numeric;
 ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_unplanned_mw numeric;
+
+-- Optional aliases (some dashboards / exports use *_active names).
+ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_mw_planned_active numeric;
+ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS remit_mw_unplanned_active numeric;

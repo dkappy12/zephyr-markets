@@ -35,16 +35,11 @@ const CO2_INTENSITY = 0.9;
 const CO2_PRICE = 71;
 const COAL_EFF = 0.36;
 
-/** Matches ingestion wind scaling (17 GW / 8 m/s). */
-const WIND_MS_TO_GW = 2.125;
-
 /** EU storage seasonal reference benchmarks (not live DB values). */
 const REF_STORAGE_SAME_WEEK_LAST_YEAR_PCT = 28;
 const REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT = 35;
 
 const WIND_LINE = "#5c6b2e";
-/** Yesterday price overlay (GB Power chart). */
-const YDAY_LINE = "#9ca3af";
 
 function utcTodayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -119,6 +114,7 @@ type GasRow = {
 
 type WeatherRow = {
   forecast_time: string;
+  /** Wind at 100 m from Open-Meteo, m/s (column may be wind_speed_100m or windspeed_100m in API). */
   wind_speed_100m: number | null;
 };
 
@@ -210,12 +206,12 @@ function priceCellClass(price: number): string {
   return "text-ink";
 }
 
-/** Open-Meteo stores m/s in `wind_speed_100m`; implied GW for the linear desk model. */
-function windMsToImpliedGw(windSpeed100mMs: number): number {
-  return windSpeed100mMs * WIND_MS_TO_GW;
+/** `weather_forecasts` stores m/s; plot implied GW = m/s × 2.125. */
+function windMsToImpliedGw(windSpeedMs: number): number {
+  return windSpeedMs * 2.125;
 }
 
-function windGwForSp(
+function windImpliedGwForSp(
   sp: number,
   rows: WeatherRow[],
   todayYmd: string,
@@ -237,29 +233,9 @@ function windGwForSp(
     }
   }
   if (best == null) return null;
-  const w = parseNum(best.wind_speed_100m);
-  if (w == null) return null;
-  return windMsToImpliedGw(w);
-}
-
-const REMIT_DERATED_MW_RE = /derated by\s+([\d.]+)\s*MW/i;
-
-function sumRemitFromSignalDescriptions(
-  descriptions: string[],
-): { planned: number; unplanned: number } {
-  let planned = 0;
-  let unplanned = 0;
-  for (const desc of descriptions) {
-    const low = desc.toLowerCase();
-    const m = REMIT_DERATED_MW_RE.exec(desc);
-    if (!m) continue;
-    const mw = parseFloat(m[1]);
-    if (!Number.isFinite(mw)) continue;
-    if (low.includes("unplanned")) unplanned += mw;
-    else if (low.includes("planned")) planned += mw;
-    else planned += mw;
-  }
-  return { planned, unplanned };
+  const ms = parseNum(best.wind_speed_100m);
+  if (ms == null) return null;
+  return windMsToImpliedGw(ms);
 }
 
 function formatRemitMw(n: number): string {
@@ -342,17 +318,11 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
-  const [remitFromSignals, setRemitFromSignals] = useState<{
-    planned: number;
-    unplanned: number;
-  } | null>(null);
-
   useEffect(() => {
     const supabase = createBrowserClient();
     const today = utcTodayStr();
     const yesterday = utcYesterdayStr();
     const sevenAgo = utcDateMinusDays(7);
-    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     /** Cover settlement-date vs UTC midnight mismatches vs weather rows. */
     const wxRangeStart = `${utcDateMinusDays(1)}T00:00:00.000Z`;
     const wxRangeEnd = `${utcDatePlusDays(2)}T00:00:00.000Z`;
@@ -371,28 +341,12 @@ export default function MarketsPage() {
         /** Schema types may lag behind DB; assert so `volume` is selectable when present. */
         const mpSel = mpCols as typeof MP_COLS_WITH_VOLUME;
 
-        let ppRes = await supabase
+        const ppRes = await supabase
           .from("physical_premium")
-          .select(
-            "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost, remit_planned_mw, remit_unplanned_mw",
-          )
+          .select("*")
           .order("calculated_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (
-          ppRes.error &&
-          (isMissingColumnError(ppRes.error, "remit_planned_mw") ||
-            isMissingColumnError(ppRes.error, "remit_unplanned_mw"))
-        ) {
-          ppRes = await supabase
-            .from("physical_premium")
-            .select(
-              "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost",
-            )
-            .order("calculated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        }
 
         const [
           mpRes,
@@ -404,7 +358,6 @@ export default function MarketsPage() {
           ydayRes,
           wxRes,
           mp7dRes,
-          remitSigRes,
         ] = await Promise.all([
           supabase
             .from("market_prices")
@@ -470,11 +423,6 @@ export default function MarketsPage() {
             .order("price_date", { ascending: true })
             .order("settlement_period", { ascending: true })
             .limit(2500),
-          supabase
-            .from("signals")
-            .select("description")
-            .eq("type", "remit")
-            .gte("created_at", since24h),
         ]);
 
         if (ppRes.error) {
@@ -490,9 +438,13 @@ export default function MarketsPage() {
             solar_gw: parseNum(p.solar_gw),
             remit_mw_lost: parseNum(p.remit_mw_lost),
             remit_planned_mw:
-              parseNum(p.remit_planned_mw) ?? parseNum(p.remit_mw_planned),
+              parseNum(p.remit_mw_planned_active) ??
+              parseNum(p.remit_planned_mw) ??
+              parseNum(p.remit_mw_planned),
             remit_unplanned_mw:
-              parseNum(p.remit_unplanned_mw) ?? parseNum(p.remit_mw_unplanned),
+              parseNum(p.remit_mw_unplanned_active) ??
+              parseNum(p.remit_unplanned_mw) ??
+              parseNum(p.remit_mw_unplanned),
           });
         } else {
           setPhysicalPremium(null);
@@ -567,21 +519,15 @@ export default function MarketsPage() {
           setWeatherRows(
             (wxRes.data ?? []).map((r) => {
               const row = r as Record<string, unknown>;
+              const ms =
+                parseNum(row.wind_speed_100m) ??
+                parseNum(row.windspeed_100m);
               return {
                 forecast_time: String(row.forecast_time ?? ""),
-                wind_speed_100m: parseNum(row.wind_speed_100m),
+                wind_speed_100m: ms,
               };
             }),
           );
-        }
-
-        if (remitSigRes.error) {
-          setRemitFromSignals(null);
-        } else {
-          const descs = (remitSigRes.data ?? [])
-            .map((r) => String((r as Record<string, unknown>).description ?? ""))
-            .filter(Boolean);
-          setRemitFromSignals(sumRemitFromSignalDescriptions(descs));
         }
 
         if (mp7dRes.error) {
@@ -716,13 +662,14 @@ export default function MarketsPage() {
       .map((r) => {
         const sp = r.settlement_period;
         const minutes = spToMinutesFromMidnight(sp);
+        const windImpliedGw = windImpliedGwForSp(sp, weatherRows, todayDateStr);
         return {
           sp,
           minutes,
           timeLabel: spToUtcHHMM(sp),
-          priceToday: r.price_gbp_mwh,
-          priceYesterday: yMap.get(sp) ?? null,
-          windGw: windGwForSp(sp, weatherRows, todayDateStr),
+          today_price: r.price_gbp_mwh,
+          yesterday_price: yMap.get(sp) ?? null,
+          wind_implied_gw: windImpliedGw,
         };
       });
   }, [todayRows, yesterdayRows, weatherRows, todayDateStr]);
@@ -731,11 +678,11 @@ export default function MarketsPage() {
     if (gbMergedData.length === 0) return null;
     let best = gbMergedData[0];
     for (const d of gbMergedData) {
-      if (d.priceToday > best.priceToday) best = d;
+      if (d.today_price > best.today_price) best = d;
     }
     return {
       minutes: best.minutes,
-      price: best.priceToday,
+      price: best.today_price,
       sp: best.sp,
     };
   }, [gbMergedData]);
@@ -924,18 +871,11 @@ export default function MarketsPage() {
     if (ppP != null && ppU != null) {
       return `REMIT: ${formatRemitMw(ppP)} MW planned · ${formatRemitMw(ppU)} MW unplanned`;
     }
-    const sigSum =
-      remitFromSignals != null
-        ? remitFromSignals.planned + remitFromSignals.unplanned
-        : 0;
-    if (remitFromSignals != null && sigSum > 0) {
-      return `REMIT: ${formatRemitMw(remitFromSignals.planned)} MW planned · ${formatRemitMw(remitFromSignals.unplanned)} MW unplanned`;
-    }
     if (pp?.remit_mw_lost != null) {
       return `${formatRemitMw(pp.remit_mw_lost)} MW offline`;
     }
     return null;
-  }, [physicalPremium, remitFromSignals]);
+  }, [physicalPremium]);
 
   return (
     <div className="space-y-6">
@@ -1094,9 +1034,9 @@ export default function MarketsPage() {
                     axisLine={false}
                     tickLine={false}
                     width={40}
-                    domain={["auto", "auto"]}
+                    domain={[0, "auto"]}
                     label={{
-                      value: "GW (implied)",
+                      value: "GW",
                       angle: 90,
                       position: "insideRight",
                       fill: INK_MID,
@@ -1115,7 +1055,8 @@ export default function MarketsPage() {
                   <Area
                     yAxisId="left"
                     type="monotone"
-                    dataKey="priceToday"
+                    dataKey="today_price"
+                    name="Today"
                     stroke={BRAND_GREEN}
                     strokeWidth={1.5}
                     fill={BRAND_GREEN}
@@ -1125,11 +1066,11 @@ export default function MarketsPage() {
                   <Line
                     yAxisId="left"
                     type="monotone"
-                    dataKey="priceYesterday"
-                    stroke={YDAY_LINE}
+                    dataKey="yesterday_price"
+                    name="Yesterday"
+                    stroke="#9ca3af"
                     strokeWidth={1.5}
-                    strokeOpacity={0.7}
-                    strokeDasharray="4 2"
+                    strokeDasharray="5 3"
                     dot={false}
                     connectNulls
                     isAnimationActive={false}
@@ -1137,9 +1078,10 @@ export default function MarketsPage() {
                   <Line
                     yAxisId="right"
                     type="monotone"
-                    dataKey="windGw"
+                    dataKey="wind_implied_gw"
+                    name="Wind (implied GW)"
                     stroke={WIND_LINE}
-                    strokeWidth={1}
+                    strokeWidth={1.25}
                     dot={false}
                     connectNulls
                     isAnimationActive={false}
@@ -1169,21 +1111,45 @@ export default function MarketsPage() {
               </div>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-mid">
-            <span>
-              <span className="text-[#1D6B4E]">—</span> Today
-              <span className="mx-1 text-ink-light">·</span>
-              <span className="text-[#9ca3af]">··</span> Yesterday
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-[10px] text-ink-mid">
+            <span className="flex items-center gap-2">
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm bg-[#1D6B4E]"
+                aria-hidden
+              />
+              <span className="text-ink">Today</span>
             </span>
-            <span>
-              <span className="text-[#1D6B4E]">—</span> Price
-              <span className="mx-1 text-ink-light">·</span>
-              <span className="text-[#5c6b2e]">—</span> Wind GW
+            <span className="flex items-center gap-2">
+              <svg width="22" height="3" viewBox="0 0 22 3" aria-hidden className="shrink-0">
+                <line
+                  x1="0"
+                  y1="1.5"
+                  x2="22"
+                  y2="1.5"
+                  stroke="#9ca3af"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 3"
+                />
+              </svg>
+              <span className="text-ink">Yesterday</span>
+            </span>
+            <span className="flex items-center gap-2">
+              <svg width="22" height="3" viewBox="0 0 22 3" aria-hidden className="shrink-0">
+                <line
+                  x1="0"
+                  y1="1.5"
+                  x2="22"
+                  y2="1.5"
+                  stroke={WIND_LINE}
+                  strokeWidth="1.25"
+                />
+              </svg>
+              <span className="text-ink">Wind (implied GW)</span>
             </span>
           </div>
           <p className="mt-1 text-[10px] text-ink-light">
             {srmcRef != null
-              ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind: ECMWF 100 m (m/s) × ${WIND_MS_TO_GW} → implied GW`
+              ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind: ECMWF 100 m (m/s) × 2.125 → implied GW`
               : "No SRMC reference (no TTF or stored SRMC)"}
           </p>
           <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3 text-[11px] text-ink-mid">

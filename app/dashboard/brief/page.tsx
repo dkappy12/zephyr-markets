@@ -5,6 +5,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
+import Image from "next/image";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -107,7 +108,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 
   const content = (
     <>
-      <div className="flex h-32 w-56 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#f5f0e8] sm:h-36 sm:w-64">
+      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#f5f0e8] sm:h-36 sm:w-64">
         {showImg ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
@@ -118,15 +119,18 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
             onError={() => setImgFailed(true)}
           />
-        ) : null}
-        {!showImg ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
+        ) : (
+          <Image
             src={ARTICLE_THUMB_PLACEHOLDER}
             alt=""
-            className="h-full w-full object-cover"
+            fill
+            sizes="(max-width: 640px) 224px, 256px"
+            className="object-contain object-center"
+            unoptimized
+            draggable={false}
+            priority={false}
           />
-        ) : null}
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-start justify-between">

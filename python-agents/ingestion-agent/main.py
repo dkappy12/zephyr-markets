@@ -1627,6 +1627,8 @@ async def calculate_physical_premium() -> None:
             "remit_mw_lost": remit_total_mw,
             "remit_planned_mw": remit_planned_mw,
             "remit_unplanned_mw": remit_unplanned_mw,
+            "remit_mw_planned_active": remit_planned_mw,
+            "remit_mw_unplanned_active": remit_unplanned_mw,
             "regime": premium_regime,
             "source": PHYSICAL_PREMIUM_SOURCE,
         }
