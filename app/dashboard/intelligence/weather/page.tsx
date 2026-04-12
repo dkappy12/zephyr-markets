@@ -407,16 +407,10 @@ export default function WeatherPage() {
       return;
     }
     const maxR = Math.max(...pos);
-    if (maxR <= 1.5) {
-      console.log("Solar conversion: 0–1 normalised scale → ×8", {
-        maxR,
-      });
-    } else {
-      console.log(
-        "Solar conversion: W/m² scale (typical 0–1000) → ×0.000065",
-        { maxR },
-      );
-    }
+    console.log("Solar conversion: W/m² × 0.0167 → GW", {
+      maxR,
+      samplePeakGw: (maxR * SOLAR_RAD_TO_GW).toFixed(2),
+    });
   }, [wf168]);
 
   const { hourly, solarRadiationUnavailable } = useMemo(() => {
@@ -424,11 +418,6 @@ export default function WeatherPage() {
       .map((r) => r.solar_radiation)
       .filter((x): x is number => x != null && x > 0);
     const unavailable = wf168.length > 0 && pos.length === 0;
-    let solarRadToGw = SOLAR_RAD_TO_GW;
-    if (pos.length > 0) {
-      const maxR = Math.max(...pos);
-      solarRadToGw = maxR <= 1.5 ? 8 : 0.000065;
-    }
     const rows = wf168.map((r) => ({
       forecast_time: r.forecast_time,
       w10: r.wind_speed_10m,
@@ -437,7 +426,7 @@ export default function WeatherPage() {
       rad: r.solar_radiation,
     }));
     return {
-      hourly: buildHourlyPoints(rows, { solarRadToGw }),
+      hourly: buildHourlyPoints(rows, { solarRadToGw: SOLAR_RAD_TO_GW }),
       solarRadiationUnavailable: unavailable,
     };
   }, [wf168]);
