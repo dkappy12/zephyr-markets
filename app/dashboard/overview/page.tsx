@@ -286,33 +286,40 @@ export default function OverviewPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.32, delay: 0.05 }}
-        className="relative overflow-hidden rounded-[4px] border-[0.5px] border-gold/45 bg-card px-6 py-6"
+        className="relative overflow-visible rounded-[4px] border-[0.5px] border-gold/45 bg-card px-6 py-6"
       >
-        <div className="pointer-events-none absolute inset-0">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[4px]">
           <TopoBackground className="h-full w-full" lineOpacity={0.25} />
         </div>
         <div className="relative z-[1] flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-gold">
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center">
                 Physical premium
-                <span className="group relative inline-flex shrink-0">
+                <span className="group relative ml-1.5 inline-flex shrink-0 align-middle">
                   <span
-                    className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-ink-light"
+                    className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-gray-500"
                     aria-label="Physical premium score explained"
                   >
                     ⓘ
                   </span>
                   <span
                     role="tooltip"
-                    className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 w-max max-w-xs -translate-x-1/2 rounded border-[0.5px] border-ivory-border bg-ivory px-2.5 py-2 text-left text-xs font-normal normal-case leading-snug tracking-normal text-ink opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
+                    className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[280px] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
                   >
-                    The physical premium score measures how far the market price
-                    has diverged from our physically-implied price. Positive =
-                    market underpriced vs fundamentals (FIRMING). Negative =
-                    market overpriced vs fundamentals (SOFTENING). Score
-                    magnitude indicates confidence: ±1 moderate, ±2 significant, ±4
-                    extreme.
+                    <span className="block">
+                      The physical premium score measures how far the market price
+                      has diverged from our model&apos;s physically-implied price.
+                    </span>
+                    <span className="mt-3 block">
+                      Negative = market overpriced vs fundamentals (SOFTENING)
+                    </span>
+                    <span className="mt-1 block">
+                      Positive = market underpriced vs fundamentals (FIRMING)
+                    </span>
+                    <span className="mt-3 block">
+                      ±1 moderate · ±2 significant · ±4 extreme
+                    </span>
                   </span>
                 </span>
               </span>
