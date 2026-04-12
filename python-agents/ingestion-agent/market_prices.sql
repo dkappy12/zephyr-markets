@@ -17,9 +17,7 @@ COMMENT ON TABLE public.market_prices IS
 CREATE INDEX IF NOT EXISTS market_prices_market_price_date_idx
   ON public.market_prices (market, price_date DESC);
 
--- MID volume (MWh) when the source provides it; optional — add before selecting `volume` in the Markets UI.
-ALTER TABLE public.market_prices
-  ADD COLUMN IF NOT EXISTS volume numeric;
+-- Optional column `volume` (MWh) for Markets live tape: add in Supabase if needed.
 
 ALTER TABLE public.market_prices ENABLE ROW LEVEL SECURITY;
 
