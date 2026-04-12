@@ -2146,6 +2146,8 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
         raw_text = await _anthropic_morning_brief(
             system_prompt, user_prompt, max_tokens=3500, http=http
         )
+        logger.debug("brief_cycle: sleeping 10s before article search to avoid rate limit")
+        await asyncio.sleep(10)
         overnight_s, weather_s, one_risk_s, watch_s, book_s = parse_brief_sections(
             raw_text
         )
