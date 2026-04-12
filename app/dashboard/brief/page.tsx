@@ -100,7 +100,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 
   const content = (
     <>
-      <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+      <div className="flex h-32 w-56 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100 sm:h-36 sm:w-64">
         {showImg ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
