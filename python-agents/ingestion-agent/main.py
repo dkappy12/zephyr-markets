@@ -1821,6 +1821,15 @@ Summarise your findings in plain English. For each piece, include headline, publ
         logger.warning("further reading: step1 returned no text blocks")
         return []
 
+    text_for_step2 = text_from_step_1[:3000]
+    logger.debug(
+        "articles_search: step1 text length=%d, truncated to %d chars for step2",
+        len(text_from_step_1),
+        len(text_for_step2),
+    )
+    await asyncio.sleep(15)
+    logger.debug("articles_search: sleeping 15s between step1 and step2")
+
     # --- Step 2: format as JSON only (no tools) ---
     headers_format = {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -1830,7 +1839,7 @@ Summarise your findings in plain English. For each piece, include headline, publ
     format_user = f"""Convert these article summaries into a JSON array. Return ONLY the JSON array, starting with [ and ending with ]. No explanation, no markdown fences, no preamble.
 
 Article summaries to format:
-{text_from_step_1}
+{text_for_step2}
 
 Required JSON format:
 [
