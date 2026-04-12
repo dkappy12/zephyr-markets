@@ -44,18 +44,43 @@ const sectionLabelClass =
  * Bare domains (e.g. indexbox.com/foo) must be https — otherwise the browser
  * treats them as paths on the current origin.
  */
+const BLOCKED_ARTICLE_HOSTS = new Set([
+  "example.com",
+  "example.org",
+  "example.net",
+  "example.edu",
+  "test.com",
+  "localhost",
+]);
+
 function normalizeArticleHref(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const u = raw.trim();
   if (!u) return null;
+  let resolved: string;
   const lower = u.toLowerCase();
-  if (lower.startsWith("http://") || lower.startsWith("https://")) return u;
-  if (u.startsWith("//")) return `https:${u}`;
-  const host = u.split("/")[0] ?? "";
-  if (host.includes(".") && !host.startsWith(".")) {
-    return `https://${u.replace(/^\/+/, "")}`;
+  if (lower.startsWith("http://") || lower.startsWith("https://")) {
+    resolved = u;
+  } else if (u.startsWith("//")) {
+    resolved = `https:${u}`;
+  } else {
+    const host = u.split("/")[0] ?? "";
+    if (host.includes(".") && !host.startsWith(".")) {
+      resolved = `https://${u.replace(/^\/+/, "")}`;
+    } else {
+      return null;
+    }
   }
-  return null;
+  try {
+    const host = new URL(resolved).hostname.toLowerCase().split(":")[0];
+    if (BLOCKED_ARTICLE_HOSTS.has(host)) return null;
+    if (host.endsWith(".example.com") || host.endsWith(".example.org")) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return resolved;
 }
 
 const snippetClampStyle: CSSProperties = {

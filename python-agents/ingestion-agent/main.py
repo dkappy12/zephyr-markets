@@ -1863,6 +1863,57 @@ def _resolve_to_absolute_url(page_url: str, raw: str) -> str:
     return urljoin(base, raw)
 
 
+# Formatter models sometimes emit these when real URLs were not in the truncated input.
+_PLACEHOLDER_ARTICLE_HOSTS = frozenset(
+    {
+        "example.com",
+        "example.org",
+        "example.net",
+        "example.edu",
+        "test.com",
+        "invalid",
+        "localhost",
+    }
+)
+
+
+def _article_url_hostname(url: str) -> str:
+    try:
+        u = url.strip()
+        if not u.lower().startswith(("http://", "https://")):
+            u = "https://" + u.lstrip("/")
+        return (urlparse(u).netloc or "").lower().split(":")[0]
+    except Exception:
+        return ""
+
+
+def _is_placeholder_article_url(url: str | None) -> bool:
+    if not url or not isinstance(url, str):
+        return True
+    h = _article_url_hostname(url)
+    if not h:
+        return True
+    if h in _PLACEHOLDER_ARTICLE_HOSTS:
+        return True
+    if h.endswith(".example.com") or h.endswith(".example.org"):
+        return True
+    return False
+
+
+def _extract_http_urls_from_text(text: str) -> list[str]:
+    """Collect http(s) URLs in order (web search step puts real links in text / JSON)."""
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"https?://[^\s\>\]\)\"\'\,]+", text, flags=re.IGNORECASE):
+        u = m.group(0).rstrip(".,;:!?)]\"'")
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def _normalize_article_url(url: str | None) -> str | None:
     """Ensure article links are absolute https URLs (avoids same-origin relative paths)."""
     if not url or not isinstance(url, str):
@@ -1871,14 +1922,54 @@ def _normalize_article_url(url: str | None) -> str | None:
     if not u:
         return None
     if u.lower().startswith("http://") or u.lower().startswith("https://"):
-        return u
-    if u.startswith("//"):
-        return "https:" + u
-    # "example.com/path" or "www.example.com/..." → https://...
-    host = u.split("/")[0]
-    if "." in host and not host.startswith("."):
-        return "https://" + u.lstrip("/")
-    return None
+        nu = u
+    elif u.startswith("//"):
+        nu = "https:" + u
+    else:
+        # "bbc.co.uk/news/..." → https://...
+        host = u.split("/")[0]
+        if "." in host and not host.startswith("."):
+            nu = "https://" + u.lstrip("/")
+        else:
+            return None
+    if _is_placeholder_article_url(nu):
+        return None
+    return nu
+
+
+def _repair_brief_articles_with_search_urls(
+    articles: list[dict[str, Any]], extracted_urls: list[str]
+) -> list[dict[str, Any]]:
+    """Drop/repair URLs: use real links from web search; discard example.com hallucinations."""
+    pool = [
+        u
+        for u in extracted_urls
+        if not _is_placeholder_article_url(u)
+    ]
+    pool = list(dict.fromkeys(pool))
+    used: set[str] = set()
+    pi = 0
+    out: list[dict[str, Any]] = []
+    for a in articles:
+        if not isinstance(a, dict):
+            continue
+        raw_u = a.get("url")
+        nu = _normalize_article_url(raw_u) if isinstance(raw_u, str) else None
+        if nu and nu not in used:
+            used.add(nu)
+            a["url"] = nu
+            out.append(a)
+            continue
+        while pi < len(pool) and pool[pi] in used:
+            pi += 1
+        if pi < len(pool):
+            fixed = _normalize_article_url(pool[pi])
+            if fixed:
+                used.add(pool[pi])
+                a["url"] = fixed
+                pi += 1
+                out.append(a)
+    return out[:8]
 
 
 async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
@@ -1996,11 +2087,23 @@ Summarise your findings in plain English. For each piece, include headline, publ
         logger.warning("further reading: step1 returned no text blocks")
         return []
 
-    text_for_step2 = text_from_step_1[:3000]
+    # Include full response JSON so we still capture URLs if they only appear in tool/citation blocks.
+    search_blob = text_from_step_1 + "\n" + json.dumps(data1, default=str)
+    extracted_urls = _extract_http_urls_from_text(search_blob)
+    logger.info(
+        "further reading: extracted %s http(s) URLs from web search response",
+        len(extracted_urls),
+    )
+
+    # Truncating to 3k chars removed real URLs from the formatter input → Haiku invented
+    # example.com links. Keep a large slice so step 2 still sees actual article URLs.
+    _max_step2 = 48000
+    text_for_step2 = text_from_step_1[:_max_step2]
     logger.debug(
-        "articles_search: step1 text length=%d, truncated to %d chars for step2",
+        "articles_search: step1 text length=%d, step2 input length=%d (cap %d)",
         len(text_from_step_1),
         len(text_for_step2),
+        _max_step2,
     )
     await asyncio.sleep(60)
     logger.debug("articles_search: sleeping 60s between step1 and step2")
@@ -2014,6 +2117,11 @@ Summarise your findings in plain English. For each piece, include headline, publ
     format_user = f"""Convert these article summaries into a JSON array. Return ONLY the JSON array, starting with [ and ending with ]. No explanation, no markdown fences, no preamble.
 
 Only include articles published within the last 7 days. Today is {_today_short}. Exclude any article that appears older than 7 days. Order the array with the most recently published articles first.
+
+CRITICAL for "url":
+- Copy each URL exactly as it appears in the summaries below (https://...).
+- NEVER use example.com, example.org, test.com, placeholder domains, or invented URLs.
+- If you cannot find a real https URL for an item in the text below, OMIT that article from the array.
 
 Article summaries to format:
 {text_for_step2}
@@ -2059,6 +2167,12 @@ Required JSON format:
     if not parsed_ok:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
+        )
+    articles = _repair_brief_articles_with_search_urls(articles, extracted_urls)
+    if not articles and extracted_urls:
+        logger.warning(
+            "further reading: formatter returned no usable URLs; %s URLs were in search but lost in JSON",
+            len(extracted_urls),
         )
     return articles
 
