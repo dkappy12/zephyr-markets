@@ -870,7 +870,7 @@ export default function MarketsPage() {
   const remitBarDisplay = useMemo(() => {
     const mw = physicalPremium?.remit_mw_lost;
     if (mw == null) return null;
-    return `REMIT: ${formatRemitMw(mw)} MW active outages`;
+    return `${formatRemitMw(mw)} MW active outages`;
   }, [physicalPremium]);
 
   return (
