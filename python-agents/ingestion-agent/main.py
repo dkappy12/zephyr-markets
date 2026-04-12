@@ -1672,82 +1672,22 @@ def _parse_iso_dt(v: Any) -> datetime | None:
         return None
 
 
-async def _anthropic_further_reading_articles(
-    http: httpx.AsyncClient,
-    *,
-    wind_gw: float,
-    solar_gw: float,
-    ttf_eur: float,
-    n2ex_price: float,
-    direction: str,
-    remit_count: int,
-) -> list[dict[str, Any]]:
-    if not ANTHROPIC_API_KEY:
-        return []
-    user_content = f"""Search for 3-5 recent news articles (published in the last 48 hours) relevant to GB and European energy markets based on today's physical conditions:
-- Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
-- TTF: €{ttf_eur:.2f}/MWh, N2EX: £{n2ex_price:.2f}/MWh
-- Physical premium direction: {direction}
-- Active REMIT outages: {remit_count} outages
-
-Search for articles about: GB power prices, REMIT outages, European gas markets, wind generation, energy storage, UK electricity market. Prioritise articles from Reuters, Bloomberg, Financial Times, S&P Global Platts, ICIS, Montel, Argus Media, The Guardian energy section, BBC News energy.
-
-Return ONLY a JSON array with no other text:
-[
-  {{
-    "headline": "Full article headline",
-    "snippet": "First 150-200 characters of article body text followed by...",
-    "author": "Author name or null if not found",
-    "publication": "Publication name",
-    "url": "Full article URL",
-    "thumbnail_url": "Article thumbnail/og:image URL or null if not found"
-  }}
-]
-
-IMPORTANT: Your response must be ONLY a valid JSON array starting with [ and ending with ]. No explanation, no markdown, no preamble. Just the raw JSON array."""
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "web-search-2025-03-05",
-        "content-type": "application/json",
-    }
-    body: dict[str, Any] = {
-        "model": CLAUDE_BRIEF_MODEL,
-        "max_tokens": 2000,
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-        "messages": [{"role": "user", "content": user_content}],
-    }
-    resp = await http.post(
-        ANTHROPIC_MESSAGES_URL,
-        headers=headers,
-        json=body,
-        timeout=60.0,
-    )
-    logger.debug("articles_search: HTTP status=%s", resp.status_code)
-    logger.debug("articles_search: raw response=%s", resp.text[:2000])
-    resp.raise_for_status()
-    data = resp.json()
+def _anthropic_concat_text_blocks(data: dict[str, Any]) -> str:
+    """Join all assistant text blocks from a Messages API response."""
     blocks = data.get("content")
-    if isinstance(blocks, list):
-        for i, b in enumerate(blocks):
-            if isinstance(b, dict):
-                logger.debug(
-                    "articles_search: content block[%s] type=%s",
-                    i,
-                    b.get("type"),
-                )
-            else:
-                logger.debug(
-                    "articles_search: content block[%s] non-dict=%r",
-                    i,
-                    b,
-                )
-    else:
-        logger.debug(
-            "articles_search: content blocks missing or not a list: %r",
-            blocks,
-        )
+    if not isinstance(blocks, list):
+        return ""
+    parts: list[str] = []
+    for b in blocks:
+        if isinstance(b, dict) and b.get("type") == "text":
+            parts.append(str(b.get("text") or ""))
+    return "\n".join(parts).strip()
 
+
+def _parse_json_articles_array_from_response(
+    data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Parse list of article dicts from formatter response; bool is whether parse succeeded."""
     articles: list[dict[str, Any]] = []
     text_blocks = [
         (i, block)
@@ -1759,12 +1699,10 @@ IMPORTANT: Your response must be ONLY a valid JSON array starting with [ and end
         len(text_blocks),
         [i for i, _ in text_blocks],
     )
-
-    parsed_from_block: bool = False
+    parsed_from_block = False
     for i, block in reversed(text_blocks):
         try:
             text = str(block.get("text", "")).strip()
-            # Try direct parse first
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, list):
@@ -1777,7 +1715,6 @@ IMPORTANT: Your response must be ONLY a valid JSON array starting with [ and end
                     break
             except json.JSONDecodeError:
                 pass
-            # Try extracting JSON array from text
             start = text.find("[")
             end = text.rfind("]")
             if start != -1 and end != -1 and end > start:
@@ -1796,8 +1733,143 @@ IMPORTANT: Your response must be ONLY a valid JSON array starting with [ and end
                     pass
         except Exception as e:
             logger.debug("articles_search: block %d parse error: %s", i, e)
+    return articles, parsed_from_block
 
-    if not parsed_from_block:
+
+async def _brief_already_generated_today(http: httpx.AsyncClient) -> bool:
+    """True if the latest brief_entries row was generated on today's UTC date."""
+    resp = await http.get(
+        _brief_entries_rest_url(),
+        headers=_supabase_auth_headers(),
+        params={
+            "select": "generated_at",
+            "order": "generated_at.desc",
+            "limit": "1",
+        },
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    rows = resp.json()
+    if not isinstance(rows, list) or not rows:
+        return False
+    raw = rows[0].get("generated_at")
+    if raw is None:
+        return False
+    dt = _parse_iso_dt(raw)
+    if dt is None:
+        return False
+    today = datetime.now(timezone.utc).date()
+    return dt.date() == today
+
+
+async def _anthropic_further_reading_articles(
+    http: httpx.AsyncClient,
+    *,
+    wind_gw: float,
+    solar_gw: float,
+    ttf_eur: float,
+    n2ex_price: float,
+    direction: str,
+    remit_count: int,
+) -> list[dict[str, Any]]:
+    if not ANTHROPIC_API_KEY:
+        return []
+
+    # --- Step 1: web search, natural-language summaries (tools enabled) ---
+    headers_search = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05",
+        "content-type": "application/json",
+    }
+    search_prompt = f"""Search the web for 3-5 recent news articles (published in the last 48 hours) relevant to GB and European energy markets. Use this context:
+- Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
+- TTF: €{ttf_eur:.2f}/MWh, N2EX: £{n2ex_price:.2f}/MWh
+- Physical premium direction: {direction}
+- Active REMIT outages: {remit_count} outages
+
+Prioritise stories about: GB power prices, REMIT outages, European gas markets, wind generation, energy storage, UK electricity. Prefer reputable outlets (Reuters, Bloomberg, Financial Times, S&P Global Platts, ICIS, Montel, Argus Media, The Guardian energy section, BBC News energy).
+
+Summarise your findings in plain English. For each piece, include headline, publication, URL, author if known, and a short description of what it covers. Do not output JSON."""
+    body_search: dict[str, Any] = {
+        "model": CLAUDE_BRIEF_MODEL,
+        "max_tokens": 6000,
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "messages": [{"role": "user", "content": search_prompt}],
+    }
+    resp1 = await http.post(
+        ANTHROPIC_MESSAGES_URL,
+        headers=headers_search,
+        json=body_search,
+        timeout=120.0,
+    )
+    logger.debug("articles_search: step1 HTTP status=%s", resp1.status_code)
+    logger.debug("articles_search: step1 raw response=%s", resp1.text[:2000])
+    resp1.raise_for_status()
+    data1 = resp1.json()
+    blocks1 = data1.get("content")
+    if isinstance(blocks1, list):
+        for i, b in enumerate(blocks1):
+            if isinstance(b, dict):
+                logger.debug(
+                    "articles_search: step1 content block[%s] type=%s",
+                    i,
+                    b.get("type"),
+                )
+    text_from_step_1 = _anthropic_concat_text_blocks(data1)
+    if not text_from_step_1:
+        logger.warning("further reading: step1 returned no text blocks")
+        return []
+
+    # --- Step 2: format as JSON only (no tools) ---
+    headers_format = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    format_user = f"""Convert these article summaries into a JSON array. Return ONLY the JSON array, starting with [ and ending with ]. No explanation, no markdown fences, no preamble.
+
+Article summaries to format:
+{text_from_step_1}
+
+Required JSON format:
+[
+  {{
+    "headline": "Article headline",
+    "snippet": "First 150 characters of article content...",
+    "author": "Author name or null",
+    "publication": "Publication name",
+    "url": "Full article URL",
+    "thumbnail_url": null
+  }}
+]"""
+    body_format: dict[str, Any] = {
+        "model": CLAUDE_BRIEF_MODEL,
+        "max_tokens": 2000,
+        "system": "You are a JSON formatter. You output only valid JSON arrays, nothing else.",
+        "messages": [{"role": "user", "content": format_user}],
+    }
+    resp2 = await http.post(
+        ANTHROPIC_MESSAGES_URL,
+        headers=headers_format,
+        json=body_format,
+        timeout=120.0,
+    )
+    logger.debug("articles_search: step2 HTTP status=%s", resp2.status_code)
+    logger.debug("articles_search: step2 raw response=%s", resp2.text[:2000])
+    resp2.raise_for_status()
+    data2 = resp2.json()
+    blocks2 = data2.get("content")
+    if isinstance(blocks2, list):
+        for i, b in enumerate(blocks2):
+            if isinstance(b, dict):
+                logger.debug(
+                    "articles_search: step2 content block[%s] type=%s",
+                    i,
+                    b.get("type"),
+                )
+    articles, parsed_ok = _parse_json_articles_array_from_response(data2)
+    if not parsed_ok:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
         )
@@ -2232,8 +2304,25 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
 def scheduled_morning_brief() -> None:
     logger.info("brief_cycle: morning brief run starting")
     try:
-        asyncio.run(generate_morning_brief())
-        logger.info("brief_cycle: morning brief run finished")
+
+        async def _run() -> bool:
+            if os.environ.get("FORCE_BRIEF") == "true":
+                logger.info(
+                    "brief_cycle: FORCE_BRIEF=true, skipping today check",
+                )
+            else:
+                _require_supabase_env()
+                async with httpx.AsyncClient(follow_redirects=True) as http:
+                    if await _brief_already_generated_today(http):
+                        logger.info(
+                            "brief_cycle: brief already generated today, skipping",
+                        )
+                        return False
+            await generate_morning_brief()
+            return True
+
+        if asyncio.run(_run()):
+            logger.info("brief_cycle: morning brief run finished")
     except Exception as e:
         logger.error("Morning brief cycle aborted: %s", e, exc_info=True)
 
