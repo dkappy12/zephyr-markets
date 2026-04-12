@@ -183,20 +183,36 @@ function isMissingColumnError(
   return m.includes(c) && (m.includes("does not exist") || m.includes("schema cache"));
 }
 
-/** Avoid absurd % when prior price is near zero (e.g. £13 → £99). */
-const TREND_PCT_CAP = 250;
-const TREND_MIN_PRIOR_GBP = 8;
+/** Below this prior £/MWh, % change is omitted — % is misleading near zero; £ delta is not. */
+const MIN_PRIOR_GBP_FOR_PCT = 20;
 
-function n2exTapeTrendPct(
+/** Latest MID vs 6th row on tape: £/MWh move always; % only when prior is a stable baseline. */
+function n2exTapeMove(
   latest: number | null,
   priorRowPrice: number | null,
   enoughRows: boolean,
-): number | null {
-  if (latest == null || priorRowPrice == null || !enoughRows) return null;
-  if (!Number.isFinite(latest) || !Number.isFinite(priorRowPrice)) return null;
-  if (Math.abs(priorRowPrice) < TREND_MIN_PRIOR_GBP) return null;
-  const raw = ((latest - priorRowPrice) / priorRowPrice) * 100;
-  return Math.max(-TREND_PCT_CAP, Math.min(TREND_PCT_CAP, raw));
+): { deltaGbp: number | null; pct: number | null } {
+  if (latest == null || priorRowPrice == null || !enoughRows) {
+    return { deltaGbp: null, pct: null };
+  }
+  if (!Number.isFinite(latest) || !Number.isFinite(priorRowPrice)) {
+    return { deltaGbp: null, pct: null };
+  }
+  const deltaGbp = latest - priorRowPrice;
+  const pct =
+    priorRowPrice >= MIN_PRIOR_GBP_FOR_PCT
+      ? (deltaGbp / priorRowPrice) * 100
+      : null;
+  return { deltaGbp, pct };
+}
+
+/** Values stored as TWh/d; oversized magnitudes are legacy GWh·d⁻¹ in the same column. */
+function formatStorageInjectionTwhDay(twhPerDay: number): string {
+  const a = Math.abs(twhPerDay);
+  if (a > 8) {
+    return `${twhPerDay.toFixed(0)} GWh/d`;
+  }
+  return `${(twhPerDay * 1000).toFixed(0)} GWh/d (${twhPerDay.toFixed(3)} TWh/d)`;
 }
 
 export default function MarketsPage() {
@@ -424,7 +440,7 @@ export default function MarketsPage() {
   const latestN2ex = midRows[0]?.price_gbp_mwh ?? null;
   const sixAgo = midRows[6]?.price_gbp_mwh ?? null;
 
-  const trendPct = n2exTapeTrendPct(
+  const { deltaGbp: tapeDeltaGbp, pct: tapePct } = n2exTapeMove(
     latestN2ex,
     sixAgo,
     midRows.length > 6,
@@ -499,7 +515,7 @@ export default function MarketsPage() {
 
   const injectionRateTwhDay = useMemo(() => {
     const inj = LOC_ORDER.map((l) => storageByLoc[l]?.injection_twh).filter(
-      (v): v is number => v != null && Number.isFinite(v) && v >= 0,
+      (v): v is number => v != null && Number.isFinite(v),
     );
     if (inj.length === 0) return null;
     return inj.reduce((a, b) => a + b, 0) / inj.length;
@@ -579,10 +595,6 @@ export default function MarketsPage() {
       : null;
 
   const residualGw = physicalPremium?.residual_demand_gw;
-  const thermalDispGw =
-    spark != null && spark < 0 && residualGw != null && residualGw > 0
-      ? Math.min(residualGw, 45)
-      : null;
 
   const darkSpark = useMemo(() => {
     if (latestN2ex == null || ttfEur == null) return null;
@@ -683,15 +695,18 @@ export default function MarketsPage() {
                   ? "—"
                   : `£${latestN2ex.toFixed(2)}/MWh`}
             </p>
-            {trendPct != null ? (
+            {tapeDeltaGbp != null ? (
               <span
                 className={`text-sm tabular-nums ${
-                  trendPct >= 0 ? "text-bull" : "text-bear"
+                  tapeDeltaGbp >= 0 ? "text-bull" : "text-bear"
                 }`}
               >
-                {trendPct >= 0 ? "↑" : "↓"}{" "}
-                {trendPct >= 0 ? "+" : ""}
-                {trendPct.toFixed(1)}% vs 6 rows back
+                {tapeDeltaGbp >= 0 ? "↑" : "↓"}{" "}
+                {tapeDeltaGbp >= 0 ? "+" : "−"}
+                £{Math.abs(tapeDeltaGbp).toFixed(2)}/MWh vs 6 rows back
+                {tapePct != null
+                  ? ` (${tapePct >= 0 ? "+" : ""}${tapePct.toFixed(1)}%)`
+                  : ""}
               </span>
             ) : null}
           </div>
@@ -813,6 +828,10 @@ export default function MarketsPage() {
               : `€${ttfEur.toFixed(2)}/MWh`}
           </p>
           <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
+          <p className="mt-1 text-[10px] text-ink-light">
+            TTF quote time follows gas-market / gas-day reporting; power panels use
+            electricity settlement date.
+          </p>
           <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
             <div className="flex justify-between gap-4">
               <dt className="text-ink-mid">NBP equivalent</dt>
@@ -898,12 +917,19 @@ export default function MarketsPage() {
               : `£${darkSpark.toFixed(2)}/MWh vs coal SRMC (~£${coalSrmc?.toFixed(0) ?? "—"}/MWh at 36% eff. + ${CO2_INTENSITY} tCO2/MWh × £${CO2_PRICE}/t) — coal even further out of merit.`}
           </p>
           <p className="mt-2 text-xs text-ink-mid">
-            <span className="font-medium text-ink">Implied gas demand: </span>
-            {thermalDispGw != null
-              ? `Renewables displacing ~${thermalDispGw.toFixed(1)} GW of thermal capacity (vs residual demand).`
-              : spark != null && spark >= 0
-                ? "Thermal plant economically in the money."
-                : "—"}
+            <span className="font-medium text-ink">GB residual demand: </span>
+            {residualGw != null && residualGw > 0
+              ? `~${residualGw.toFixed(1)} GW after wind & solar (physical model).`
+              : "—"}
+            {spark != null && spark < 0 ? (
+              <span className="text-ink-mid">
+                {" "}
+                Negative spark: day-ahead power is below CCGT variable cost at this
+                TTF — not a GW displacement metric.
+              </span>
+            ) : spark != null && spark >= 0 ? (
+              <span className="text-ink-mid"> Thermal stack in the money at these levels.</span>
+            ) : null}
           </p>
           <p className="mt-1 text-[11px] text-ink-light">
             Implied CCGT margin vs gas + carbon + VOM
@@ -975,9 +1001,9 @@ export default function MarketsPage() {
           </p>
           <p className="mt-2 text-xs leading-relaxed text-ink-mid">
             {injectionDeltaTwhDay != null && injectionDeltaTwhDay > 0
-              ? `Injection season underway — continental storage building at approx ${injectionDeltaTwhDay.toFixed(2)} TWh/day (day-on-day injection delta, GIE).`
+              ? `Injection season — day-on-day injection delta ≈ ${formatStorageInjectionTwhDay(injectionDeltaTwhDay)} (GIE, EU hubs).`
               : injectionRateTwhDay != null
-                ? `Latest reported injection rate ~${injectionRateTwhDay.toFixed(2)} TWh/day (cross-location avg).`
+                ? `Latest reported injection ≈ ${formatStorageInjectionTwhDay(injectionRateTwhDay)} (cross-location avg).`
                 : "Injection trend: awaiting consecutive daily reads in the feed."}
           </p>
           <p className="mt-2 text-xs leading-relaxed text-ink-mid">

@@ -508,6 +508,11 @@ def _agsi_row_to_storage_record(
     wgv = _agsi_parse_float(item.get("workingGasVolume"))
     inj = _agsi_parse_float(item.get("injection"))
     wd = _agsi_parse_float(item.get("withdrawal"))
+    # GIE AGSI usually returns GWh/d; values ≫1 are almost certainly GWh → store as TWh
+    if inj is not None and abs(inj) > 2:
+        inj = inj / 1000.0
+    if wd is not None and abs(wd) > 2:
+        wd = wd / 1000.0
 
     return {
         "report_date": day,
@@ -1498,9 +1503,14 @@ async def calculate_physical_premium() -> None:
             r.raise_for_status()
             sigs = r.json()
             if isinstance(sigs, list):
+                seen_desc: set[str] = set()
                 for s in sigs:
                     if isinstance(s, dict) and s.get("description"):
-                        remit_descriptions.append(str(s["description"]))
+                        d = str(s["description"]).strip()
+                        if not d or d in seen_desc:
+                            continue
+                        seen_desc.add(d)
+                        remit_descriptions.append(d)
         except Exception as e:
             logger.warning("premium_cycle: REMIT signals fetch failed: %s", e)
 
@@ -1510,7 +1520,8 @@ async def calculate_physical_premium() -> None:
             remit_active_count,
             remit_total_24h,
         ) = _remit_active_planned_unplanned_mw(remit_descriptions, now_utc)
-        remit_total_mw = remit_planned_mw + (remit_unplanned_mw * 2.5)
+        # Sum derated MW only (no 2.5× on unplanned — that inflated headline remit_mw_lost)
+        remit_total_mw = remit_planned_mw + remit_unplanned_mw
         logger.info(
             "premium_cycle REMIT: %s active outages (%s total in 24h) = %.0f MW planned + %.0f MW unplanned",
             remit_active_count,
