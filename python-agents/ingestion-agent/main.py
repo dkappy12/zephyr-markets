@@ -1928,6 +1928,7 @@ Required JSON format:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
         )
+    logger.info("articles_search: fetching og:image for %d articles", len(articles))
     for article in articles:
         if not article.get("thumbnail_url"):
             u = article.get("url", "")
@@ -1935,9 +1936,10 @@ Required JSON format:
                 og = await _fetch_og_image(http, u.strip())
                 if og:
                     article["thumbnail_url"] = og
-                    logger.debug(
-                        "articles_search: og:image found for %s",
-                        article.get("publication", "unknown"),
+                    logger.info(
+                        "articles_search: og:image=%s for %s",
+                        og,
+                        article.get("publication"),
                     )
     return articles
 
@@ -2350,6 +2352,10 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             "source": BRIEF_SOURCE,
         }
 
+        logger.debug(
+            "articles_search: final articles before insert: %s",
+            json.dumps(articles, indent=2)[:500],
+        )
         await insert_brief_entry_http(http, row)
 
         preview = (overnight_s or exec_s or "").replace("\n", " ")[:100]
