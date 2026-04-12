@@ -1672,60 +1672,6 @@ def _parse_iso_dt(v: Any) -> datetime | None:
         return None
 
 
-def _extract_json_array_string(s: str) -> str:
-    i = s.find("[")
-    if i < 0:
-        return ""
-    depth = 0
-    for j in range(i, len(s)):
-        c = s[j]
-        if c == "[":
-            depth += 1
-        elif c == "]":
-            depth -= 1
-            if depth == 0:
-                return s[i : j + 1]
-    return ""
-
-
-def _parse_articles_json_from_anthropic_response(
-    data: dict[str, Any],
-) -> tuple[list[dict[str, Any]], bool]:
-    """Returns (articles, parsed_ok). parsed_ok False means text existed but no JSON array."""
-    blocks = data.get("content")
-    if not isinstance(blocks, list):
-        return [], True
-    text_chunks: list[str] = []
-    for b in blocks:
-        if not isinstance(b, dict):
-            continue
-        if b.get("type") == "text":
-            t = b.get("text")
-            if isinstance(t, str) and t.strip():
-                text_chunks.append(t.strip())
-    if not text_chunks:
-        return [], True
-    for raw in reversed(text_chunks):
-        s = raw.strip()
-        if s.startswith("```"):
-            lines = s.split("\n")
-            if len(lines) >= 2:
-                inner = "\n".join(lines[1:])
-                if inner.rstrip().endswith("```"):
-                    inner = inner.rstrip()[:-3].rstrip()
-                s = inner.strip()
-        for candidate in (s, _extract_json_array_string(s)):
-            if not candidate:
-                continue
-            try:
-                parsed = json.loads(candidate)
-                if isinstance(parsed, list):
-                    return [x for x in parsed if isinstance(x, dict)], True
-            except json.JSONDecodeError:
-                continue
-    return [], False
-
-
 async def _anthropic_further_reading_articles(
     http: httpx.AsyncClient,
     *,
@@ -1799,12 +1745,47 @@ Return ONLY a JSON array with no other text:
             "articles_search: content blocks missing or not a list: %r",
             blocks,
         )
-    out, parsed_ok = _parse_articles_json_from_anthropic_response(data)
-    if not parsed_ok:
+
+    articles: list[dict[str, Any]] = []
+    text_blocks = [
+        (i, block)
+        for i, block in enumerate(data.get("content", []))
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    logger.debug(
+        "articles_search: found %d text blocks at indices %s",
+        len(text_blocks),
+        [i for i, _ in text_blocks],
+    )
+
+    parsed_from_block: bool = False
+    for i, block in reversed(text_blocks):
+        try:
+            text = str(block.get("text", "")).strip()
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            text = text.strip()
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                articles = [x for x in parsed if isinstance(x, dict)]
+                parsed_from_block = True
+                logger.debug("articles_search: parsed JSON from block %d", i)
+                logger.debug(
+                    "articles_search: parsed JSON array from block %d with %d articles",
+                    i,
+                    len(articles),
+                )
+                break
+        except (json.JSONDecodeError, Exception):
+            continue
+
+    if not parsed_from_block:
         logger.warning(
-            "further reading: could not parse articles JSON from Claude response",
+            "further reading: could not parse articles JSON from any text block",
         )
-    return out
+    return articles
 
 
 async def _anthropic_morning_brief(
