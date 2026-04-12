@@ -87,14 +87,19 @@ function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
 
   return (
     <li>
-      <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 transition-shadow hover:shadow-md">
+      <a
+        href={a.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex cursor-pointer flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-inherit no-underline transition-shadow hover:shadow-md"
+      >
         <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
           {showImage ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={thumbUrl}
-                alt={a.headline}
+                alt=""
                 className="h-full w-full object-cover"
                 onError={() => setThumbFailed(true)}
               />
@@ -114,14 +119,9 @@ function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
               </span>
             ) : null}
           </div>
-          <a
-            href={a.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-serif text-lg leading-snug text-ink underline-offset-2 hover:underline"
-          >
+          <span className="font-serif text-lg leading-snug text-ink underline-offset-2 group-hover:underline">
             {a.headline}
-          </a>
+          </span>
           <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
             {a.snippet}
           </p>
@@ -129,7 +129,7 @@ function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
             <p className="text-[11px] text-ink-light">{a.author}</p>
           ) : null}
         </div>
-      </div>
+      </a>
     </li>
   );
 }

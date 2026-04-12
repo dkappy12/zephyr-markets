@@ -1873,7 +1873,7 @@ async def _anthropic_further_reading_articles(
         "anthropic-beta": "web-search-2025-03-05",
         "content-type": "application/json",
     }
-    search_prompt = f"""Search for news articles published in the last 48 hours only. Today's date is {_today_long}. Do not include any articles older than 48 hours. If you cannot find recent articles on a topic, skip it rather than returning old articles. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources: BBC News, The Guardian, Carbon Brief, Energy Monitor, Recharge News, Energy Voice, PV Magazine, Wind Power Monthly, Montel News, Cornwall Insight blog, NESO blog (nationalgrideso.com), Ofgem news (ofgem.gov.uk), GOV.UK press releases. Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
+    search_prompt = f"""Search for news articles published in the last 7 days. Today's date is {_today_long}. Do not include any articles older than 7 days. Prioritise the most recent articles first in how you order and emphasise your findings (newest and most relevant at the top). If you cannot find suitable articles on a topic within that window, skip it rather than returning out-of-date pieces. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources: BBC News, The Guardian, Carbon Brief, Energy Monitor, Recharge News, Energy Voice, PV Magazine, Wind Power Monthly, Montel News, Cornwall Insight blog, NESO blog (nationalgrideso.com), Ofgem news (ofgem.gov.uk), GOV.UK press releases. Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
 
 Use this context for relevance:
 - Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
@@ -1931,7 +1931,7 @@ Summarise your findings in plain English. For each piece, include headline, publ
     }
     format_user = f"""Convert these article summaries into a JSON array. Return ONLY the JSON array, starting with [ and ending with ]. No explanation, no markdown fences, no preamble.
 
-Only include articles published within the last 48 hours. Today is {_today_short}. Exclude any article that appears older than 48 hours.
+Only include articles published within the last 7 days. Today is {_today_short}. Exclude any article that appears older than 7 days. Order the array with the most recently published articles first.
 
 Article summaries to format:
 {text_for_step2}
@@ -1950,7 +1950,7 @@ Required JSON format:
 ]"""
     body_format: dict[str, Any] = {
         "model": CLAUDE_ARTICLES_FORMAT_MODEL,
-        "max_tokens": 2000,
+        "max_tokens": 1500,
         "system": "You are a JSON formatter. You output only valid JSON arrays, nothing else.",
         "messages": [{"role": "user", "content": format_user}],
     }
