@@ -95,6 +95,8 @@ PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
 
 CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
+# Further reading step 2 (JSON format only, no tools).
+CLAUDE_ARTICLES_FORMAT_MODEL = "claude-haiku-4-5-20251001"
 BRIEF_SOURCE = "Claude claude-sonnet-4-20250514"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
@@ -1827,8 +1829,8 @@ Summarise your findings in plain English. For each piece, include headline, publ
         len(text_from_step_1),
         len(text_for_step2),
     )
-    await asyncio.sleep(15)
-    logger.debug("articles_search: sleeping 15s between step1 and step2")
+    await asyncio.sleep(60)
+    logger.debug("articles_search: sleeping 60s between step1 and step2")
 
     # --- Step 2: format as JSON only (no tools) ---
     headers_format = {
@@ -1853,7 +1855,7 @@ Required JSON format:
   }}
 ]"""
     body_format: dict[str, Any] = {
-        "model": CLAUDE_BRIEF_MODEL,
+        "model": CLAUDE_ARTICLES_FORMAT_MODEL,
         "max_tokens": 2000,
         "system": "You are a JSON formatter. You output only valid JSON arrays, nothing else.",
         "messages": [{"role": "user", "content": format_user}],
