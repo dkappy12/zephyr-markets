@@ -2203,8 +2203,10 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
 
 
 def scheduled_morning_brief() -> None:
+    logger.info("brief_cycle: morning brief run starting")
     try:
         asyncio.run(generate_morning_brief())
+        logger.info("brief_cycle: morning brief run finished")
     except Exception as e:
         logger.error("Morning brief cycle aborted: %s", e, exc_info=True)
 
