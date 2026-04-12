@@ -17,7 +17,6 @@ import {
   HourlyForecastPoint,
   parseNum,
   RENEWABLE_DOM_GW,
-  SOLAR_RAD_TO_GW,
   SRMC_REF_GBP,
   TERRACOTTA,
   WIND_DROUGHT_GW,
@@ -76,8 +75,8 @@ function mapWfRaw(r: Record<string, unknown>): WfRow {
       parseNum(r.wind_speed_100m) ?? parseNum(r.windspeed_100m),
     temperature_2m: parseNum(r.temperature_2m),
     solar_radiation:
-      parseNum(r.solar_radiation) ??
       parseNum(r.direct_radiation) ??
+      parseNum(r.solar_radiation) ??
       parseNum((r as { solar?: unknown }).solar),
   };
 }
@@ -149,6 +148,80 @@ function negativePriceWindows(
   return out;
 }
 
+const TEMP_LINE_STROKE = "#9ca3af";
+
+type WindTooltipPayloadEntry = {
+  dataKey?: string | number;
+  value?: number | string;
+  color?: string;
+};
+
+function WindTempTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: readonly WindTooltipPayloadEntry[];
+  label?: string | number;
+}) {
+  if (!active || !payload?.length) return null;
+  const labels: Record<string, string> = {
+    windGw100: "Wind (implied GW)",
+    windGw10: "Wind lower bound",
+    windBandSpread: "Uncertainty spread",
+    tempC: "Temperature °C",
+  };
+  const filtered = [...payload].filter(
+    (e) => String(e.dataKey) !== "windBandBase",
+  );
+  let title = String(label ?? "");
+  try {
+    title = format(parseISO(String(label)), "EEE d MMM HH:mm") + " UTC";
+  } catch {
+    /* keep raw */
+  }
+  return (
+    <div
+      style={{
+        background: "#F5F0E8",
+        border: "1px solid #D4CCBB",
+        borderRadius: 6,
+        padding: "8px 12px",
+        fontSize: 12,
+      }}
+    >
+      <div
+        style={{
+          marginBottom: 4,
+          color: "#6b6b5a",
+          fontWeight: 500,
+        }}
+      >
+        {title}
+      </div>
+      {filtered.map((entry, i) => {
+        const key = String(entry.dataKey ?? "");
+        const text = labels[key] ?? key;
+        const raw = entry.value;
+        const value =
+          typeof raw === "number"
+            ? raw.toFixed(1)
+            : raw != null
+              ? String(raw)
+              : "";
+        const unit = key === "tempC" ? "°C" : " GW";
+        return (
+          <div key={i} style={{ color: entry.color, marginBottom: 2 }}>
+            {text}: {value}
+            {unit}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function WeatherPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,7 +248,7 @@ export default function WeatherPage() {
     async function load() {
       setLoadError(null);
       const wfSel =
-        "forecast_time, wind_speed_10m, wind_speed_100m, temperature_2m, solar_radiation";
+        "forecast_time, wind_speed_10m, wind_speed_100m, temperature_2m, solar_radiation, direct_radiation";
 
       const [
         wfRes,
@@ -220,12 +293,25 @@ export default function WeatherPage() {
       ]);
 
       if (wfRes.error) setLoadError(wfRes.error.message);
-      else
-        setWf168(
-          (wfRes.data ?? []).map((r) =>
-            mapWfRaw(r as Record<string, unknown>),
-          ),
-        );
+      else {
+        const raw168 = (wfRes.data ?? []) as Record<string, unknown>[];
+        const mapped168 = raw168.map((r) => mapWfRaw(r));
+        if (typeof console !== "undefined" && console.log) {
+          console.log(
+            "solar data sample:",
+            mapped168.slice(0, 24).map((d, i) => {
+              const r = raw168[i] ?? {};
+              const direct = parseNum(r.direct_radiation);
+              return {
+                time: d.forecast_time,
+                radiation: direct,
+                solar_gw: (direct ?? 0) * 0.000065,
+              };
+            }),
+          );
+        }
+        setWf168(mapped168);
+      }
 
       if (!yfRes.error && yfRes.data) {
         setWfYesterday(
@@ -324,16 +410,20 @@ export default function WeatherPage() {
   const statDroughtPct = useMemo(() => droughtPct(hourly), [hourly]);
 
   const statPeakSolar = useMemo(() => {
+    if (hourly.length === 0) return null;
     let best: HourlyForecastPoint | null = null;
+    let maxGw = -Infinity;
     for (const h of hourly) {
-      const s = h.solarGw;
-      if (s == null || s < 0.1) continue;
-      if (!best || (s > (best.solarGw ?? 0))) best = h;
+      const s = h.solarGw ?? 0;
+      if (s > maxGw) {
+        maxGw = s;
+        best = h;
+      }
     }
-    if (!best) return null;
+    if (maxGw <= 0 || best == null) return "pending" as const;
     return {
-      gw: best.solarGw!,
-      label: `${formatDayLabel(best.forecast_time)}`,
+      gw: best.solarGw ?? 0,
+      label: formatDayLabel(best.forecast_time),
     };
   }, [hourly]);
 
@@ -516,7 +606,7 @@ export default function WeatherPage() {
         "yyyy-MM-dd",
       );
       const solar =
-        h.solarGw != null && h.solarGw > 0.1 ? h.solarGw : null;
+        h.solarGw != null && h.solarGw > 0.05 ? h.solarGw : null;
       let actual: number | null = null;
       if (day === todayKey) {
         actual = actualByHour.get(fk) ?? null;
@@ -532,14 +622,17 @@ export default function WeatherPage() {
 
   const solarPeakWeek = useMemo(() => {
     let best: HourlyForecastPoint | null = null;
+    let maxGw = -Infinity;
     for (const h of hourly) {
-      const s = h.solarGw;
-      if (s == null || s < 0.1) continue;
-      if (!best || s > (best.solarGw ?? 0)) best = h;
+      const s = h.solarGw ?? 0;
+      if (s > maxGw) {
+        maxGw = s;
+        best = h;
+      }
     }
-    if (!best?.solarGw) return null;
+    if (!best || maxGw <= 0) return null;
     return {
-      gw: best.solarGw,
+      gw: maxGw,
       day: formatDayLabel(best.forecast_time),
       time: formatInTimeZone(
         parseISO(best.forecast_time),
@@ -575,7 +668,7 @@ export default function WeatherPage() {
         const sg = p.solarGw ?? 0;
         if (sg > (best.solarGw ?? 0)) best = p;
       }
-      if ((best.solarGw ?? 0) > 0.1)
+      if ((best.solarGw ?? 0) > 0.05)
         dots.push({
           forecast_time: best.forecast_time,
           solarGw: best.solarGw!,
@@ -697,9 +790,13 @@ export default function WeatherPage() {
         <div>
           <p className={sectionLabel}>Peak solar</p>
           <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-            {loading || !statPeakSolar
+            {loading
               ? "…"
-              : `${statPeakSolar.gw.toFixed(1)} GW on ${statPeakSolar.label}`}
+              : statPeakSolar === "pending"
+                ? "Data pending"
+                : statPeakSolar
+                  ? `${statPeakSolar.gw.toFixed(1)} GW on ${statPeakSolar.label}`
+                  : "—"}
           </p>
         </div>
       </motion.div>
@@ -765,15 +862,17 @@ export default function WeatherPage() {
                   }}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fdfbf7",
-                    border: "0.5px solid #d9d2c4",
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
-                  labelFormatter={(iso) =>
-                    format(parseISO(String(iso)), "EEE d MMM HH:mm") + " UTC"
-                  }
+                  content={(props) => (
+                    <WindTempTooltip
+                      active={props.active}
+                      payload={
+                        props.payload as
+                          | readonly WindTooltipPayloadEntry[]
+                          | undefined
+                      }
+                      label={props.label}
+                    />
+                  )}
                 />
                 <Area
                   yAxisId="w"
@@ -818,7 +917,7 @@ export default function WeatherPage() {
                   yAxisId="t"
                   type="monotone"
                   dataKey="tempC"
-                  stroke={GREY_TEMP}
+                  stroke={TEMP_LINE_STROKE}
                   strokeWidth={1.25}
                   dot={false}
                   connectNulls
@@ -1005,9 +1104,9 @@ export default function WeatherPage() {
                 </p>
               </>
             ) : (
-              <p className="mt-2 text-xs text-ink-mid">
-                Insufficient data to match yesterday&apos;s forecast to physical
-                premium snapshots.
+              <p className="mt-2 text-xs italic text-ink-light">
+                Forecast accuracy comparison requires 24h of matched data. Check
+                back tomorrow for yesterday&apos;s accuracy metrics.
               </p>
             )}
           </div>
@@ -1397,7 +1496,7 @@ export default function WeatherPage() {
                 <Line
                   type="monotone"
                   dataKey="tempC"
-                  stroke={GREY_TEMP}
+                  stroke={TEMP_LINE_STROKE}
                   strokeWidth={1.5}
                   dot={false}
                   connectNulls

@@ -4,7 +4,7 @@ import { format, parseISO } from "date-fns";
 export const WIND_MS_TO_GW = 2.125;
 
 /** W/m² direct radiation → implied solar GW (GB scaling) */
-export const SOLAR_RAD_TO_GW = 0.000065;
+export const SOLAR_RAD_TO_GW = 0.00008;
 
 export const APRIL_TEMP_NORM_C = 9.0;
 export const WIND_DROUGHT_GW = 10;
