@@ -294,7 +294,28 @@ export default function OverviewPage() {
         <div className="relative z-[1] flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-gold">
-              Physical premium
+              <span className="inline-flex items-center gap-1.5">
+                Physical premium
+                <span className="group relative inline-flex shrink-0">
+                  <span
+                    className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-ink-light"
+                    aria-label="Physical premium score explained"
+                  >
+                    ⓘ
+                  </span>
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 w-max max-w-xs -translate-x-1/2 rounded border-[0.5px] border-ivory-border bg-ivory px-2.5 py-2 text-left text-xs font-normal normal-case leading-snug tracking-normal text-ink opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
+                  >
+                    The physical premium score measures how far the market price
+                    has diverged from our physically-implied price. Positive =
+                    market underpriced vs fundamentals (FIRMING). Negative =
+                    market overpriced vs fundamentals (SOFTENING). Score
+                    magnitude indicates confidence: ±1 moderate, ±2 significant, ±4
+                    extreme.
+                  </span>
+                </span>
+              </span>
             </p>
             <p className="mt-2 font-serif text-5xl leading-none text-ink tabular-nums">
               {premiumLoading

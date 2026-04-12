@@ -42,39 +42,39 @@ const sectionLabelClass =
 function BriefArticleThumbnailPlaceholder() {
   return (
     <svg
-      viewBox="0 0 128 128"
+      viewBox="0 0 224 128"
       className="h-full w-full"
       aria-hidden
     >
-      <rect width="128" height="128" fill="#F5F0E8" />
+      <rect width="224" height="128" fill="#F5F0E8" />
       <line
-        x1="10"
+        x1="8"
         y1="102"
-        x2="118"
+        x2="216"
         y2="102"
         stroke="#3D3D2E"
         strokeWidth="1.25"
         strokeLinecap="round"
       />
       <line
-        x1="64"
+        x1="112"
         y1="102"
-        x2="64"
+        x2="112"
         y2="46"
         stroke="#3D3D2E"
         strokeWidth="2.25"
         strokeLinecap="round"
       />
-      <circle cx="64" cy="42" r="3.5" fill="#3D3D2E" />
+      <circle cx="112" cy="42" r="3.5" fill="#3D3D2E" />
       <g
         stroke="#3D3D2E"
         strokeWidth="1.75"
         strokeLinecap="round"
         fill="none"
       >
-        <line x1="64" y1="42" x2="64" y2="14" />
-        <line x1="64" y1="42" x2="94" y2="58" />
-        <line x1="64" y1="42" x2="34" y2="58" />
+        <line x1="112" y1="42" x2="112" y2="14" />
+        <line x1="112" y1="42" x2="142" y2="58" />
+        <line x1="112" y1="42" x2="82" y2="58" />
       </g>
     </svg>
   );
@@ -88,7 +88,7 @@ function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
   return (
     <li>
       <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 transition-shadow hover:shadow-md">
-        <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
+        <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
           {showImage ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
