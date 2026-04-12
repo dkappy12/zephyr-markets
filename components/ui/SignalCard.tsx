@@ -4,7 +4,6 @@ import { motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
-  Anchor,
   Cloud,
   Gauge,
   type LucideIcon,
@@ -16,7 +15,7 @@ export type SignalBorderTone = "bull" | "bear" | "watch" | "neutral";
 export type SignalCardProps = {
   tone: SignalBorderTone;
   /** DB `type` (e.g. remit → warning icon); drives Lucide icon. */
-  type?: "flow" | "weather" | "lng" | "alert" | "generic" | "remit";
+  type?: "flow" | "weather" | "alert" | "generic" | "remit";
   title: string;
   description: string;
   source?: string;
@@ -36,7 +35,6 @@ const borderClass: Record<SignalBorderTone, string> = {
 const typeIcon: Record<NonNullable<SignalCardProps["type"]>, LucideIcon> = {
   flow: Gauge,
   weather: Cloud,
-  lng: Anchor,
   alert: AlertTriangle,
   remit: AlertTriangle,
   generic: Activity,

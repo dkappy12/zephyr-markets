@@ -22,7 +22,6 @@ const tags = [
   "GB Power",
   "NBP",
   "TTF",
-  "LNG",
   "Carbon",
   "EUA",
 ] as const;
@@ -32,7 +31,7 @@ const tickerItems = [
   "NBP Day-Ahead · 78.2",
   "TTF Month · 34.10",
   "EU Carbon Dec · 68.20",
-  "LNG DES NW Eur · 9.85",
+  "GB Baseload Week · 51.2",
   "System Wind · 12.8 GW",
   "Interconnector Nemo · 880 MW",
   "Rough Storage · 82%",
@@ -210,7 +209,7 @@ export default function Home() {
           <div className="grid gap-10 md:grid-cols-3 md:gap-0 md:divide-x-[0.5px] md:divide-ivory-border">
             <FeatureColumn
               title="Physical signals"
-              body="REMIT filings, interconnector flows, LNG arrivals, and wind error land as tradable context for GB Power, NBP, and TTF."
+              body="REMIT filings, interconnector flows, and wind error land as tradable context for GB Power, NBP, and TTF."
               className="md:pr-8"
             />
             <FeatureColumn

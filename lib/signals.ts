@@ -70,7 +70,7 @@ function mapDbTypeToCardType(
   if (t === "remit") return "remit";
   if (t === "flow") return "flow";
   if (t === "weather") return "weather";
-  if (t === "lng") return "lng";
+  if (t === "lng") return "generic";
   if (t === "alert") return "alert";
   return "generic";
 }

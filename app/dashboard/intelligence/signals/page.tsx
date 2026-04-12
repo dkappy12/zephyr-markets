@@ -15,7 +15,6 @@ const filters = [
   "All",
   "GB Power",
   "Gas",
-  "LNG",
   "Carbon",
   "REMIT",
 ] as const;

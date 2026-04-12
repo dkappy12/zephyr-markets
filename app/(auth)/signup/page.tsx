@@ -10,7 +10,6 @@ const markets = [
   "GB Power",
   "NBP",
   "TTF",
-  "LNG",
   "Carbon",
   "Continental European Power",
 ] as const;

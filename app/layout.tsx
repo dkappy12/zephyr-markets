@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Zephyr Markets",
     description:
-      "Portfolio intelligence for power and gas: REMIT, LNG, weather, storage, and your book in one place.",
+      "Portfolio intelligence for power and gas: REMIT, weather, storage, and your book in one place.",
     url: "https://zephyr.markets",
     siteName: "Zephyr Markets",
     locale: "en_GB",
