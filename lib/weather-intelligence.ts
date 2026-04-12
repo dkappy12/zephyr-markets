@@ -44,10 +44,11 @@ export function windGwFromMs(ms: number | null): number | null {
 
 export function solarGwFromRadiation(
   wPerM2: number | null | undefined,
+  radToGw: number = SOLAR_RAD_TO_GW,
 ): number | null {
   const r = parseNum(wPerM2);
   if (r == null) return null;
-  return r * SOLAR_RAD_TO_GW;
+  return r * radToGw;
 }
 
 export type HourlyForecastPoint = {
@@ -71,7 +72,9 @@ export function buildHourlyPoints(
     temp: number | null;
     rad: number | null;
   }>,
+  options?: { solarRadToGw?: number },
 ): HourlyForecastPoint[] {
+  const solarFactor = options?.solarRadToGw ?? SOLAR_RAD_TO_GW;
   const out: HourlyForecastPoint[] = [];
   for (const r of rows) {
     let w100 = windGwFromMs(r.w100);
@@ -84,7 +87,7 @@ export function buildHourlyPoints(
     const t = parseISO(r.forecast_time);
     const h = t.getUTCHours();
     const base = demandBaselineGwUtcHour(h);
-    const solar = solarGwFromRadiation(r.rad) ?? 0;
+    const solar = solarGwFromRadiation(r.rad, solarFactor) ?? 0;
     const residual = Math.max(0, base - w100 - solar);
     out.push({
       forecast_time: r.forecast_time,

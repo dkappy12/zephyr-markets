@@ -17,6 +17,7 @@ import {
   HourlyForecastPoint,
   parseNum,
   RENEWABLE_DOM_GW,
+  SOLAR_RAD_TO_GW,
   SRMC_REF_GBP,
   TERRACOTTA,
   WIND_DROUGHT_GW,
@@ -28,7 +29,13 @@ import {
 import { format, parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Area,
   AreaChart,
@@ -145,47 +152,62 @@ function negativePriceWindows(
 
 const TEMP_LINE_STROKE = "#9ca3af";
 
-type WindTooltipPayloadEntry = {
-  dataKey?: string | number;
+const TOOLTIP_BOX: CSSProperties = {
+  background: "#F5F0E8",
+  border: "1px solid #D4CCBB",
+  borderRadius: 6,
+  padding: "8px 12px",
+  fontSize: 12,
+};
+
+type TooltipPayloadEntry = {
+  dataKey?: string | number | ((obj: unknown) => unknown);
   value?: number | string;
   color?: string;
 };
 
-function WindTempTooltip({
+function formatChartTooltipTime(label: unknown): string {
+  try {
+    const d = new Date(String(label));
+    if (Number.isNaN(d.getTime())) return String(label ?? "");
+    return (
+      d.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      }) +
+      " " +
+      d.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+  } catch {
+    return String(label ?? "");
+  }
+}
+
+function ChartTooltip({
   active,
   payload,
   label,
+  series,
 }: {
   active?: boolean;
-  payload?: readonly WindTooltipPayloadEntry[];
+  payload?: readonly TooltipPayloadEntry[];
   label?: string | number;
+  series: Record<string, string>;
 }) {
   if (!active || !payload?.length) return null;
-  const labels: Record<string, string> = {
-    windGw100: "Wind (implied GW)",
-    windGw10: "Wind lower bound",
-    windBandSpread: "Uncertainty spread",
-    tempC: "Temperature °C",
-  };
-  const filtered = [...payload].filter(
-    (e) => String(e.dataKey) !== "windBandBase",
-  );
-  let title = String(label ?? "");
-  try {
-    title = format(parseISO(String(label)), "EEE d MMM HH:mm") + " UTC";
-  } catch {
-    /* keep raw */
-  }
+  const allowed = new Set(Object.keys(series));
+  const rows = [...payload].filter((e) => {
+    const dk = e.dataKey;
+    if (typeof dk === "function") return false;
+    return allowed.has(String(dk ?? ""));
+  });
+  if (rows.length === 0) return null;
   return (
-    <div
-      style={{
-        background: "#F5F0E8",
-        border: "1px solid #D4CCBB",
-        borderRadius: 6,
-        padding: "8px 12px",
-        fontSize: 12,
-      }}
-    >
+    <div style={TOOLTIP_BOX}>
       <div
         style={{
           marginBottom: 4,
@@ -193,11 +215,11 @@ function WindTempTooltip({
           fontWeight: 500,
         }}
       >
-        {title}
+        {formatChartTooltipTime(label)}
       </div>
-      {filtered.map((entry, i) => {
+      {rows.map((entry, i) => {
         const key = String(entry.dataKey ?? "");
-        const text = labels[key] ?? key;
+        const text = series[key] ?? key;
         const raw = entry.value;
         const value =
           typeof raw === "number"
@@ -205,14 +227,38 @@ function WindTempTooltip({
             : raw != null
               ? String(raw)
               : "";
-        const unit = key === "tempC" ? "°C" : " GW";
         return (
           <div key={i} style={{ color: entry.color, marginBottom: 2 }}>
             {text}: {value}
-            {unit}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function tooltipPayload(p: { payload?: unknown } | undefined) {
+  return p?.payload as readonly TooltipPayloadEntry[] | undefined;
+}
+
+function MarketImplicationBox({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`bg-transparent rounded-[6px] border border-solid border-[#D4CCBB] border-l-[3px] border-l-[#1D6B4E] ${className}`}
+      style={{ padding: "16px 20px" }}
+    >
+      <p className="text-[9px] font-normal uppercase tracking-[0.1em] text-[#9ca3af]">
+        MARKET IMPLICATION
+      </p>
+      <div className="mt-2 text-[13px] leading-[1.6] text-[#3D3D2E]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -291,20 +337,6 @@ export default function WeatherPage() {
       else {
         const raw168 = (wfRes.data ?? []) as Record<string, unknown>[];
         const mapped168 = raw168.map((r) => mapWfRaw(r));
-        if (typeof console !== "undefined" && console.log) {
-          console.log(
-            "solar data sample:",
-            mapped168.slice(0, 24).map((d, i) => {
-              const r = raw168[i] ?? {};
-              const rad = parseNum(r.solar_radiation);
-              return {
-                time: d.forecast_time,
-                radiation: rad,
-                solar_gw: (rad ?? 0) * 0.000065,
-              };
-            }),
-          );
-        }
         setWf168(mapped168);
       }
 
@@ -356,7 +388,47 @@ export default function WeatherPage() {
     load().finally(() => setLoading(false));
   }, []);
 
-  const hourly = useMemo(() => {
+  useEffect(() => {
+    if (wf168.length === 0) return;
+    console.log(
+      "solar_radiation sample:",
+      wf168.slice(0, 24).map((d) => ({
+        time: d.forecast_time,
+        radiation: d.solar_radiation,
+      })),
+    );
+    const pos = wf168
+      .map((r) => r.solar_radiation)
+      .filter((x): x is number => x != null && x > 0);
+    if (pos.length === 0) {
+      console.log(
+        "Solar radiation: all values zero or missing — check ingestion and future daytime hours",
+      );
+      return;
+    }
+    const maxR = Math.max(...pos);
+    if (maxR <= 1.5) {
+      console.log("Solar conversion: 0–1 normalised scale → ×8", {
+        maxR,
+      });
+    } else {
+      console.log(
+        "Solar conversion: W/m² scale (typical 0–1000) → ×0.000065",
+        { maxR },
+      );
+    }
+  }, [wf168]);
+
+  const { hourly, solarRadiationUnavailable } = useMemo(() => {
+    const pos = wf168
+      .map((r) => r.solar_radiation)
+      .filter((x): x is number => x != null && x > 0);
+    const unavailable = wf168.length > 0 && pos.length === 0;
+    let solarRadToGw = SOLAR_RAD_TO_GW;
+    if (pos.length > 0) {
+      const maxR = Math.max(...pos);
+      solarRadToGw = maxR <= 1.5 ? 8 : 0.000065;
+    }
     const rows = wf168.map((r) => ({
       forecast_time: r.forecast_time,
       w10: r.wind_speed_10m,
@@ -364,7 +436,10 @@ export default function WeatherPage() {
       temp: r.temperature_2m,
       rad: r.solar_radiation,
     }));
-    return buildHourlyPoints(rows);
+    return {
+      hourly: buildHourlyPoints(rows, { solarRadToGw }),
+      solarRadiationUnavailable: unavailable,
+    };
   }, [wf168]);
 
   const chartWindTemp = useMemo(() => {
@@ -858,14 +933,14 @@ export default function WeatherPage() {
                 />
                 <Tooltip
                   content={(props) => (
-                    <WindTempTooltip
+                    <ChartTooltip
                       active={props.active}
-                      payload={
-                        props.payload as
-                          | readonly WindTooltipPayloadEntry[]
-                          | undefined
-                      }
+                      payload={tooltipPayload(props)}
                       label={props.label}
+                      series={{
+                        windGw100: "Wind GW",
+                        tempC: "Temp °C",
+                      }}
                     />
                   )}
                 />
@@ -1035,10 +1110,10 @@ export default function WeatherPage() {
                 on {largestRamp.day}
               </p>
             ) : null}
-            <p className="mt-2 italic text-ink-light">
-              Wind drought periods create gas-marginal conditions. CCGT SRMC at £
-              {SRMC_REF_GBP.toFixed(2)}/MWh provides the price ceiling.
-            </p>
+            <MarketImplicationBox className="mt-2">
+              Wind drought periods create gas-marginal conditions. CCGT SRMC at
+              £{SRMC_REF_GBP.toFixed(2)}/MWh provides the price ceiling.
+            </MarketImplicationBox>
           </div>
         </div>
 
@@ -1112,11 +1187,19 @@ export default function WeatherPage() {
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
         <p className={sectionLabel}>7-Day Solar Generation Forecast</p>
         <p className="mt-1 text-[11px] italic text-ink-light">
-          Derived from direct radiation forecast · peak generation typically
+          Derived from solar radiation forecast (W/m²) · peak generation typically
           10:00–15:00 UTC
         </p>
         <div className="mt-4 h-[160px] min-h-[160px]">
-          {solarChartData.length > 0 ? (
+          {loading ? (
+            <div className="flex h-[160px] items-center text-sm text-ink-mid">
+              Loading…
+            </div>
+          ) : solarRadiationUnavailable ? (
+            <div className="flex h-[160px] items-center justify-center px-4 text-center text-sm text-ink-mid">
+              Solar radiation data not yet available from forecast provider
+            </div>
+          ) : solarChartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
               <ComposedChart
                 data={solarChartData}
@@ -1154,12 +1237,17 @@ export default function WeatherPage() {
                   }}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fdfbf7",
-                    border: "0.5px solid #d9d2c4",
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={tooltipPayload(props)}
+                      label={props.label}
+                      series={{
+                        solarForecast: "Solar GW",
+                        solarActual: "Actual solar (MW)",
+                      }}
+                    />
+                  )}
                 />
                 <Area
                   type="monotone"
@@ -1310,12 +1398,16 @@ export default function WeatherPage() {
                   }}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fdfbf7",
-                    border: "0.5px solid #d9d2c4",
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={tooltipPayload(props)}
+                      label={props.label}
+                      series={{
+                        residualGw: "Residual demand GW",
+                      }}
+                    />
+                  )}
                 />
                 <Area
                   type="monotone"
@@ -1459,12 +1551,16 @@ export default function WeatherPage() {
                   }}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fdfbf7",
-                    border: "0.5px solid #d9d2c4",
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={tooltipPayload(props)}
+                      label={props.label}
+                      series={{
+                        tempC: "Temperature °C",
+                      }}
+                    />
+                  )}
                 />
                 <ReferenceArea
                   y1={-5}
@@ -1540,9 +1636,9 @@ export default function WeatherPage() {
               <p>—</p>
             )}
           </div>
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-3 py-2 text-[11px] leading-relaxed text-ink-mid">
-            {tempGasCopy}
-          </div>
+          {tempGasCopy ? (
+            <MarketImplicationBox>{tempGasCopy}</MarketImplicationBox>
+          ) : null}
         </div>
       </div>
     </div>
