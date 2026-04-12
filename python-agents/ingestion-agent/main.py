@@ -59,7 +59,37 @@ from dotenv import load_dotenv
 # Configuration
 # -----------------------------------------------------------------------------
 
-load_dotenv()
+
+def _normalize_anthropic_api_key(raw: str | None) -> str:
+    """Strip whitespace, UTF-8 BOM, and optional surrounding quotes from pasted keys."""
+    if not raw:
+        return ""
+    s = raw.strip().lstrip("\ufeff")
+    if len(s) >= 2 and s[0] in "\"'":
+        if s[-1] == s[0]:
+            s = s[1:-1].strip()
+    return s
+
+
+def _anthropic_api_key() -> str:
+    """Return the current Anthropic API key (read fresh from the environment)."""
+    return _normalize_anthropic_api_key(os.environ.get("ANTHROPIC_API_KEY", ""))
+
+
+# On Railway, secrets are injected at runtime. Do not load a local `.env` here — it can
+# override `ANTHROPIC_API_KEY` with an empty or stale value if present in the image.
+_RAILWAY_ENV = any(
+    os.environ.get(k)
+    for k in (
+        "RAILWAY_ENVIRONMENT",
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_SERVICE_ID",
+        "RAILWAY_REPLICA_ID",
+        "RAILWAY_GIT_COMMIT_SHA",
+    )
+)
+if not _RAILWAY_ENV:
+    load_dotenv(override=False)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
@@ -98,7 +128,10 @@ CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
 # Further reading step 2 (JSON format only, no tools).
 CLAUDE_ARTICLES_FORMAT_MODEL = "claude-haiku-4-5-20251001"
 BRIEF_SOURCE = "Claude claude-sonnet-4-20250514"
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+_ANTHROPIC_RAW = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = _normalize_anthropic_api_key(_ANTHROPIC_RAW)
+if ANTHROPIC_API_KEY:
+    os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -153,6 +186,16 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("bmrs-ingestion")
 logger.setLevel(logging.DEBUG)
+
+_ak = _anthropic_api_key()
+if _ak:
+    logger.info(
+        "anthropic: API key loaded prefix=%s len=%d",
+        _ak[:15] + ("…" if len(_ak) > 15 else ""),
+        len(_ak),
+    )
+else:
+    logger.warning("anthropic: ANTHROPIC_API_KEY not set — morning brief will be skipped")
 
 
 def _utc_now_iso() -> str:
@@ -1809,7 +1852,7 @@ async def _anthropic_further_reading_articles(
     direction: str,
     remit_count: int,
 ) -> list[dict[str, Any]]:
-    if not ANTHROPIC_API_KEY:
+    if not _anthropic_api_key():
         return []
 
     _now_utc = datetime.now(timezone.utc)
@@ -1818,7 +1861,7 @@ async def _anthropic_further_reading_articles(
 
     # --- Step 1: web search, natural-language summaries (tools enabled) ---
     headers_search = {
-        "x-api-key": ANTHROPIC_API_KEY,
+        "x-api-key": _anthropic_api_key(),
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "web-search-2025-03-05",
         "content-type": "application/json",
@@ -1875,7 +1918,7 @@ Summarise your findings in plain English. For each piece, include headline, publ
 
     # --- Step 2: format as JSON only (no tools) ---
     headers_format = {
-        "x-api-key": ANTHROPIC_API_KEY,
+        "x-api-key": _anthropic_api_key(),
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
@@ -1951,10 +1994,10 @@ async def _anthropic_morning_brief(
     max_tokens: int = 3500,
     http: httpx.AsyncClient | None = None,
 ) -> str:
-    if not ANTHROPIC_API_KEY:
+    if not _anthropic_api_key():
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
     headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
+        "x-api-key": _anthropic_api_key(),
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
@@ -2028,7 +2071,7 @@ async def insert_brief_entry_http(
 async def generate_morning_brief() -> None:
     """Fetch inputs, call Claude, parse sections, INSERT into brief_entries."""
     _require_supabase_env()
-    if not ANTHROPIC_API_KEY:
+    if not _anthropic_api_key():
         logger.error("Morning brief skipped: ANTHROPIC_API_KEY not set")
         return
 
