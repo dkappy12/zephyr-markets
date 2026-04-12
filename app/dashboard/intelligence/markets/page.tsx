@@ -24,7 +24,8 @@ const BRAND_GREEN = "#1D6B4E";
 const INK = "#2C2A26";
 const INK_MID = "#6B6760";
 const SPARK_NEG = "#8B3A3A";
-const DEFAULT_SRMC = 108.41;
+const GBP_PER_EUR = 0.86;
+const CCGT_ELECTRIC_EFF = 0.5;
 const CARBON_ADDER = 26;
 const VOM = 2;
 const CO2_INTENSITY = 0.9;
@@ -62,6 +63,8 @@ type MidRow = {
   price_date: string;
   market: string;
   fetched_at: string | null;
+  /** MID volume when present in DB */
+  volume: number | null;
 };
 
 type PhysicalPremiumRow = {
@@ -109,20 +112,22 @@ function dedupeMidBySettlement(rows: MidRow[]): MidRow[] {
   });
 }
 
-function gasThermalGbpPerMwhElec(ttfEur: number): number {
-  return (ttfEur * 0.86) / 2.931;
+/** TTF €/MWh → GBP/MWh thermal (currency bridge only; no therm conversion). */
+function gasGbpPerMwhThermal(ttfEur: number): number {
+  return ttfEur * GBP_PER_EUR;
 }
 
-function gasToPowerCostGbp(ttfEur: number): number {
-  return gasThermalGbpPerMwhElec(ttfEur) / 0.5;
+/** Gas cost per MWh electricity at CCGT efficiency. */
+function gasGbpPerMwhElectric(ttfEur: number): number {
+  return gasGbpPerMwhThermal(ttfEur) / CCGT_ELECTRIC_EFF;
 }
 
 function srmcGbpMwh(ttfEur: number): number {
-  return gasToPowerCostGbp(ttfEur) + CARBON_ADDER + VOM;
+  return gasGbpPerMwhElectric(ttfEur) + CARBON_ADDER + VOM;
 }
 
 function nbpGbpMwh(ttfEur: number): number {
-  return gasThermalGbpPerMwhElec(ttfEur);
+  return gasGbpPerMwhThermal(ttfEur);
 }
 
 function sparkSpreadGbpMwh(n2ex: number, ttfEur: number): number {
@@ -130,7 +135,7 @@ function sparkSpreadGbpMwh(n2ex: number, ttfEur: number): number {
 }
 
 function coalSrmcGbpMwh(ttfEur: number): number {
-  return gasThermalGbpPerMwhElec(ttfEur) / COAL_EFF + CO2_INTENSITY * CO2_PRICE + VOM;
+  return gasGbpPerMwhThermal(ttfEur) / COAL_EFF + CO2_INTENSITY * CO2_PRICE + VOM;
 }
 
 function darkSpreadGbpMwh(n2ex: number, ttfEur: number): number {
@@ -152,6 +157,12 @@ function priceCellClass(price: number): string {
   if (price > 50) return "text-watch";
   if (price < 0) return "text-bear/85";
   return "text-ink";
+}
+
+function formatVolumeMwh(v: unknown): string {
+  const n = parseNum(v);
+  if (n == null || n === 0) return "—";
+  return `${new Intl.NumberFormat("en-GB").format(Math.round(n))} MWh`;
 }
 
 export default function MarketsPage() {
@@ -194,7 +205,7 @@ export default function MarketsPage() {
           supabase
             .from("market_prices")
             .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at",
+              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
             )
             .or("market.eq.N2EX,market.eq.APX")
             .order("price_date", { ascending: false })
@@ -203,7 +214,7 @@ export default function MarketsPage() {
           supabase
             .from("market_prices")
             .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at",
+              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
             )
             .or("market.eq.N2EX,market.eq.APX")
             .eq("price_date", today)
@@ -234,7 +245,7 @@ export default function MarketsPage() {
           supabase
             .from("market_prices")
             .select(
-              "price_gbp_mwh, settlement_period, price_date, market, fetched_at",
+              "price_gbp_mwh, settlement_period, price_date, market, fetched_at, volume",
             )
             .or("market.eq.N2EX,market.eq.APX")
             .eq("price_date", today)
@@ -269,6 +280,9 @@ export default function MarketsPage() {
             price_date: String(r.price_date ?? ""),
             market: String(r.market ?? ""),
             fetched_at: r.fetched_at != null ? String(r.fetched_at) : null,
+            volume:
+              parseNum(r.volume) ??
+              parseNum((r as Record<string, unknown>).volume_mwh),
           }));
 
         if (mpRes.error) {
@@ -367,13 +381,17 @@ export default function MarketsPage() {
 
   const ttfEur = gasRow?.price_eur_mwh ?? null;
 
+  const srmcFromTtf =
+    ttfEur != null && Number.isFinite(srmcGbpMwh(ttfEur))
+      ? srmcGbpMwh(ttfEur)
+      : null;
   const srmcRef =
-    physicalPremium?.srmc_gbp_mwh != null &&
-    Number.isFinite(physicalPremium.srmc_gbp_mwh)
-      ? physicalPremium.srmc_gbp_mwh
-      : ttfEur != null
-        ? srmcGbpMwh(ttfEur)
-        : DEFAULT_SRMC;
+    srmcFromTtf != null
+      ? srmcFromTtf
+      : physicalPremium?.srmc_gbp_mwh != null &&
+          Number.isFinite(physicalPremium.srmc_gbp_mwh)
+        ? physicalPremium.srmc_gbp_mwh
+        : null;
 
   const latestN2ex = midRows[0]?.price_gbp_mwh ?? null;
   const sixAgo = midRows[6]?.price_gbp_mwh ?? null;
@@ -386,22 +404,10 @@ export default function MarketsPage() {
       ? ((latestN2ex - sixAgo) / sixAgo) * 100
       : null;
 
-  const sparkFromModel =
-    physicalPremium?.premium_value != null &&
-    Number.isFinite(physicalPremium.premium_value)
-      ? physicalPremium.premium_value
-      : physicalPremium?.market_price_gbp_mwh != null &&
-          physicalPremium?.srmc_gbp_mwh != null
-        ? physicalPremium.market_price_gbp_mwh -
-          physicalPremium.srmc_gbp_mwh
-        : null;
-
   const spark =
-    sparkFromModel != null && Number.isFinite(sparkFromModel)
-      ? sparkFromModel
-      : latestN2ex != null && ttfEur != null
-        ? sparkSpreadGbpMwh(latestN2ex, ttfEur)
-        : null;
+    latestN2ex != null && ttfEur != null
+      ? sparkSpreadGbpMwh(latestN2ex, ttfEur)
+      : null;
 
   const gbChartData = useMemo(() => {
     return [...todayRows]
@@ -700,12 +706,14 @@ export default function MarketsPage() {
                     width={44}
                     domain={["auto", "auto"]}
                   />
-                  <ReferenceLine
-                    y={srmcRef}
-                    stroke={INK_MID}
-                    strokeDasharray="4 4"
-                    strokeOpacity={0.85}
-                  />
+                  {srmcRef != null ? (
+                    <ReferenceLine
+                      y={srmcRef}
+                      stroke={INK_MID}
+                      strokeDasharray="4 4"
+                      strokeOpacity={0.85}
+                    />
+                  ) : null}
                   <Area
                     type="monotone"
                     dataKey="price"
@@ -724,7 +732,9 @@ export default function MarketsPage() {
             )}
           </div>
           <p className="mt-1 text-[10px] text-ink-light">
-            Dashed line: SRMC £{srmcRef.toFixed(2)}/MWh
+            {srmcRef != null
+              ? `Dashed line: SRMC £${srmcRef.toFixed(2)}/MWh`
+              : "No SRMC reference (no TTF or stored SRMC)"}
           </p>
           <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3 text-[11px] text-ink-mid">
             <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-light">
@@ -789,7 +799,7 @@ export default function MarketsPage() {
               <dd className="tabular-nums text-ink">
                 {ttfEur == null
                   ? "—"
-                  : `£${gasToPowerCostGbp(ttfEur).toFixed(2)}/MWh`}
+                  : `£${gasGbpPerMwhElectric(ttfEur).toFixed(2)}/MWh`}
               </dd>
             </div>
             <div className="flex justify-between gap-4">
@@ -849,9 +859,9 @@ export default function MarketsPage() {
             ) : null}
           </div>
           <p className="mt-2 text-xs leading-relaxed text-ink-mid">
-            {spark != null && spark < 0
+            {spark != null && spark < 0 && srmcRef != null
               ? `CCGT generation is currently uneconomic. Gas plant requires prices above £${srmcRef.toFixed(2)}/MWh to recover costs.`
-              : spark != null && spark >= 0
+              : spark != null && spark >= 0 && srmcRef != null
                 ? `CCGT is in merit vs SRMC £${srmcRef.toFixed(2)}/MWh.`
                 : "Spark spread compares power price to full gas SRMC."}
           </p>
@@ -1041,7 +1051,9 @@ export default function MarketsPage() {
                       >
                         £{r.price_gbp_mwh.toFixed(2)}/MWh
                       </td>
-                      <td className="py-2 tabular-nums text-ink-mid">—</td>
+                      <td className="py-2 tabular-nums text-ink-mid">
+                        {formatVolumeMwh(r.volume)}
+                      </td>
                     </tr>
                   );
                 })
