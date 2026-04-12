@@ -1702,7 +1702,9 @@ Return ONLY a JSON array with no other text:
     "url": "Full article URL",
     "thumbnail_url": "Article thumbnail/og:image URL or null if not found"
   }}
-]"""
+]
+
+IMPORTANT: Your response must be ONLY a valid JSON array starting with [ and ending with ]. No explanation, no markdown, no preamble. Just the raw JSON array."""
     headers = {
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
@@ -1762,24 +1764,38 @@ Return ONLY a JSON array with no other text:
     for i, block in reversed(text_blocks):
         try:
             text = str(block.get("text", "")).strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                articles = [x for x in parsed if isinstance(x, dict)]
-                parsed_from_block = True
-                logger.debug("articles_search: parsed JSON from block %d", i)
-                logger.debug(
-                    "articles_search: parsed JSON array from block %d with %d articles",
-                    i,
-                    len(articles),
-                )
-                break
-        except (json.JSONDecodeError, Exception):
-            continue
+            # Try direct parse first
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    articles = [x for x in parsed if isinstance(x, dict)]
+                    parsed_from_block = True
+                    logger.debug(
+                        "articles_search: direct parse succeeded, %d articles",
+                        len(articles),
+                    )
+                    break
+            except json.JSONDecodeError:
+                pass
+            # Try extracting JSON array from text
+            start = text.find("[")
+            end = text.rfind("]")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    parsed = json.loads(text[start : end + 1])
+                    if isinstance(parsed, list):
+                        articles = [x for x in parsed if isinstance(x, dict)]
+                        parsed_from_block = True
+                        logger.debug(
+                            "articles_search: extracted JSON array from block %d, %d articles",
+                            i,
+                            len(articles),
+                        )
+                        break
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            logger.debug("articles_search: block %d parse error: %s", i, e)
 
     if not parsed_from_block:
         logger.warning(
@@ -1844,11 +1860,22 @@ async def insert_brief_entry_http(
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
-    resp = await client.post(
-        _brief_entries_rest_url(),
-        headers=headers,
-        json=row,
-    )
+    url = _brief_entries_rest_url()
+    for attempt in range(2):
+        resp = await client.post(
+            url,
+            headers=headers,
+            json=row,
+        )
+        if resp.status_code < 500:
+            resp.raise_for_status()
+            return
+        if attempt == 0:
+            logger.warning(
+                "brief insert: 5xx error %s, retrying in 5s",
+                resp.status_code,
+            )
+            await asyncio.sleep(5)
     resp.raise_for_status()
 
 
