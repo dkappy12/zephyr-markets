@@ -43,7 +43,8 @@ const REF_STORAGE_SAME_WEEK_LAST_YEAR_PCT = 28;
 const REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT = 35;
 
 const WIND_LINE = "#5c6b2e";
-const YDAY_GREY = "#94a3b8";
+/** Yesterday price overlay (GB Power chart). */
+const YDAY_LINE = "#9ca3af";
 
 function utcTodayStr(): string {
   return new Date().toISOString().slice(0, 10);
@@ -55,15 +56,15 @@ function utcYesterdayStr(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function utcTomorrowStr(todayYmd: string): string {
-  const d = new Date(`${todayYmd}T12:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
 function utcDateMinusDays(days: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function utcDatePlusDays(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -209,6 +210,11 @@ function priceCellClass(price: number): string {
   return "text-ink";
 }
 
+/** Open-Meteo stores m/s in `wind_speed_100m`; implied GW for the linear desk model. */
+function windMsToImpliedGw(windSpeed100mMs: number): number {
+  return windSpeed100mMs * WIND_MS_TO_GW;
+}
+
 function windGwForSp(
   sp: number,
   rows: WeatherRow[],
@@ -232,7 +238,34 @@ function windGwForSp(
   }
   if (best == null) return null;
   const w = parseNum(best.wind_speed_100m);
-  return w == null ? null : w * WIND_MS_TO_GW;
+  if (w == null) return null;
+  return windMsToImpliedGw(w);
+}
+
+const REMIT_DERATED_MW_RE = /derated by\s+([\d.]+)\s*MW/i;
+
+function sumRemitFromSignalDescriptions(
+  descriptions: string[],
+): { planned: number; unplanned: number } {
+  let planned = 0;
+  let unplanned = 0;
+  for (const desc of descriptions) {
+    const low = desc.toLowerCase();
+    const m = REMIT_DERATED_MW_RE.exec(desc);
+    if (!m) continue;
+    const mw = parseFloat(m[1]);
+    if (!Number.isFinite(mw)) continue;
+    if (low.includes("unplanned")) unplanned += mw;
+    else if (low.includes("planned")) planned += mw;
+    else planned += mw;
+  }
+  return { planned, unplanned };
+}
+
+function formatRemitMw(n: number): string {
+  return new Intl.NumberFormat("en-GB", {
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 function formatVolumeMwh(v: unknown): string {
@@ -309,13 +342,20 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
+  const [remitFromSignals, setRemitFromSignals] = useState<{
+    planned: number;
+    unplanned: number;
+  } | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
     const today = utcTodayStr();
     const yesterday = utcYesterdayStr();
     const sevenAgo = utcDateMinusDays(7);
-    const tomorrow = utcTomorrowStr(today);
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    /** Cover settlement-date vs UTC midnight mismatches vs weather rows. */
+    const wxRangeStart = `${utcDateMinusDays(1)}T00:00:00.000Z`;
+    const wxRangeEnd = `${utcDatePlusDays(2)}T00:00:00.000Z`;
 
     async function load() {
       setLoadError(null);
@@ -364,6 +404,7 @@ export default function MarketsPage() {
           ydayRes,
           wxRes,
           mp7dRes,
+          remitSigRes,
         ] = await Promise.all([
           supabase
             .from("market_prices")
@@ -418,8 +459,8 @@ export default function MarketsPage() {
             .from("weather_forecasts")
             .select("forecast_time, wind_speed_100m")
             .eq("location", "GB")
-            .gte("forecast_time", `${today}T00:00:00.000Z`)
-            .lt("forecast_time", `${tomorrow}T00:00:00.000Z`)
+            .gte("forecast_time", wxRangeStart)
+            .lt("forecast_time", wxRangeEnd)
             .order("forecast_time", { ascending: true }),
           supabase
             .from("market_prices")
@@ -429,6 +470,11 @@ export default function MarketsPage() {
             .order("price_date", { ascending: true })
             .order("settlement_period", { ascending: true })
             .limit(2500),
+          supabase
+            .from("signals")
+            .select("description")
+            .eq("type", "remit")
+            .gte("created_at", since24h),
         ]);
 
         if (ppRes.error) {
@@ -443,8 +489,10 @@ export default function MarketsPage() {
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
             remit_mw_lost: parseNum(p.remit_mw_lost),
-            remit_planned_mw: parseNum(p.remit_planned_mw),
-            remit_unplanned_mw: parseNum(p.remit_unplanned_mw),
+            remit_planned_mw:
+              parseNum(p.remit_planned_mw) ?? parseNum(p.remit_mw_planned),
+            remit_unplanned_mw:
+              parseNum(p.remit_unplanned_mw) ?? parseNum(p.remit_mw_unplanned),
           });
         } else {
           setPhysicalPremium(null);
@@ -525,6 +573,15 @@ export default function MarketsPage() {
               };
             }),
           );
+        }
+
+        if (remitSigRes.error) {
+          setRemitFromSignals(null);
+        } else {
+          const descs = (remitSigRes.data ?? [])
+            .map((r) => String((r as Record<string, unknown>).description ?? ""))
+            .filter(Boolean);
+          setRemitFromSignals(sumRemitFromSignalDescriptions(descs));
         }
 
         if (mp7dRes.error) {
@@ -860,6 +917,26 @@ export default function MarketsPage() {
   const coalSrmc =
     ttfEur != null ? coalSrmcGbpMwh(ttfEur) : null;
 
+  const remitBarDisplay = useMemo(() => {
+    const pp = physicalPremium;
+    const ppP = pp?.remit_planned_mw;
+    const ppU = pp?.remit_unplanned_mw;
+    if (ppP != null && ppU != null) {
+      return `REMIT: ${formatRemitMw(ppP)} MW planned · ${formatRemitMw(ppU)} MW unplanned`;
+    }
+    const sigSum =
+      remitFromSignals != null
+        ? remitFromSignals.planned + remitFromSignals.unplanned
+        : 0;
+    if (remitFromSignals != null && sigSum > 0) {
+      return `REMIT: ${formatRemitMw(remitFromSignals.planned)} MW planned · ${formatRemitMw(remitFromSignals.unplanned)} MW unplanned`;
+    }
+    if (pp?.remit_mw_lost != null) {
+      return `${formatRemitMw(pp.remit_mw_lost)} MW offline`;
+    }
+    return null;
+  }, [physicalPremium, remitFromSignals]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -924,14 +1001,7 @@ export default function MarketsPage() {
             REMIT impact
           </p>
           <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-            {loading
-              ? "…"
-              : physicalPremium?.remit_planned_mw != null &&
-                  physicalPremium?.remit_unplanned_mw != null
-                ? `${physicalPremium.remit_planned_mw.toFixed(0)} MW planned · ${physicalPremium.remit_unplanned_mw.toFixed(0)} MW unplanned`
-                : physicalPremium?.remit_mw_lost != null
-                  ? `${physicalPremium.remit_mw_lost.toFixed(0)} MW offline`
-                  : "—"}
+            {loading ? "…" : remitBarDisplay ?? "—"}
           </p>
         </div>
       </motion.div>
@@ -1018,13 +1088,15 @@ export default function MarketsPage() {
                     yAxisId="right"
                     orientation="right"
                     tick={{ fontSize: 10, fill: INK_MID }}
-                    tickFormatter={(v) => `${v}`}
+                    tickFormatter={(v) =>
+                      typeof v === "number" ? v.toFixed(1) : `${v}`
+                    }
                     axisLine={false}
                     tickLine={false}
-                    width={36}
+                    width={40}
                     domain={["auto", "auto"]}
                     label={{
-                      value: "GW",
+                      value: "GW (implied)",
                       angle: 90,
                       position: "insideRight",
                       fill: INK_MID,
@@ -1054,9 +1126,10 @@ export default function MarketsPage() {
                     yAxisId="left"
                     type="monotone"
                     dataKey="priceYesterday"
-                    stroke={YDAY_GREY}
-                    strokeWidth={1.25}
-                    strokeDasharray="5 4"
+                    stroke={YDAY_LINE}
+                    strokeWidth={1.5}
+                    strokeOpacity={0.7}
+                    strokeDasharray="4 2"
                     dot={false}
                     connectNulls
                     isAnimationActive={false}
@@ -1100,7 +1173,7 @@ export default function MarketsPage() {
             <span>
               <span className="text-[#1D6B4E]">—</span> Today
               <span className="mx-1 text-ink-light">·</span>
-              <span className="text-[#94a3b8]">··</span> Yesterday
+              <span className="text-[#9ca3af]">··</span> Yesterday
             </span>
             <span>
               <span className="text-[#1D6B4E]">—</span> Price
@@ -1110,7 +1183,7 @@ export default function MarketsPage() {
           </div>
           <p className="mt-1 text-[10px] text-ink-light">
             {srmcRef != null
-              ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind from GB ECMWF 100 m × ${WIND_MS_TO_GW} GW/(m/s)`
+              ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind: ECMWF 100 m (m/s) × ${WIND_MS_TO_GW} → implied GW`
               : "No SRMC reference (no TTF or stored SRMC)"}
           </p>
           <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3 text-[11px] text-ink-mid">

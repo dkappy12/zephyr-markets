@@ -93,83 +93,8 @@ const snippetClampStyle: CSSProperties = {
   overflow: "hidden",
 };
 
-/** Placeholder when no article thumbnail — warm field, ink sketch (#f5f0e8 / #2c2a26). */
-function ArticleThumbnailPlaceholder() {
-  const ink = "#2c2a26";
-  return (
-    <svg
-      viewBox="0 0 240 135"
-      className="h-full w-full"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-    >
-      {/* Rolling horizon */}
-      <path
-        d="M0 96 Q60 88 120 92 T240 90"
-        stroke={ink}
-        strokeWidth={0.85}
-        opacity={0.35}
-        strokeLinecap="round"
-      />
-      {/* Baseload / curve — abstract “session” profile */}
-      <path
-        d="M14 98 C48 52 88 108 132 68c38-32 62-18 94-8"
-        stroke={ink}
-        strokeWidth={1.2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.92}
-      />
-      {/* Connector — grid feel */}
-      <path
-        d="M42 74 L118 58 L198 48"
-        stroke={ink}
-        strokeWidth={0.75}
-        opacity={0.45}
-        strokeDasharray="3 5"
-        strokeLinecap="round"
-      />
-      {/* Wind cluster — three turbines, varied scale */}
-      <g stroke={ink} strokeWidth={1.15} strokeLinecap="round">
-        <line x1="26" y1="100" x2="26" y2="66" />
-        <line x1="26" y1="66" x2="26" y2="50" />
-        <line x1="26" y1="66" x2="12" y2="74" />
-        <line x1="26" y1="66" x2="40" y2="74" />
-        <line x1="52" y1="100" x2="52" y2="72" />
-        <line x1="52" y1="72" x2="52" y2="58" />
-        <line x1="52" y1="72" x2="41" y2="79" />
-        <line x1="52" y1="72" x2="63" y2="79" />
-        <line x1="74" y1="100" x2="74" y2="78" />
-        <line x1="74" y1="78" x2="74" y2="66" />
-        <line x1="74" y1="78" x2="66" y2="84" />
-        <line x1="74" y1="78" x2="82" y2="84" />
-      </g>
-      {/* Solar field — minimal panel grid */}
-      <g stroke={ink} strokeWidth={0.9} opacity={0.55}>
-        <rect x="178" y="82" width="34" height="18" rx="1" />
-        <line x1="189" y1="82" x2="189" y2="100" />
-        <line x1="200" y1="82" x2="200" y2="100" />
-        <line x1="178" y1="91" x2="212" y2="91" />
-      </g>
-      {/* Pylon silhouette */}
-      <g stroke={ink} strokeWidth={1.05} strokeLinecap="round" strokeLinejoin="round">
-        <line x1="128" y1="100" x2="138" y2="44" />
-        <line x1="128" y1="100" x2="152" y2="44" />
-        <line x1="132" y1="100" x2="158" y2="44" />
-        <line x1="138" y1="44" x2="152" y2="44" />
-        <line x1="134" y1="62" x2="156" y2="62" />
-        <line x1="136" y1="78" x2="154" y2="78" />
-        <line x1="145" y1="44" x2="145" y2="100" />
-      </g>
-      {/* Dispatch nodes */}
-      <g fill={ink} opacity={0.65}>
-        <circle cx="118" cy="58" r="1.8" />
-        <circle cx="198" cy="48" r="1.8" />
-      </g>
-    </svg>
-  );
-}
+/** Served from /public/images/article-placeholder.png — replace that file to change artwork. */
+const ARTICLE_THUMB_PLACEHOLDER = "/images/article-placeholder.png";
 
 function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -194,7 +119,14 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
             onError={() => setImgFailed(true)}
           />
         ) : null}
-        {!showImg ? <ArticleThumbnailPlaceholder /> : null}
+        {!showImg ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={ARTICLE_THUMB_PLACEHOLDER}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : null}
       </div>
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-start justify-between">
