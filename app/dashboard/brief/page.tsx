@@ -39,6 +39,101 @@ function parseWatchList(watchList: string | null): string[] {
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
 
+function BriefArticleThumbnailPlaceholder() {
+  return (
+    <svg
+      viewBox="0 0 128 128"
+      className="h-full w-full"
+      aria-hidden
+    >
+      <rect width="128" height="128" fill="#F5F0E8" />
+      <line
+        x1="10"
+        y1="102"
+        x2="118"
+        y2="102"
+        stroke="#3D3D2E"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+      />
+      <line
+        x1="64"
+        y1="102"
+        x2="64"
+        y2="46"
+        stroke="#3D3D2E"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+      />
+      <circle cx="64" cy="42" r="3.5" fill="#3D3D2E" />
+      <g
+        stroke="#3D3D2E"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        fill="none"
+      >
+        <line x1="64" y1="42" x2="64" y2="14" />
+        <line x1="64" y1="42" x2="94" y2="58" />
+        <line x1="64" y1="42" x2="34" y2="58" />
+      </g>
+    </svg>
+  );
+}
+
+function FurtherReadingArticleCard({ a }: { a: BriefArticle }) {
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const thumbUrl = a.thumbnail_url?.trim();
+  const showImage = Boolean(thumbUrl) && !thumbFailed;
+
+  return (
+    <li>
+      <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 transition-shadow hover:shadow-md">
+        <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg bg-[#F5F0E8]">
+          {showImage ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={thumbUrl}
+                alt={a.headline}
+                className="h-full w-full object-cover"
+                onError={() => setThumbFailed(true)}
+              />
+            </>
+          ) : (
+            <BriefArticleThumbnailPlaceholder />
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex flex-row items-start justify-between gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+              {a.publication}
+            </span>
+            {a.published_date ? (
+              <span className="shrink-0 text-right text-[11px] text-ink-light">
+                {a.published_date}
+              </span>
+            ) : null}
+          </div>
+          <a
+            href={a.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-serif text-lg leading-snug text-ink underline-offset-2 hover:underline"
+          >
+            {a.headline}
+          </a>
+          <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
+            {a.snippet}
+          </p>
+          {a.author ? (
+            <p className="text-[11px] text-ink-light">{a.author}</p>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export default function BriefPage() {
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState<BriefRow | null>(null);
@@ -87,7 +182,7 @@ export default function BriefPage() {
     : [];
 
   return (
-    <div className="relative mx-auto w-full max-w-4xl px-8">
+    <>
       <div className="pointer-events-none absolute bottom-8 left-0 top-24 hidden sm:block">
         <ManuscriptMarginalia />
       </div>
@@ -167,78 +262,22 @@ export default function BriefPage() {
           <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-light">
             Further reading
           </h2>
-          <ul className="mt-4 space-y-3">
+          <ul className="mt-4 space-y-4">
             {loading ? (
               <li className="text-ink-mid">…</li>
             ) : articles.length > 0 ? (
-              articles.map((a, i) => {
-                const thumbUrl = a.thumbnail_url?.trim();
-                const hasThumb = Boolean(thumbUrl);
-                return (
-                  <li key={`${a.url}-${i}`}>
-                    <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
-                      <div className="relative h-20 w-20 shrink-0">
-                        {hasThumb ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={thumbUrl}
-                              alt={a.headline}
-                              className="h-20 w-20 flex-shrink-0 rounded object-cover bg-stone-200"
-                              onError={(e) => {
-                                const el = e.target as HTMLImageElement;
-                                el.style.display = "none";
-                                el.nextElementSibling?.classList.remove("hidden");
-                              }}
-                            />
-                            <div
-                              className="absolute inset-0 hidden h-20 w-20 rounded bg-stone-200"
-                              aria-hidden
-                            />
-                          </>
-                        ) : (
-                          <div
-                            className="h-20 w-20 flex-shrink-0 rounded bg-stone-200"
-                            aria-hidden
-                          />
-                        )}
-                      </div>
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <div className="flex flex-row items-start justify-between gap-2">
-                          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-                            {a.publication}
-                          </span>
-                          {a.published_date ? (
-                            <span className="shrink-0 text-right text-[11px] text-ink-light">
-                              {a.published_date}
-                            </span>
-                          ) : null}
-                        </div>
-                        <a
-                          href={a.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-serif text-base leading-snug text-ink underline-offset-2 hover:underline"
-                        >
-                          {a.headline}
-                        </a>
-                        <p className="text-[13px] leading-relaxed text-ink-mid">
-                          {a.snippet}
-                        </p>
-                        {a.author ? (
-                          <p className="text-[11px] text-ink-light">{a.author}</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })
+              articles.map((a, i) => (
+                <FurtherReadingArticleCard
+                  key={`${a.url}-${i}`}
+                  a={a}
+                />
+              ))
             ) : (
               <li className="text-[13px] text-ink-mid">No articles linked yet.</li>
             )}
           </ul>
         </div>
       </motion.article>
-    </div>
+    </>
   );
 }

@@ -50,7 +50,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-14 overflow-hidden">
           <TopoBackground className="h-full w-full" lineOpacity={0.25} />
         </div>
-        <div className="relative z-10 mx-auto flex h-14 max-w-[1280px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="relative z-10 mx-auto flex h-14 max-w-[1536px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link
             href="/dashboard/overview"
             className="shrink-0 font-serif text-xl tracking-tight text-ink"
@@ -89,7 +89,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
         </div>
         {(showIntel || showPortfolio) && (
           <div className="relative z-10 border-t-[0.5px] border-ivory-border bg-ivory">
-            <div className="mx-auto flex max-w-[1280px] flex-wrap gap-1 px-4 py-2 sm:px-6 lg:px-8">
+            <div className="mx-auto flex max-w-[1536px] flex-wrap gap-1 px-4 py-2 sm:px-6 lg:px-8">
               {showIntel
                 ? intelligenceSecondary.map((item) => {
                     const active = pathname === item.href;
@@ -126,7 +126,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
           </div>
         )}
       </header>
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-8 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-[1536px] px-4 py-8 sm:px-6 lg:px-8">
         {children}
       </main>
     </div>
