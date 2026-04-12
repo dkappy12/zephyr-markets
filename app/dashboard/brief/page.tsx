@@ -5,6 +5,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
 type BriefArticle = {
@@ -39,111 +40,19 @@ function parseWatchList(watchList: string | null): string[] {
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
 
-function WindTurbineThumbPlaceholder() {
-  return (
-    <svg
-      viewBox="0 0 100 120"
-      className="h-20 w-16 text-stone-400"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      aria-hidden
-    >
-      <line x1="50" y1="20" x2="50" y2="110" />
-      <line x1="50" y1="110" x2="35" y2="120" />
-      <line x1="50" y1="110" x2="65" y2="120" />
-      <line x1="50" y1="20" x2="20" y2="50" />
-      <line x1="50" y1="20" x2="80" y2="35" />
-      <line x1="50" y1="20" x2="45" y2="0" />
-    </svg>
-  );
-}
+/** SVG markup for img onError fallback (innerHTML replace on thumbnail container). */
+const TURBINE_SVG_MARKUP =
+  '<svg viewBox="0 0 80 100" width="48" height="60" fill="none" stroke="#9ca3af" stroke-width="1.5"><line x1="40" y1="15" x2="40" y2="90"/><line x1="40" y1="90" x2="28" y2="100"/><line x1="40" y1="90" x2="52" y2="100"/><line x1="40" y1="15" x2="15" y2="40"/><line x1="40" y1="15" x2="65" y2="28"/><line x1="40" y1="15" x2="36" y2="0"/></svg>';
 
-function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
-  const href =
-    article.url != null &&
-    typeof article.url === "string" &&
-    article.url.trim() !== ""
-      ? article.url.trim()
-      : null;
-
-  const thumbBlock = (
-    <>
-      {article.thumbnail_url ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={article.thumbnail_url}
-          alt={article.headline}
-          className="h-32 w-32 flex-shrink-0 rounded-lg object-cover"
-          onError={(e) => {
-            const target = e.currentTarget;
-            target.style.display = "none";
-            const placeholder = target.nextElementSibling as HTMLElement;
-            if (placeholder) placeholder.style.display = "flex";
-          }}
-        />
-      ) : null}
-      <div
-        className="flex h-32 w-32 flex-shrink-0 items-center justify-center rounded-lg bg-stone-100"
-        style={{
-          display: article.thumbnail_url ? "none" : "flex",
-        }}
-      >
-        <WindTurbineThumbPlaceholder />
-      </div>
-    </>
-  );
-
-  const body = (
-    <div className="flex gap-4">
-      <div className="shrink-0">{thumbBlock}</div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-row items-start justify-between gap-2">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-            {article.publication}
-          </span>
-          {article.published_date ? (
-            <span className="shrink-0 text-right text-[11px] text-ink-light">
-              {article.published_date}
-            </span>
-          ) : null}
-        </div>
-        <span className="font-serif text-lg leading-snug text-ink">
-          {article.headline}
-        </span>
-        <p className="line-clamp-3 text-sm leading-relaxed text-ink-mid">
-          {article.snippet}
-        </p>
-        {article.author ? (
-          <p className="text-[11px] text-ink-light">{article.author}</p>
-        ) : null}
-      </div>
-    </div>
-  );
-
-  if (!href) {
-    return (
-      <li>
-        <div className="block cursor-default rounded border border-stone-200 p-4 no-underline opacity-80">
-          {body}
-        </div>
-      </li>
-    );
-  }
-
-  return (
-    <li>
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block border border-stone-200 rounded p-4 hover:border-stone-400 hover:shadow-sm transition-all cursor-pointer no-underline"
-      >
-        {body}
-      </a>
-    </li>
-  );
-}
+const snippetClampStyle: CSSProperties = {
+  fontSize: "13px",
+  color: "#6b6b5a",
+  lineHeight: 1.5,
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+};
 
 export default function BriefPage() {
   const [loading, setLoading] = useState(true);
@@ -174,15 +83,6 @@ export default function BriefPage() {
   const articles: BriefArticle[] = Array.isArray(row?.articles)
     ? row!.articles!
     : [];
-
-  useEffect(() => {
-    articles.forEach((article, i) => {
-      console.log(
-        `[brief] article[${i}] thumbnail_url:`,
-        article.thumbnail_url,
-      );
-    });
-  }, [articles]);
 
   const headerTime =
     row?.generated_at != null
@@ -307,24 +207,96 @@ export default function BriefPage() {
           <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-light">
             Further reading
           </h2>
-          <ul className="mt-4 space-y-4">
+          <div className="mt-4 space-y-4">
             {loading ? (
-              <li className="text-ink-mid">…</li>
+              <p className="text-ink-mid">…</p>
             ) : articles.length > 0 ? (
-              articles.map((article, i) => (
-                <FurtherReadingArticleCard
-                  key={
-                    article.url
-                      ? `${article.url}-${i}`
-                      : `article-${i}-${article.headline?.slice(0, 12)}`
-                  }
-                  article={article}
-                />
+              articles.map((article, index) => (
+                <a
+                  key={index}
+                  href={article.url || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    textDecoration: "none",
+                    color: "inherit",
+                    cursor: "pointer",
+                  }}
+                  className="flex gap-4 rounded-lg border border-stone-200 p-4 transition-all duration-150 hover:border-stone-400 hover:shadow-md"
+                >
+                  <div className="flex h-32 w-32 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+                    {article.thumbnail_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={article.thumbnail_url}
+                        alt=""
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        onError={(e) => {
+                          const el = e.currentTarget.parentElement;
+                          if (el) el.innerHTML = TURBINE_SVG_MARKUP;
+                        }}
+                      />
+                    ) : (
+                      <svg
+                        viewBox="0 0 80 100"
+                        width="48"
+                        height="60"
+                        fill="none"
+                        stroke="#9ca3af"
+                        strokeWidth="1.5"
+                        aria-hidden
+                      >
+                        <line x1="40" y1="15" x2="40" y2="90" />
+                        <line x1="40" y1="90" x2="28" y2="100" />
+                        <line x1="40" y1="90" x2="52" y2="100" />
+                        <line x1="40" y1="15" x2="15" y2="40" />
+                        <line x1="40" y1="15" x2="65" y2="28" />
+                        <line x1="40" y1="15" x2="36" y2="0" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-start justify-between">
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em",
+                          color: "#9ca3af",
+                        }}
+                      >
+                        {article.publication}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: "#9ca3af",
+                          flexShrink: 0,
+                          marginLeft: "8px",
+                        }}
+                      >
+                        {article.published_date || ""}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "16px",
+                        fontFamily: "Cormorant Garamond, serif",
+                        color: "#1a1a0e",
+                        marginBottom: "6px",
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      {article.headline}
+                    </div>
+                    <div style={snippetClampStyle}>{article.snippet}</div>
+                  </div>
+                </a>
               ))
             ) : (
-              <li className="text-[13px] text-ink-mid">No articles linked yet.</li>
+              <p className="text-[13px] text-ink-mid">No articles linked yet.</p>
             )}
-          </ul>
+          </div>
         </div>
       </motion.article>
     </>

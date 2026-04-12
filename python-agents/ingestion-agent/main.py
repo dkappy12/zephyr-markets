@@ -2379,21 +2379,15 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             remit_count=remit_count,
         )
 
-        # Fetch og:image for each article that has a URL but no thumbnail
-        logger.info("articles: fetching og:image for %d articles", len(articles))
+        # Fetch og:image for each article with a URL; set thumbnail_url before insert
         for article in articles:
-            if article.get("url") and not article.get("thumbnail_url"):
-                og = await _fetch_og_image(http, article["url"])
-                article["thumbnail_url"] = og  # will be None if fetch failed
-                logger.info(
-                    "articles: %s -> thumbnail_url=%s",
-                    article.get("publication", "?"),
-                    og or "None",
-                )
+            u = article.get("url")
+            if isinstance(u, str) and u.strip():
+                og = await _fetch_og_image(http, u.strip())
+                article["thumbnail_url"] = og
 
-        # Log thumbnail status before insert
         logger.info(
-            "articles before insert thumbnails: %s",
+            "og:image fetch complete, inserting brief with thumbnails: %s",
             [a.get("thumbnail_url") for a in articles],
         )
 
