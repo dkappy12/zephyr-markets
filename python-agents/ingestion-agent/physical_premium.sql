@@ -16,8 +16,12 @@ CREATE TABLE IF NOT EXISTS public.physical_premium (
   ttf_eur_mwh numeric,
   srmc_gbp_mwh numeric,
   remit_mw_lost numeric,
+  regime text,
   source text NOT NULL DEFAULT 'Zephyr Physical Model v1'
 );
+
+-- If you created physical_premium before regime existed:
+-- ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS regime text;
 
 COMMENT ON TABLE public.physical_premium IS
   'CCGT-anchored SRMC physical premium; inserted by python-agents/ingestion-agent/main.py';
@@ -42,3 +46,6 @@ CREATE POLICY "Allow authenticated read physical_premium"
 
 GRANT SELECT ON public.physical_premium TO anon;
 GRANT SELECT ON public.physical_premium TO authenticated;
+
+-- Existing deployments: add regime column if missing.
+ALTER TABLE public.physical_premium ADD COLUMN IF NOT EXISTS regime text;

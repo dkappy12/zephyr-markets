@@ -13,6 +13,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
 - TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 - Physical premium: CCGT SRMC model → Supabase `physical_premium` (append-only history).
+- Morning brief: Claude → Supabase `brief_entries` (append-only).
 
 Required Supabase:
   - signals: remit_message_id, type, title, description, direction, source,
@@ -23,9 +24,11 @@ Required Supabase:
   - gas_prices: see gas_prices.sql
   - solar_outturn: see solar_outturn.sql
   - physical_premium: see physical_premium.sql
+  - brief_entries: see brief_entries.sql
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
+  ANTHROPIC_API_KEY — required for morning brief generation
   ELEXON_API_KEY — optional; sent as APIKey query param when set
   GIE_API_KEY — optional; sent as request header x-key for GIE AGSI (required for production API)
 """
@@ -90,6 +93,11 @@ BASE_DEMAND_GW = 32.0
 WIND_MS_TO_GW = 17.0 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
+
+CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
+BRIEF_SOURCE = "Claude claude-sonnet-4-20250514"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_LAT = 54.0
@@ -202,6 +210,11 @@ def _solar_outturn_rest_url() -> str:
 def _physical_premium_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/physical_premium"
+
+
+def _brief_entries_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/brief_entries"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -1527,6 +1540,7 @@ async def calculate_physical_premium() -> None:
             "ttf_eur_mwh": ttf_eur_mwh,
             "srmc_gbp_mwh": srmc_gbp_mwh,
             "remit_mw_lost": remit_total_mw,
+            "regime": premium_regime,
             "source": PHYSICAL_PREMIUM_SOURCE,
         }
 
@@ -1568,6 +1582,376 @@ def scheduled_physical_premium() -> None:
         asyncio.run(calculate_physical_premium())
     except Exception as e:
         logger.error("Physical premium cycle aborted: %s", e, exc_info=True)
+
+
+# -----------------------------------------------------------------------------
+# Morning brief (Claude) → brief_entries (INSERT history)
+# -----------------------------------------------------------------------------
+
+BRIEF_SECTION_RE = re.compile(
+    r"(?is)EXECUTIVE\s+SUMMARY\s*(.*?)\s*WATCH\s+LIST\s*(.*?)\s*BOOK\s+TOUCHPOINTS\s*(.*)"
+)
+
+
+def _regime_plain_english(regime: str | None) -> str:
+    if not regime:
+        return "unknown"
+    r = regime.lower()
+    if r == "renewable":
+        return "renewable-dominated"
+    if r == "transitional":
+        return "transitional"
+    if r == "gas-dominated":
+        return "gas-dominated"
+    return regime
+
+
+def _brief_fmt_num(v: Any, nd: int = 2) -> str:
+    try:
+        if v is None:
+            return "n/a"
+        return f"{float(v):.{nd}f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _normalize_watch_list_block(text: str) -> str:
+    lines: list[str] = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith("-"):
+            s = "• " + s[1:].strip()
+        elif not s.startswith("•"):
+            s = "• " + s
+        lines.append(s)
+    return "\n".join(lines)
+
+
+def parse_brief_sections(raw: str) -> tuple[str, str, str]:
+    m = BRIEF_SECTION_RE.search(raw)
+    if not m:
+        return raw.strip(), "", ""
+    exec_s = m.group(1).strip()
+    watch_s = _normalize_watch_list_block(m.group(2).strip())
+    book_s = m.group(3).strip()
+    return exec_s, watch_s, book_s
+
+
+async def _anthropic_morning_brief(system: str, user: str) -> str:
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    body: dict[str, Any] = {
+        "model": CLAUDE_BRIEF_MODEL,
+        "max_tokens": 1000,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+    }
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        resp = await http.post(
+            ANTHROPIC_MESSAGES_URL,
+            headers=headers,
+            json=body,
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    blocks = data.get("content")
+    if not isinstance(blocks, list) or not blocks:
+        raise RuntimeError("Claude response missing content")
+    first = blocks[0]
+    if isinstance(first, dict) and first.get("type") == "text":
+        return str(first.get("text") or "")
+    raise RuntimeError("Unexpected Claude content shape")
+
+
+async def insert_brief_entry_http(
+    client: httpx.AsyncClient, row: dict[str, Any]
+) -> None:
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    resp = await client.post(
+        _brief_entries_rest_url(),
+        headers=headers,
+        json=row,
+    )
+    resp.raise_for_status()
+
+
+async def generate_morning_brief() -> None:
+    """Fetch inputs, call Claude, parse sections, INSERT into brief_entries."""
+    _require_supabase_env()
+    if not ANTHROPIC_API_KEY:
+        logger.error("Morning brief skipped: ANTHROPIC_API_KEY not set")
+        return
+
+    now = datetime.now(timezone.utc)
+    ts_label = now.strftime("%Y-%m-%d %H:%M UTC")
+    iso_lo = now.isoformat()
+    iso_hi = (now + timedelta(hours=24)).isoformat()
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        pp_resp = await http.get(
+            _physical_premium_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "select": (
+                    "normalised_score,direction,implied_price_gbp_mwh,market_price_gbp_mwh,"
+                    "wind_gw,solar_gw,residual_demand_gw,srmc_gbp_mwh,remit_mw_lost,regime,"
+                    "premium_value"
+                ),
+                "order": "calculated_at.desc",
+                "limit": "1",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        pp_resp.raise_for_status()
+        pp_rows = pp_resp.json()
+        pp: dict[str, Any] = pp_rows[0] if isinstance(pp_rows, list) and pp_rows else {}
+
+        gas_resp = await http.get(
+            _gas_prices_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "hub": "eq.TTF",
+                "select": "price_eur_mwh",
+                "order": "price_time.desc",
+                "limit": "1",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        gas_resp.raise_for_status()
+        gas_rows = gas_resp.json()
+        ttf_eur = None
+        if isinstance(gas_rows, list) and gas_rows:
+            ttf_eur = gas_rows[0].get("price_eur_mwh")
+
+        mp_resp = await http.get(
+            _market_prices_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "market": "eq.N2EX",
+                "select": "price_gbp_mwh,settlement_period",
+                "order": "price_date.desc,settlement_period.desc",
+                "limit": "1",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        mp_resp.raise_for_status()
+        mp_rows = mp_resp.json()
+        n2ex_price = None
+        n2ex_sp: str | int | None = None
+        if isinstance(mp_rows, list) and mp_rows:
+            n2ex_price = mp_rows[0].get("price_gbp_mwh")
+            n2ex_sp = mp_rows[0].get("settlement_period")
+
+        sig_resp = await http.get(
+            _signals_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "type": "eq.remit",
+                "select": "title,description",
+                "order": "created_at.desc",
+                "limit": "5",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        sig_resp.raise_for_status()
+        sig_rows = sig_resp.json()
+        remit_lines: list[str] = []
+        if isinstance(sig_rows, list):
+            for s in sig_rows:
+                if not isinstance(s, dict):
+                    continue
+                t = str(s.get("title") or "").strip()
+                d = str(s.get("description") or "").strip()
+                remit_lines.append(f"- {t}: {d}" if t else f"- {d}")
+
+        st_resp = await http.get(
+            _storage_levels_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "location": "in.(DE,FR)",
+                "select": "location,full_pct,report_date",
+                "order": "report_date.desc",
+                "limit": "40",
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        st_resp.raise_for_status()
+        st_rows = st_resp.json()
+        de_pct: float | None = None
+        fr_pct: float | None = None
+        if isinstance(st_rows, list):
+            for row in st_rows:
+                if not isinstance(row, dict):
+                    continue
+                loc = row.get("location")
+                if loc == "DE" and de_pct is None:
+                    fp = row.get("full_pct")
+                    de_pct = float(fp) if fp is not None else None
+                elif loc == "FR" and fr_pct is None:
+                    fp = row.get("full_pct")
+                    fr_pct = float(fp) if fp is not None else None
+                if de_pct is not None and fr_pct is not None:
+                    break
+
+        wf_resp = await http.get(
+            _weather_forecasts_rest_url(),
+            headers=_supabase_auth_headers(),
+            params=[
+                ("location", "eq.GB"),
+                ("select", "wind_speed_100m"),
+                ("forecast_time", f"gte.{iso_lo}"),
+                ("forecast_time", f"lte.{iso_hi}"),
+            ],
+            timeout=HTTP_TIMEOUT,
+        )
+        wf_resp.raise_for_status()
+        wf_rows = wf_resp.json()
+        wind_speeds: list[float] = []
+        if isinstance(wf_rows, list):
+            for r in wf_rows:
+                if not isinstance(r, dict):
+                    continue
+                w = r.get("wind_speed_100m")
+                try:
+                    if w is not None:
+                        wind_speeds.append(float(w))
+                except (TypeError, ValueError):
+                    pass
+        w_min = min(wind_speeds) if wind_speeds else None
+        w_max = max(wind_speeds) if wind_speeds else None
+
+    ns = pp.get("normalised_score")
+    direction = pp.get("direction") or "n/a"
+    implied = pp.get("implied_price_gbp_mwh")
+    market_p = pp.get("market_price_gbp_mwh")
+    gap = pp.get("premium_value")
+    r_reg = pp.get("regime")
+    regime = _regime_plain_english(
+        str(r_reg) if r_reg is not None else None
+    )
+    srmc = pp.get("srmc_gbp_mwh")
+    wind_gw = pp.get("wind_gw")
+    solar_gw = pp.get("solar_gw")
+    residual = pp.get("residual_demand_gw")
+
+    remit_block = "\n".join(remit_lines) if remit_lines else "(none in last 5 signals)"
+
+    system_prompt = (
+        "You are Zephyr's market intelligence engine. You write concise, professional "
+        "morning briefs for GB and NW European energy traders. Your tone is direct, "
+        "precise, and analytical — like a senior trader explaining the physical picture "
+        "to a colleague. Never use filler phrases. Every sentence should contain a "
+        "tradeable insight or relevant context. Write in present tense."
+    )
+
+    user_prompt = f"""Generate a morning brief for GB energy traders based on these physical conditions as of {ts_label}:
+
+PHYSICAL PREMIUM MODEL:
+- Normalised score: {_brief_fmt_num(ns, 1)} ({direction})
+- Implied price: £{_brief_fmt_num(implied)}/MWh | Market price: £{_brief_fmt_num(market_p)}/MWh | Premium gap: £{_brief_fmt_num(gap)}/MWh
+- Regime: {regime} (renewable-dominated / transitional / gas-dominated)
+- SRMC anchor: £{_brief_fmt_num(srmc)}/MWh
+
+GENERATION & WEATHER:
+- Wind: {_brief_fmt_num(wind_gw, 1)}GW | Solar: {_brief_fmt_num(solar_gw, 1)}GW | Residual demand: {_brief_fmt_num(residual, 1)}GW
+- 24h wind forecast range: {_brief_fmt_num(w_min, 1)}-{_brief_fmt_num(w_max, 1)} m/s
+
+GAS & CARBON:
+- TTF NGP: €{_brief_fmt_num(ttf_eur)}/MWh (today)
+- N2EX latest: £{_brief_fmt_num(n2ex_price)}/MWh (SP{n2ex_sp if n2ex_sp is not None else "n/a"})
+
+REMIT (active outages):
+{remit_block}
+
+EU STORAGE:
+- Germany: {(_brief_fmt_num(de_pct, 1) if de_pct is not None else "n/a")}% full
+- France: {(_brief_fmt_num(fr_pct, 1) if fr_pct is not None else "n/a")}% full
+
+Write a morning brief with exactly these three sections:
+
+EXECUTIVE SUMMARY
+[2-3 sentences capturing the single most important physical read for today's session. Be specific about prices, GW figures, and what they mean for the market.]
+
+WATCH LIST
+- [Specific thing to watch #1 — one line]
+- [Specific thing to watch #2 — one line]
+- [Specific thing to watch #3 — one line]
+
+BOOK TOUCHPOINTS
+[1-2 sentences connecting the physical picture to how a generic long/short GB power or gas position would be affected today.]
+
+Do not add any other sections or headers. Do not use markdown formatting."""
+
+    raw_text = await _anthropic_morning_brief(system_prompt, user_prompt)
+    exec_s, watch_s, book_s = parse_brief_sections(raw_text)
+
+    score_store = None
+    try:
+        if ns is not None:
+            score_store = float(ns)
+    except (TypeError, ValueError):
+        pass
+    wind_store = None
+    try:
+        if wind_gw is not None:
+            wind_store = float(wind_gw)
+    except (TypeError, ValueError):
+        pass
+    ttf_store = None
+    try:
+        if ttf_eur is not None:
+            ttf_store = float(ttf_eur)
+    except (TypeError, ValueError):
+        pass
+    mkt_store = None
+    try:
+        if n2ex_price is not None:
+            mkt_store = float(n2ex_price)
+    except (TypeError, ValueError):
+        pass
+
+    row = {
+        "executive_summary": exec_s,
+        "watch_list": watch_s,
+        "book_touchpoints": book_s,
+        "raw_response": raw_text,
+        "physical_premium_score": score_store,
+        "wind_gw": wind_store,
+        "ttf_eur_mwh": ttf_store,
+        "market_price_gbp_mwh": mkt_store,
+        "source": BRIEF_SOURCE,
+    }
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        await insert_brief_entry_http(http, row)
+
+    preview = (exec_s or "").replace("\n", " ")[:100]
+    logger.info(
+        "brief_cycle: generated brief score=%s wind=%sGW ttf=€%s | executive_summary preview: %s",
+        _brief_fmt_num(ns, 1) if ns is not None else "n/a",
+        _brief_fmt_num(wind_gw, 1) if wind_gw is not None else "n/a",
+        _brief_fmt_num(ttf_eur) if ttf_eur is not None else "n/a",
+        preview,
+    )
+
+
+def scheduled_morning_brief() -> None:
+    try:
+        asyncio.run(generate_morning_brief())
+    except Exception as e:
+        logger.error("Morning brief cycle aborted: %s", e, exc_info=True)
 
 
 # -----------------------------------------------------------------------------
@@ -1935,7 +2319,8 @@ def main() -> None:
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
-        "| TTF NGP every %s min | PV_Live solar every %s min | physical premium every %s min",
+        "| TTF NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
+        "| morning brief daily 06:00 (host TZ; use UTC)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -1957,12 +2342,15 @@ def main() -> None:
     scheduled_ttf()
     scheduled_solar()
     scheduled_physical_premium()
+    scheduled_morning_brief()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
     schedule.every(MARKET_INDEX_POLL_MINUTES).minutes.do(scheduled_market_prices)
     schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_ttf)
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
+    # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
+    schedule.every().day.at("06:00").do(scheduled_morning_brief)
 
     while True:
         schedule.run_pending()
