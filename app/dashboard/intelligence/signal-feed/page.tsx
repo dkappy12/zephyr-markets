@@ -9,10 +9,13 @@ import type { SignalRow } from "@/lib/signals";
 import {
   type AssetTab,
   type DedupedSignal,
+  assetNameFromTitle,
   buildCapacityHeaderStats,
   classifyAssetType,
-  dedupeByAssetLast24h,
+  dedupeByAsset,
+  eventLabelFromTitle,
   impactScore,
+  isActiveOutage,
   isOutageExpired,
   marketImplication,
   mwDeratedForRow,
@@ -56,16 +59,6 @@ function formatMw(n: number): string {
   }).format(Math.round(n));
 }
 
-function titleParts(title: string): { asset: string; event: string } {
-  const t = title.trim();
-  const idx = t.indexOf(" — ");
-  if (idx === -1) return { asset: t, event: "" };
-  return {
-    asset: t.slice(0, idx).trim(),
-    event: t.slice(idx + 3).trim(),
-  };
-}
-
 function assetTypePillClass(t: Exclude<AssetTab, "ALL">): string {
   switch (t) {
     case "CCGT":
@@ -102,7 +95,8 @@ function StructuredSignalCard({
   muted: boolean;
 }) {
   const { latest, updateCount, asset } = item;
-  const { asset: titleAsset, event } = titleParts(latest.title);
+  const titleAsset = assetNameFromTitle(latest.title);
+  const event = eventLabelFromTitle(latest.title);
   const assetType = classifyAssetType(asset);
   const desc = latest.description ?? "";
   const parsed = parseRemitDescription(desc);
@@ -213,7 +207,7 @@ function StructuredSignalCard({
         <div className="mt-2">
           <div
             className="flex h-2 w-full overflow-hidden rounded-sm"
-            style={{ backgroundColor: "rgba(214,211,205,0.95)" }}
+            style={{ backgroundColor: "#e5e1d9" }}
           >
             <div
               className="h-full shrink-0 rounded-sm"
@@ -310,26 +304,39 @@ export default function SignalFeedPage() {
     [rows],
   );
 
-  const deduped = useMemo(() => {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const recent = rows.filter(
-      (r) => new Date(r.created_at).getTime() >= cutoff,
+  const deduped = useMemo(() => dedupeByAsset(rows), [rows]);
+
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log(
+      "all deduplicated signals:",
+      deduped.map((s) => s.latest.title),
     );
-    return dedupeByAssetLast24h(recent);
-  }, [rows]);
+  }, [deduped]);
+
+  /** Feed row: recent update (24h) OR still active — so long-running outages (e.g. LBAR-1) stay visible. */
+  const feedVisible = useMemo(() => {
+    const now = new Date();
+    const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+    return deduped.filter((d) => {
+      const latest = d.latest;
+      if (isOutageExpired(latest, now)) return showCleared;
+      const recent =
+        new Date(latest.created_at).getTime() >= cutoff24h;
+      const active = isActiveOutage(latest, now);
+      return recent || active;
+    });
+  }, [deduped, showCleared]);
 
   const filteredSorted = useMemo(() => {
-    const now = new Date();
-    let list = deduped;
-    if (!showCleared) {
-      list = list.filter((d) => !isOutageExpired(d.latest, now));
-    }
+    let list = feedVisible;
     if (activeTab !== "ALL") {
       list = list.filter((d) => classifyAssetType(d.asset) === activeTab);
     }
     const scored = list.map((d) => {
       const mw = mwDeratedForRow(d.latest);
-      const impact = impactScore(d.latest, d.asset, mw);
+      const assetType = classifyAssetType(d.asset);
+      const impact = impactScore(d.latest, assetType, mw);
       const t = new Date(d.latest.created_at).getTime();
       return { d, impact, t };
     });
@@ -341,7 +348,7 @@ export default function SignalFeedPage() {
       return b.t - a.t;
     });
     return scored.map((x) => x.d);
-  }, [deduped, activeTab, sortMode, showCleared]);
+  }, [feedVisible, activeTab, sortMode]);
 
   const paged = useMemo(
     () => filteredSorted.slice(0, visibleCount),
@@ -356,9 +363,11 @@ export default function SignalFeedPage() {
     const now = new Date();
     return (
       deduped.length > 0 &&
+      !showCleared &&
+      feedVisible.length === 0 &&
       deduped.every((d) => isOutageExpired(d.latest, now))
     );
-  }, [deduped]);
+  }, [deduped, feedVisible.length, showCleared]);
 
   return (
     <div className="space-y-8">

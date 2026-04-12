@@ -77,21 +77,36 @@ const IC_TAGS = [
   "VIKING",
 ] as const;
 
-const ASSET_TYPE_WEIGHT: Record<Exclude<AssetTab, "ALL">, number> = {
+/** Weights for impact sort (aligned with desk prioritisation). */
+export const ASSET_TYPE_WEIGHT: Record<Exclude<AssetTab, "ALL">, number> = {
   CCGT: 1.0,
   WIND: 0.8,
   NUCLEAR: 1.2,
   INTERCONNECTOR: 1.1,
-  STORAGE: 0.55,
+  STORAGE: 0.9,
   OTHER: 0.5,
 };
 
-/** Part before em dash in title = asset name. */
+const TITLE_SEPARATORS = [" — ", " – ", " - "] as const;
+
+/** Part before title separator (em dash, en dash, or spaced hyphen) = asset name. */
 export function assetNameFromTitle(title: string): string {
   const t = title.trim();
-  const idx = t.indexOf(" — ");
-  if (idx === -1) return t;
-  return t.slice(0, idx).trim() || t;
+  for (const sep of TITLE_SEPARATORS) {
+    const idx = t.indexOf(sep);
+    if (idx !== -1) return t.slice(0, idx).trim() || t;
+  }
+  return t;
+}
+
+/** Text after the first recognised title separator (event label). */
+export function eventLabelFromTitle(title: string): string {
+  const t = title.trim();
+  for (const sep of TITLE_SEPARATORS) {
+    const idx = t.indexOf(sep);
+    if (idx !== -1) return t.slice(idx + sep.length).trim();
+  }
+  return "";
 }
 
 function matchesAny(u: string, tags: readonly string[]): boolean {
@@ -317,16 +332,22 @@ export function severityForRow(
   return "LOW";
 }
 
+/**
+ * Impact for sort: MW × asset weight × (2.5 if description mentions unplanned).
+ * e.g. DRAXX-4 515 MW unplanned CCGT → 515 × 1.0 × 2.5 = 1287.5
+ */
 export function impactScore(
   row: SignalRow,
-  asset: string,
+  assetType: Exclude<AssetTab, "ALL">,
   mw: number | null,
 ): number {
-  const m = mw ?? 0;
-  const unplanned = /\bUnplanned\b/i.test(row.description ?? "");
-  const type = classifyAssetType(asset);
-  const w = ASSET_TYPE_WEIGHT[type];
-  return m * (unplanned ? 2.5 : 1.0) * w;
+  const parsedMw = mw ?? 0;
+  const isUnplanned = (row.description ?? "").toLowerCase().includes("unplanned")
+    ? 1
+    : 0;
+  const typeWeight = ASSET_TYPE_WEIGHT[assetType];
+  const unplannedMultiplier = isUnplanned ? 2.5 : 1.0;
+  return parsedMw * typeWeight * unplannedMultiplier;
 }
 
 export function marketImplication(
@@ -417,9 +438,9 @@ export type DedupedSignal = {
 };
 
 /**
- * Last 24h rows, ordered by created_at desc; group by asset name; keep most recent + count.
+ * Group by asset name (before title separator); keep most recent row per asset + message count.
  */
-export function dedupeByAssetLast24h(rows: SignalRow[]): DedupedSignal[] {
+export function dedupeByAsset(rows: SignalRow[]): DedupedSignal[] {
   const byAsset = new Map<string, SignalRow[]>();
   for (const row of rows) {
     const asset = assetNameFromTitle(row.title);
@@ -441,3 +462,6 @@ export function dedupeByAssetLast24h(rows: SignalRow[]): DedupedSignal[] {
   }
   return out;
 }
+
+/** @deprecated Use {@link dedupeByAsset} */
+export const dedupeByAssetLast24h = dedupeByAsset;
