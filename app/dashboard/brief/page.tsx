@@ -14,6 +14,7 @@ type BriefArticle = {
   publication: string;
   url: string;
   thumbnail_url: string | null;
+  published_date?: string | null;
 };
 
 type BriefRow = {
@@ -86,7 +87,7 @@ export default function BriefPage() {
     : [];
 
   return (
-    <div className="relative mx-auto max-w-[660px] pl-8 sm:pl-10">
+    <div className="relative mx-auto max-w-3xl pl-8 sm:pl-10">
       <div className="pointer-events-none absolute bottom-8 left-0 top-24 hidden sm:block">
         <ManuscriptMarginalia />
       </div>
@@ -170,43 +171,68 @@ export default function BriefPage() {
             {loading ? (
               <li className="text-ink-mid">…</li>
             ) : articles.length > 0 ? (
-              articles.map((a, i) => (
-                <li key={`${a.url}-${i}`}>
-                  <div className="flex gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
-                    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[4px] bg-ivory-border/40">
-                      {a.thumbnail_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={a.thumbnail_url}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      ) : null}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-                        {a.publication}
-                      </p>
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 block font-serif text-base leading-snug text-ink underline-offset-2 hover:underline"
-                      >
-                        {a.headline}
-                      </a>
-                      <p className="mt-1 text-[13px] leading-relaxed text-ink-mid">
-                        {a.snippet}
-                      </p>
-                      {a.author ? (
-                        <p className="mt-1 text-[11px] text-ink-light">
-                          {a.author}
+              articles.map((a, i) => {
+                const thumbUrl = a.thumbnail_url?.trim();
+                const hasThumb = Boolean(thumbUrl);
+                return (
+                  <li key={`${a.url}-${i}`}>
+                    <div className="flex flex-row gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
+                      <div className="relative h-20 w-20 shrink-0">
+                        {hasThumb ? (
+                          <>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={thumbUrl}
+                              alt={a.headline}
+                              className="h-20 w-20 flex-shrink-0 rounded object-cover bg-stone-200"
+                              onError={(e) => {
+                                const el = e.target as HTMLImageElement;
+                                el.style.display = "none";
+                                el.nextElementSibling?.classList.remove("hidden");
+                              }}
+                            />
+                            <div
+                              className="absolute inset-0 hidden h-20 w-20 rounded bg-stone-200"
+                              aria-hidden
+                            />
+                          </>
+                        ) : (
+                          <div
+                            className="h-20 w-20 flex-shrink-0 rounded bg-stone-200"
+                            aria-hidden
+                          />
+                        )}
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex flex-row items-start justify-between gap-2">
+                          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                            {a.publication}
+                          </span>
+                          {a.published_date ? (
+                            <span className="shrink-0 text-right text-[11px] text-ink-light">
+                              {a.published_date}
+                            </span>
+                          ) : null}
+                        </div>
+                        <a
+                          href={a.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-serif text-base leading-snug text-ink underline-offset-2 hover:underline"
+                        >
+                          {a.headline}
+                        </a>
+                        <p className="text-[13px] leading-relaxed text-ink-mid">
+                          {a.snippet}
                         </p>
-                      ) : null}
+                        {a.author ? (
+                          <p className="text-[11px] text-ink-light">{a.author}</p>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))
+                  </li>
+                );
+              })
             ) : (
               <li className="text-[13px] text-ink-mid">No articles linked yet.</li>
             )}

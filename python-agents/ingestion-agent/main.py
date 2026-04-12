@@ -1764,6 +1764,41 @@ async def _brief_already_generated_today(http: httpx.AsyncClient) -> bool:
     return dt.date() == today
 
 
+async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
+    if not url or not isinstance(url, str) or not url.strip():
+        return None
+    try:
+        resp = await http.get(
+            url.strip(),
+            timeout=8.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+            },
+        )
+        if resp.status_code == 200:
+            html = resp.text
+            match = re.search(
+                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https?://[^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            )
+            if not match:
+                match = re.search(
+                    r'<meta[^>]+content=["\'](https?://[^"\']+)["\'][^>]+property=["\']og:image["\']',
+                    html,
+                    re.IGNORECASE,
+                )
+            if match:
+                return match.group(1)
+    except Exception as e:
+        logger.debug("og:image fetch failed for %s: %s", url, e)
+    return None
+
+
 async def _anthropic_further_reading_articles(
     http: httpx.AsyncClient,
     *,
@@ -1777,6 +1812,10 @@ async def _anthropic_further_reading_articles(
     if not ANTHROPIC_API_KEY:
         return []
 
+    _now_utc = datetime.now(timezone.utc)
+    _today_long = _now_utc.strftime("%A %d %B %Y")
+    _today_short = _now_utc.strftime("%d %B %Y")
+
     # --- Step 1: web search, natural-language summaries (tools enabled) ---
     headers_search = {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -1784,15 +1823,17 @@ async def _anthropic_further_reading_articles(
         "anthropic-beta": "web-search-2025-03-05",
         "content-type": "application/json",
     }
-    search_prompt = f"""Search the web for 3-5 recent news articles (published in the last 48 hours) relevant to GB and European energy markets. Use this context:
+    search_prompt = f"""Search for news articles published in the last 48 hours only. Today's date is {_today_long}. Do not include any articles older than 48 hours. If you cannot find recent articles on a topic, skip it rather than returning old articles. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources: BBC News, The Guardian, Carbon Brief, Energy Monitor, Recharge News, Energy Voice, PV Magazine, Wind Power Monthly, Montel News, Cornwall Insight blog, NESO blog (nationalgrideso.com), Ofgem news (ofgem.gov.uk), GOV.UK press releases. Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
+
+Use this context for relevance:
 - Wind generation: {wind_gw:.1f}GW, Solar: {solar_gw:.1f}GW
 - TTF: €{ttf_eur:.2f}/MWh, N2EX: £{n2ex_price:.2f}/MWh
 - Physical premium direction: {direction}
 - Active REMIT outages: {remit_count} outages
 
-Prioritise stories about: GB power prices, REMIT outages, European gas markets, wind generation, energy storage, UK electricity. Prefer reputable outlets (Reuters, Bloomberg, Financial Times, S&P Global Platts, ICIS, Montel, Argus Media, The Guardian energy section, BBC News energy).
+Prioritise stories about: GB power prices, REMIT outages, European gas markets, wind generation, energy storage, UK electricity.
 
-Summarise your findings in plain English. For each piece, include headline, publication, URL, author if known, and a short description of what it covers. Do not output JSON."""
+Summarise your findings in plain English. For each piece, include headline, publication, URL, author if known, publication date if known, and a short description of what it covers. Do not output JSON."""
     body_search: dict[str, Any] = {
         "model": CLAUDE_BRIEF_MODEL,
         "max_tokens": 6000,
@@ -1840,18 +1881,21 @@ Summarise your findings in plain English. For each piece, include headline, publ
     }
     format_user = f"""Convert these article summaries into a JSON array. Return ONLY the JSON array, starting with [ and ending with ]. No explanation, no markdown fences, no preamble.
 
+Only include articles published within the last 48 hours. Today is {_today_short}. Exclude any article that appears older than 48 hours.
+
 Article summaries to format:
 {text_for_step2}
 
 Required JSON format:
 [
   {{
-    "headline": "Article headline",
-    "snippet": "First 150 characters of article content...",
+    "headline": "Full article headline",
+    "snippet": "First 150-200 characters of article body text...",
     "author": "Author name or null",
     "publication": "Publication name",
     "url": "Full article URL",
-    "thumbnail_url": null
+    "thumbnail_url": "og:image URL or null",
+    "published_date": "e.g. 12 April 2026 or null if unknown"
   }}
 ]"""
     body_format: dict[str, Any] = {
@@ -1884,6 +1928,17 @@ Required JSON format:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
         )
+    for article in articles:
+        if not article.get("thumbnail_url"):
+            u = article.get("url", "")
+            if isinstance(u, str) and u.strip():
+                og = await _fetch_og_image(http, u.strip())
+                if og:
+                    article["thumbnail_url"] = og
+                    logger.debug(
+                        "articles_search: og:image found for %s",
+                        article.get("publication", "unknown"),
+                    )
     return articles
 
 
