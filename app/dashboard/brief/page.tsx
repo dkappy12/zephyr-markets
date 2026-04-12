@@ -87,7 +87,7 @@ export default function BriefPage() {
     : [];
 
   return (
-    <div className="relative mx-auto max-w-4xl px-6">
+    <div className="relative mx-auto w-full max-w-4xl px-8">
       <div className="pointer-events-none absolute bottom-8 left-0 top-24 hidden sm:block">
         <ManuscriptMarginalia />
       </div>

@@ -1822,21 +1822,28 @@ async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
                 ),
             },
         )
-        if resp.status_code == 200:
-            html = resp.text
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+        match = re.search(
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        )
+        if not match:
             match = re.search(
-                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https?://[^"\']+)["\']',
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
                 html,
                 re.IGNORECASE,
             )
-            if not match:
-                match = re.search(
-                    r'<meta[^>]+content=["\'](https?://[^"\']+)["\'][^>]+property=["\']og:image["\']',
-                    html,
-                    re.IGNORECASE,
-                )
-            if match:
-                return match.group(1)
+        if not match:
+            match = re.search(
+                r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            )
+        if match:
+            return match.group(1).strip()
     except Exception as e:
         logger.debug("og:image fetch failed for %s: %s", url, e)
     return None
@@ -1971,19 +1978,20 @@ Required JSON format:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
         )
-    logger.info("articles_search: fetching og:image for %d articles", len(articles))
+    logger.info("articles: fetching og:image for %d articles", len(articles))
     for article in articles:
         if not article.get("thumbnail_url"):
             u = article.get("url", "")
             if isinstance(u, str) and u.strip():
-                og = await _fetch_og_image(http, u.strip())
+                u_stripped = u.strip()
+                og = await _fetch_og_image(http, u_stripped)
+                logger.info(
+                    "articles: url=%s og_image=%s",
+                    u_stripped[:50],
+                    og or "None",
+                )
                 if og:
                     article["thumbnail_url"] = og
-                    logger.info(
-                        "articles_search: og:image=%s for %s",
-                        og,
-                        article.get("publication"),
-                    )
     return articles
 
 
@@ -2401,9 +2409,9 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             "source": BRIEF_SOURCE,
         }
 
-        logger.debug(
-            "articles_search: final articles before insert: %s",
-            json.dumps(articles, indent=2)[:500],
+        logger.info(
+            "articles before insert: %s",
+            str([a.get("thumbnail_url") for a in articles]),
         )
         await insert_brief_entry_http(http, row)
 
