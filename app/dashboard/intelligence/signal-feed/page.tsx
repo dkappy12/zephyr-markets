@@ -13,6 +13,7 @@ import {
   classifyAssetType,
   dedupeByAssetLast24h,
   impactScore,
+  isOutageExpired,
   marketImplication,
   mwDeratedForRow,
   normalMwFromRaw,
@@ -21,6 +22,8 @@ import {
 } from "@/lib/signal-feed";
 
 const BRAND_GREEN = "#1D6B4E";
+/** Zephyr terracotta — capacity derated, severity HIGH, warnings */
+const TERRACOTTA = "#8B3A3A";
 
 const ASSET_TABS: AssetTab[] = [
   "ALL",
@@ -28,6 +31,7 @@ const ASSET_TABS: AssetTab[] = [
   "WIND",
   "NUCLEAR",
   "INTERCONNECTOR",
+  "STORAGE",
   "OTHER",
 ];
 
@@ -37,6 +41,7 @@ const TAB_LABEL: Record<AssetTab, string> = {
   WIND: "Wind",
   NUCLEAR: "Nuclear",
   INTERCONNECTOR: "Interconnector",
+  STORAGE: "Storage",
   OTHER: "Other",
 };
 
@@ -71,6 +76,8 @@ function assetTypePillClass(t: Exclude<AssetTab, "ALL">): string {
       return "border-violet-700/30 bg-violet-50/80 text-violet-900";
     case "INTERCONNECTOR":
       return "border-cyan-700/30 bg-cyan-50/80 text-cyan-900";
+    case "STORAGE":
+      return "border-sky-700/30 bg-sky-50/80 text-sky-950";
     default:
       return "border-ivory-border bg-ivory text-ink-mid";
   }
@@ -79,18 +86,20 @@ function assetTypePillClass(t: Exclude<AssetTab, "ALL">): string {
 function severityPillClass(s: "HIGH" | "MEDIUM" | "LOW"): string {
   switch (s) {
     case "HIGH":
-      return "border-bear/40 bg-[#FDF6F5] text-bear";
+      return "border-transparent bg-[#8B3A3A] text-white";
     case "MEDIUM":
-      return "border-amber-600/40 bg-amber-50/90 text-amber-900";
+      return "border-transparent bg-[#92400E] text-white";
     default:
-      return "border-ivory-border bg-ivory text-ink-mid";
+      return "border-transparent bg-[#4B5320] text-white";
   }
 }
 
 function StructuredSignalCard({
   item,
+  muted,
 }: {
   item: DedupedSignal;
+  muted: boolean;
 }) {
   const { latest, updateCount, asset } = item;
   const { asset: titleAsset, event } = titleParts(latest.title);
@@ -137,12 +146,19 @@ function StructuredSignalCard({
   }
   const middleLine = bits.join(" · ");
 
-  const barPct =
-    mw != null && normal != null && normal > 0
-      ? Math.min(100, Math.max(0, (mw / normal) * 100))
-      : mw != null && mw > 0
-        ? 100
-        : 0;
+  const der = mw ?? 0;
+  const norm = normal ?? 0;
+  let capacityBarLabel = "";
+  let terrPct = 0;
+  if (norm > 0) {
+    terrPct = Math.min(100, Math.max(0, (der / norm) * 100));
+    if (mw == null) capacityBarLabel = "";
+    else if (der <= 0) capacityBarLabel = "RETURNED";
+    else if (der >= norm) capacityBarLabel = "FULLY OFFLINE";
+    else capacityBarLabel = `${Math.round((der / norm) * 100)}% derated`;
+  } else if (mw !== null && der <= 0) {
+    capacityBarLabel = "RETURNED";
+  }
 
   const latestTime = formatInTimeZone(
     parseISO(latest.created_at),
@@ -151,7 +167,11 @@ function StructuredSignalCard({
   );
 
   return (
-    <article className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
+    <article
+      className={`rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3 transition-opacity ${
+        muted ? "opacity-[0.62]" : ""
+      }`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex flex-wrap items-center gap-2">
           <h3 className="font-sans text-base font-semibold leading-snug text-ink">
@@ -183,15 +203,34 @@ function StructuredSignalCard({
           {latestTime} UTC
         </time>
       </div>
-      <p className="mt-2 text-sm leading-relaxed text-ink">{middleLine}</p>
+      <p
+        className={`mt-2 text-sm leading-relaxed ${muted ? "text-ink-mid" : "text-ink"}`}
+      >
+        {middleLine}
+      </p>
 
-      {mw != null && mw > 0 ? (
-        <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/70">
+      {norm > 0 ? (
+        <div className="mt-2">
           <div
-            className="h-full rounded-sm bg-[#B91C1C]/85"
-            style={{ width: `${barPct}%` }}
-          />
+            className="flex h-2 w-full overflow-hidden rounded-sm"
+            style={{ backgroundColor: "rgba(214,211,205,0.95)" }}
+          >
+            <div
+              className="h-full shrink-0 rounded-sm"
+              style={{
+                width: `${terrPct}%`,
+                backgroundColor: TERRACOTTA,
+              }}
+            />
+          </div>
+          {capacityBarLabel ? (
+            <p className="mt-1 text-[10px] font-medium tabular-nums text-ink-mid">
+              {capacityBarLabel}
+            </p>
+          ) : null}
         </div>
+      ) : capacityBarLabel === "RETURNED" ? (
+        <p className="mt-2 text-[10px] font-medium text-ink-mid">RETURNED</p>
       ) : null}
 
       <p
@@ -211,6 +250,7 @@ export default function SignalFeedPage() {
   const [activeTab, setActiveTab] = useState<AssetTab>("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("impact");
   const [visibleCount, setVisibleCount] = useState(10);
+  const [showCleared, setShowCleared] = useState(false);
 
   const loadSignals = useCallback(async () => {
     const supabase = createBrowserClient();
@@ -279,7 +319,11 @@ export default function SignalFeedPage() {
   }, [rows]);
 
   const filteredSorted = useMemo(() => {
+    const now = new Date();
     let list = deduped;
+    if (!showCleared) {
+      list = list.filter((d) => !isOutageExpired(d.latest, now));
+    }
     if (activeTab !== "ALL") {
       list = list.filter((d) => classifyAssetType(d.asset) === activeTab);
     }
@@ -297,7 +341,7 @@ export default function SignalFeedPage() {
       return b.t - a.t;
     });
     return scored.map((x) => x.d);
-  }, [deduped, activeTab, sortMode]);
+  }, [deduped, activeTab, sortMode, showCleared]);
 
   const paged = useMemo(
     () => filteredSorted.slice(0, visibleCount),
@@ -306,7 +350,15 @@ export default function SignalFeedPage() {
 
   useEffect(() => {
     setVisibleCount(10);
-  }, [activeTab, sortMode]);
+  }, [activeTab, sortMode, showCleared]);
+
+  const allRecentCleared = useMemo(() => {
+    const now = new Date();
+    return (
+      deduped.length > 0 &&
+      deduped.every((d) => isOutageExpired(d.latest, now))
+    );
+  }, [deduped]);
 
   return (
     <div className="space-y-8">
@@ -377,6 +429,15 @@ export default function SignalFeedPage() {
             );
           })}
         </div>
+        <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink-mid">
+          <input
+            type="checkbox"
+            checked={showCleared}
+            onChange={(e) => setShowCleared(e.target.checked)}
+            className="rounded border-ivory-border text-ink accent-[#8B3A3A]"
+          />
+          <span>Show cleared outages</span>
+        </label>
         <div className="flex items-center gap-2 text-[11px] text-ink-mid">
           <span className="font-medium text-ink-light">Sort by:</span>
           {(["impact", "time"] as const).map((m) => {
@@ -413,7 +474,9 @@ export default function SignalFeedPage() {
         </p>
       ) : filteredSorted.length === 0 ? (
         <p className="text-sm text-ink-mid">
-          No REMIT signals in the last 24h with the current filter.
+          {allRecentCleared && !showCleared
+            ? "All recent outages have ended (cleared). Turn on “Show cleared outages” to see them muted below."
+            : "No REMIT signals in the last 24h with the current filter."}
         </p>
       ) : (
         <>
@@ -426,7 +489,10 @@ export default function SignalFeedPage() {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               >
-                <StructuredSignalCard item={item} />
+                <StructuredSignalCard
+                  item={item}
+                  muted={isOutageExpired(item.latest, new Date())}
+                />
               </motion.div>
             ))}
           </div>

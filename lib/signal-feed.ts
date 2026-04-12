@@ -7,6 +7,7 @@ export type AssetTab =
   | "WIND"
   | "NUCLEAR"
   | "INTERCONNECTOR"
+  | "STORAGE"
   | "OTHER";
 
 const CCGT_TAGS = [
@@ -38,7 +39,11 @@ const CCGT_TAGS = [
   "TBGP",
   "KEADBY",
   "UNITA",
+  "THUR",
+  "NNGAO",
 ] as const;
+
+const STORAGE_TAGS = ["LBAR", "BATT", "STOR"] as const;
 
 const WIND_TAGS = [
   "WIND",
@@ -54,6 +59,9 @@ const WIND_TAGS = [
   "FIFO",
   "SGRWO",
   "BCRWO",
+  "MOWEO",
+  "MOWWO",
+  "MORAY",
 ] as const;
 
 const NUCLEAR_TAGS = ["HEYM", "TORN", "WYLF", "SIZI", "HRTL"] as const;
@@ -74,6 +82,7 @@ const ASSET_TYPE_WEIGHT: Record<Exclude<AssetTab, "ALL">, number> = {
   WIND: 0.8,
   NUCLEAR: 1.2,
   INTERCONNECTOR: 1.1,
+  STORAGE: 0.55,
   OTHER: 0.5,
 };
 
@@ -85,20 +94,24 @@ export function assetNameFromTitle(title: string): string {
   return t.slice(0, idx).trim() || t;
 }
 
+function matchesAny(u: string, tags: readonly string[]): boolean {
+  for (const tag of tags) {
+    if (u.includes(tag)) return true;
+  }
+  return false;
+}
+
+/**
+ * CCGT before STORAGE so assets matching both resolve to CCGT.
+ * Order: WIND → NUCLEAR → INTERCONNECTOR → CCGT → STORAGE → OTHER.
+ */
 export function classifyAssetType(asset: string): Exclude<AssetTab, "ALL"> {
   const u = asset.toUpperCase();
-  for (const tag of CCGT_TAGS) {
-    if (u.includes(tag)) return "CCGT";
-  }
-  for (const tag of WIND_TAGS) {
-    if (u.includes(tag)) return "WIND";
-  }
-  for (const tag of NUCLEAR_TAGS) {
-    if (u.includes(tag)) return "NUCLEAR";
-  }
-  for (const tag of IC_TAGS) {
-    if (u.includes(tag)) return "INTERCONNECTOR";
-  }
+  if (matchesAny(u, WIND_TAGS)) return "WIND";
+  if (matchesAny(u, NUCLEAR_TAGS)) return "NUCLEAR";
+  if (matchesAny(u, IC_TAGS)) return "INTERCONNECTOR";
+  if (matchesAny(u, CCGT_TAGS)) return "CCGT";
+  if (matchesAny(u, STORAGE_TAGS)) return "STORAGE";
   return "OTHER";
 }
 
@@ -139,9 +152,31 @@ function endTimeFromRaw(raw: unknown): Date | null {
   }
 }
 
+/** Parse "HH:MM UTC D Mon" from REMIT description (same as ingestion `format_event_time_utc`). */
+export function parseRemitDisplayTimeUtc(display: string): Date | null {
+  const y = new Date().getUTCFullYear();
+  return parseUkRemitTime(display.trim(), y);
+}
+
+/** Prefer JSON end time; else parse `to …` / `until …` from description. */
+export function outageEndUtcFromRow(row: SignalRow): Date | null {
+  const rawEnd = endTimeFromRaw(row.raw_data);
+  if (rawEnd) return rawEnd;
+  const p = parseRemitDescription(row.description ?? "");
+  if (!p.endDisplay) return null;
+  return parseRemitDisplayTimeUtc(p.endDisplay);
+}
+
+/** Cleared: parsed end exists and is not after now. */
+export function isOutageExpired(row: SignalRow, now: Date): boolean {
+  const end = outageEndUtcFromRow(row);
+  if (end == null) return false;
+  return end.getTime() <= now.getTime();
+}
+
 /** Active = no end time, or end strictly in the future. */
 export function isActiveOutage(row: SignalRow, now: Date): boolean {
-  const end = endTimeFromRaw(row.raw_data);
+  const end = outageEndUtcFromRow(row);
   if (end == null) return true;
   return end.getTime() > now.getTime();
 }
@@ -270,13 +305,15 @@ export function severityForRow(
   row: SignalRow,
   mw: number | null,
 ): Severity {
-  const c = (row.confidence ?? "").trim().toLowerCase();
-  if (c === "high" || c === "confirmed") return "HIGH";
-  if (c === "medium" || c === "med" || c === "watch") return "MEDIUM";
-  if (c === "low") return "LOW";
+  const desc = row.description ?? "";
+  const planned = /\bPlanned\b/i.test(desc);
+  const unplanned = /\bUnplanned\b/i.test(desc);
   const m = mw ?? 0;
-  if (m > 200) return "HIGH";
-  if (m >= 50) return "MEDIUM";
+  if (m < 100) return "LOW";
+  if (unplanned && m >= 300) return "HIGH";
+  if (unplanned && m >= 100 && m <= 299) return "MEDIUM";
+  if (planned && m >= 500) return "MEDIUM";
+  if (planned && m < 500) return "LOW";
   return "LOW";
 }
 
@@ -316,6 +353,9 @@ export function marketImplication(
   }
   if (assetType === "NUCLEAR") {
     return "Baseload reduction — increases residual demand";
+  }
+  if (assetType === "STORAGE") {
+    return "Storage derate — may shift balancing and intraday spreads";
   }
   return "Monitor for system impact";
 }
