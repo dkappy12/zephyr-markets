@@ -24,8 +24,10 @@ const BRAND_GREEN = "#1D6B4E";
 const INK = "#2C2A26";
 const INK_MID = "#6B6760";
 const SPARK_NEG = "#8B3A3A";
+/** Currency bridge € → £ for TTF (€/MWh). */
 const GBP_PER_EUR = 0.86;
 const CCGT_ELECTRIC_EFF = 0.5;
+/** UKA + CPS stack (£/MWh electric). */
 const CARBON_ADDER = 26;
 const VOM = 2;
 const CO2_INTENSITY = 0.9;
@@ -73,10 +75,8 @@ type PhysicalPremiumRow = {
   residual_demand_gw: number | null;
   wind_gw: number | null;
   solar_gw: number | null;
+  /** From latest row; Python agent — not summed from raw REMIT signals. */
   remit_mw_lost: number | null;
-  market_price_gbp_mwh: number | null;
-  srmc_gbp_mwh: number | null;
-  premium_value: number | null;
 };
 
 type GasRow = {
@@ -112,12 +112,15 @@ function dedupeMidBySettlement(rows: MidRow[]): MidRow[] {
   });
 }
 
-/** TTF €/MWh → GBP/MWh thermal (currency bridge only; no therm conversion). */
+/**
+ * SRMC: gas_gbp_per_mwh_thermal = ttf_eur_mwh * GBP_PER_EUR (skip THERM_PER_MWH=2.931; TTF is €/MWh).
+ * gas_gbp_per_mwh_electric = gas_gbp_per_mwh_thermal / 0.50
+ * SRMC = gas_gbp_per_mwh_electric + 26 + 2
+ */
 function gasGbpPerMwhThermal(ttfEur: number): number {
   return ttfEur * GBP_PER_EUR;
 }
 
-/** Gas cost per MWh electricity at CCGT efficiency. */
 function gasGbpPerMwhElectric(ttfEur: number): number {
   return gasGbpPerMwhThermal(ttfEur) / CCGT_ELECTRIC_EFF;
 }
@@ -130,6 +133,7 @@ function nbpGbpMwh(ttfEur: number): number {
   return gasGbpPerMwhThermal(ttfEur);
 }
 
+/** Spark spread = n2ex_price − SRMC(TTF). */
 function sparkSpreadGbpMwh(n2ex: number, ttfEur: number): number {
   return n2ex - srmcGbpMwh(ttfEur);
 }
@@ -197,7 +201,7 @@ export default function MarketsPage() {
           supabase
             .from("physical_premium")
             .select(
-              "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost, market_price_gbp_mwh, srmc_gbp_mwh, premium_value",
+              "normalised_score, direction, residual_demand_gw, wind_gw, solar_gw, remit_mw_lost",
             )
             .order("calculated_at", { ascending: false })
             .limit(1)
@@ -265,9 +269,6 @@ export default function MarketsPage() {
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
             remit_mw_lost: parseNum(p.remit_mw_lost),
-            market_price_gbp_mwh: parseNum(p.market_price_gbp_mwh),
-            srmc_gbp_mwh: parseNum(p.srmc_gbp_mwh),
-            premium_value: parseNum(p.premium_value),
           });
         } else {
           setPhysicalPremium(null);
@@ -381,17 +382,9 @@ export default function MarketsPage() {
 
   const ttfEur = gasRow?.price_eur_mwh ?? null;
 
-  const srmcFromTtf =
-    ttfEur != null && Number.isFinite(srmcGbpMwh(ttfEur))
-      ? srmcGbpMwh(ttfEur)
-      : null;
+  /** GB Power chart dashed line: same TTF-derived SRMC as the cost stack (no legacy £108.41 / DB SRMC). */
   const srmcRef =
-    srmcFromTtf != null
-      ? srmcFromTtf
-      : physicalPremium?.srmc_gbp_mwh != null &&
-          Number.isFinite(physicalPremium.srmc_gbp_mwh)
-        ? physicalPremium.srmc_gbp_mwh
-        : null;
+    ttfEur != null && Number.isFinite(ttfEur) ? srmcGbpMwh(ttfEur) : null;
 
   const latestN2ex = midRows[0]?.price_gbp_mwh ?? null;
   const sixAgo = midRows[6]?.price_gbp_mwh ?? null;
