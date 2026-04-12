@@ -1972,6 +1972,12 @@ async def _anthropic_morning_brief(
             json=body,
             timeout=120.0,
         )
+        if not resp.is_success:
+            logger.error(
+                "anthropic API error: status=%s body=%s",
+                resp.status_code,
+                resp.text[:1000],
+            )
         resp.raise_for_status()
         return resp.json()
 
