@@ -1978,20 +1978,6 @@ Required JSON format:
         logger.warning(
             "further reading: could not parse articles JSON from any text block",
         )
-    logger.info("articles: fetching og:image for %d articles", len(articles))
-    for article in articles:
-        if not article.get("thumbnail_url"):
-            u = article.get("url", "")
-            if isinstance(u, str) and u.strip():
-                u_stripped = u.strip()
-                og = await _fetch_og_image(http, u_stripped)
-                logger.info(
-                    "articles: url=%s og_image=%s",
-                    u_stripped[:50],
-                    og or "None",
-                )
-                if og:
-                    article["thumbnail_url"] = og
     return articles
 
 
@@ -2393,6 +2379,24 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             remit_count=remit_count,
         )
 
+        # Fetch og:image for each article that has a URL but no thumbnail
+        logger.info("articles: fetching og:image for %d articles", len(articles))
+        for article in articles:
+            if article.get("url") and not article.get("thumbnail_url"):
+                og = await _fetch_og_image(http, article["url"])
+                article["thumbnail_url"] = og  # will be None if fetch failed
+                logger.info(
+                    "articles: %s -> thumbnail_url=%s",
+                    article.get("publication", "?"),
+                    og or "None",
+                )
+
+        # Log thumbnail status before insert
+        logger.info(
+            "articles before insert thumbnails: %s",
+            [a.get("thumbnail_url") for a in articles],
+        )
+
         row = {
             "executive_summary": exec_s,
             "overnight_summary": overnight_s,
@@ -2409,10 +2413,6 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             "source": BRIEF_SOURCE,
         }
 
-        logger.info(
-            "articles before insert: %s",
-            str([a.get("thumbnail_url") for a in articles]),
-        )
         await insert_brief_entry_http(http, row)
 
         preview = (overnight_s or exec_s or "").replace("\n", " ")[:100]
