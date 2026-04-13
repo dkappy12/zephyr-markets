@@ -8,6 +8,7 @@ import {
   parsePhysicalDirection,
   premiumGasGbpPosition,
   premiumRemitGbpPosition,
+  premiumShapeGbpPosition,
   premiumWindGbpPosition,
   primaryDriverKey,
   resolveTotalPriceMoveGbpMwh,
@@ -402,11 +403,32 @@ export function AttributionPageClient() {
   const windAtt = premiumAttr.windGbp;
   const gasAtt = premiumAttr.gasGbp;
   const remitAtt = premiumAttr.remitGbp;
+  const shapeAtt = useMemo(
+    () =>
+      positions.reduce(
+        (sum, p) =>
+          sum + premiumShapeGbpPosition(p, premiumAttr.priceResidualMoveGbpMwh),
+        0,
+      ),
+    [positions, premiumAttr.priceResidualMoveGbpMwh],
+  );
 
   const totalPnl = totalTodayPnlGbp(positions, livePrices);
-  const residual = totalPnl - windAtt - gasAtt - remitAtt;
+  const residual = totalPnl - windAtt - gasAtt - remitAtt - shapeAtt;
+  const explainedPnl = totalPnl - residual;
+  const explainedRatio =
+    Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
+  const explainedPct = Math.round(explainedRatio * 100);
+  const attributionConfidence =
+    explainedPct >= 75 ? "High" : explainedPct >= 50 ? "Medium" : "Low";
 
-  const primary = primaryDriverKey(windAtt, gasAtt, remitAtt, residual);
+  const primary = primaryDriverKey(
+    windAtt,
+    gasAtt,
+    remitAtt,
+    residual,
+    shapeAtt,
+  );
 
   const windStackPct = useMemo(() => {
     const w = parseNum(physLatest?.wind_gw) ?? 0;
@@ -479,6 +501,7 @@ export function AttributionPageClient() {
     Math.abs(windAtt) +
     Math.abs(gasAtt) +
     Math.abs(remitAtt) +
+    Math.abs(shapeAtt) +
     Math.abs(residual);
   const barPct = (v: number) =>
     absSum > 0 ? Math.round((Math.abs(v) / absSum) * 100) : 0;
@@ -564,7 +587,11 @@ export function AttributionPageClient() {
       wind_attribution_gbp: windAtt,
       gas_attribution_gbp: gasAtt,
       remit_attribution_gbp: remitAtt,
+      shape_attribution_gbp: shapeAtt,
       residual_gbp: residual,
+      explained_gbp: explainedPnl,
+      explained_ratio: explainedRatio,
+      attribution_confidence: attributionConfidence,
       primary_driver: primary,
       total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
       market_intraday_gbp_mwh: marketIntradayGbpMwh,
@@ -612,7 +639,11 @@ export function AttributionPageClient() {
     windAtt,
     gasAtt,
     remitAtt,
+    shapeAtt,
     residual,
+    explainedPnl,
+    explainedRatio,
+    attributionConfidence,
     primary,
     supabase,
     positions,
@@ -665,7 +696,7 @@ export function AttributionPageClient() {
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="grid gap-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-4 sm:grid-cols-2 lg:grid-cols-4 sm:px-5"
+            className="grid gap-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-4 sm:grid-cols-2 lg:grid-cols-5 sm:px-5"
           >
             <div>
               <p className={sectionLabel}>Total P&amp;L today</p>
@@ -695,6 +726,15 @@ export function AttributionPageClient() {
                 className={`mt-1 text-sm font-semibold uppercase tracking-wide ${regime.className}`}
               >
                 {regime.label}
+              </p>
+            </div>
+            <div>
+              <p className={sectionLabel}>Explained</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+                {explainedPct}%
+              </p>
+              <p className="mt-1 text-[11px] text-ink-mid">
+                {attributionConfidence} confidence
               </p>
             </div>
           </motion.div>
@@ -735,9 +775,14 @@ export function AttributionPageClient() {
                         dir: `${remitStressPct.toFixed(0)}% system stress · ${premiumAttr.remitMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
+                        name: "Shape / basis",
+                        impact: shapeAtt,
+                        dir: `${premiumAttr.priceResidualMoveGbpMwh.toFixed(2)} £/MWh residual market move`,
+                      },
+                      {
                         name: "Residual",
                         impact: residual,
-                        dir: "unexplained",
+                        dir: "unexplained after factor decomposition",
                       },
                     ] as const
                   ).map((row) => {
@@ -783,6 +828,10 @@ export function AttributionPageClient() {
                 </tbody>
               </table>
             </div>
+            <p className="mt-3 text-xs text-ink-light">
+              Model explains {explainedPct}% of today&apos;s P&amp;L ({formatSignedGbp(explainedPnl)} explained,{" "}
+              {formatSignedGbp(residual)} residual) · confidence: {attributionConfidence}.
+            </p>
 
             <button
               type="button"

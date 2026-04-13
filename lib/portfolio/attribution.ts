@@ -250,11 +250,16 @@ export function primaryDriverKey(
   gas: number,
   remit: number,
   residual: number,
-): "wind" | "gas" | "remit" | "residual" {
-  const rows: { k: "wind" | "gas" | "remit" | "residual"; a: number }[] = [
+  shape = 0,
+): "wind" | "gas" | "remit" | "residual" | "shape" {
+  const rows: {
+    k: "wind" | "gas" | "remit" | "residual" | "shape";
+    a: number;
+  }[] = [
     { k: "wind", a: Math.abs(wind) },
     { k: "gas", a: Math.abs(gas) },
     { k: "remit", a: Math.abs(remit) },
+    { k: "shape", a: Math.abs(shape) },
     { k: "residual", a: Math.abs(residual) },
   ];
   rows.sort((x, y) => y.a - x.a);
@@ -353,6 +358,14 @@ export function premiumRemitGbpPosition(
   remitMoveGbpMwh: number,
 ): number {
   return premiumWindGbpPosition(p, remitMoveGbpMwh);
+}
+
+/** Residual market move attribution on GB power legs (shape/basis/intraday effects). */
+export function premiumShapeGbpPosition(
+  p: PositionRow,
+  shapeMoveGbpMwh: number,
+): number {
+  return premiumWindGbpPosition(p, shapeMoveGbpMwh);
 }
 
 export function premiumGasGbpPosition(
