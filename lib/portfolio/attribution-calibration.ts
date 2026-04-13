@@ -37,7 +37,7 @@ const DEFAULT_MULTIPLIERS: Record<CalibrationFeatureKey, number> = {
   interconnector: 1,
 };
 
-const MIN_SAMPLE_SIZE = 8;
+export const MIN_SAMPLE_SIZE = 30;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -104,7 +104,7 @@ export function calibrateAttributionMultipliers(
     };
   }
 
-  const multipliers: Record<CalibrationFeatureKey, number> = {
+  const rawMultipliers: Record<CalibrationFeatureKey, number> = {
     wind: clamp(beta[0] ?? 1, -3, 3),
     gas: clamp(beta[1] ?? 1, -3, 3),
     remit: clamp(beta[2] ?? 1, -3, 3),
@@ -116,11 +116,40 @@ export function calibrateAttributionMultipliers(
   let ssRes = 0;
   let ssTot = 0;
   for (const s of samples) {
-    const pred = KEYS.reduce((sum, k) => sum + (s.x[k] ?? 0) * multipliers[k], 0);
+    const pred = KEYS.reduce(
+      (sum, k) => sum + (s.x[k] ?? 0) * rawMultipliers[k],
+      0,
+    );
     ssRes += (s.y - pred) ** 2;
     ssTot += (s.y - yMean) ** 2;
   }
   const r2 = ssTot > 0 ? clamp(1 - ssRes / ssTot, -1, 1) : 0;
+
+  // Hard fallback on obviously poor fit.
+  if (!Number.isFinite(r2) || r2 < -0.05) {
+    return {
+      multipliers: { ...DEFAULT_MULTIPLIERS },
+      sampleSize: samples.length,
+      fallbackUsed: true,
+      r2: Number.isFinite(r2) ? r2 : 0,
+      lambda,
+    };
+  }
+
+  // Blend towards neutral multipliers when sample size is only moderately sufficient.
+  const maturity = clamp(
+    (samples.length - MIN_SAMPLE_SIZE) / (90 - MIN_SAMPLE_SIZE),
+    0,
+    1,
+  );
+  const multipliers: Record<CalibrationFeatureKey, number> = {
+    wind: 1 + (rawMultipliers.wind - 1) * maturity,
+    gas: 1 + (rawMultipliers.gas - 1) * maturity,
+    remit: 1 + (rawMultipliers.remit - 1) * maturity,
+    shape: 1 + (rawMultipliers.shape - 1) * maturity,
+    demand: 1 + (rawMultipliers.demand - 1) * maturity,
+    interconnector: 1 + (rawMultipliers.interconnector - 1) * maturity,
+  };
 
   return {
     multipliers,
@@ -129,4 +158,25 @@ export function calibrateAttributionMultipliers(
     r2,
     lambda,
   };
+}
+
+export function attributionConfidenceFromMetrics(opts: {
+  explainedRatio: number;
+  residualAbs: number;
+  totalPnlAbs: number;
+  calibration: CalibrationResult;
+}): "High" | "Medium" | "Low" {
+  const explained = clamp(opts.explainedRatio, 0, 1);
+  const relResidual =
+    opts.totalPnlAbs > 1 ? opts.residualAbs / opts.totalPnlAbs : 1;
+  if (opts.calibration.fallbackUsed || opts.calibration.sampleSize < MIN_SAMPLE_SIZE) {
+    return "Low";
+  }
+  if (explained >= 0.75 && opts.calibration.r2 >= 0.2 && relResidual <= 0.35) {
+    return "High";
+  }
+  if (explained >= 0.5 && opts.calibration.r2 >= 0.05 && relResidual <= 0.6) {
+    return "Medium";
+  }
+  return "Low";
 }

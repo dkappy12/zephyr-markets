@@ -15,7 +15,11 @@ import {
   totalTodayPnlGbp,
   type PhysicalPremiumInput,
 } from "@/lib/portfolio/attribution";
-import { calibrateAttributionMultipliers } from "@/lib/portfolio/attribution-calibration";
+import {
+  attributionConfidenceFromMetrics,
+  calibrateAttributionMultipliers,
+  MIN_SAMPLE_SIZE,
+} from "@/lib/portfolio/attribution-calibration";
 import {
   formatGbpColored,
   GBP_PER_EUR,
@@ -324,7 +328,7 @@ export function AttributionPageClient() {
 
     const today = utcToday();
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const since30 = format(subDays(new Date(), 30), "yyyy-MM-dd");
+    const since120 = format(subDays(new Date(), 120), "yyyy-MM-dd");
 
     const [
       posRes,
@@ -379,7 +383,7 @@ export function AttributionPageClient() {
             .from("portfolio_pnl")
             .select("date, total_pnl, attribution_json")
             .eq("user_id", uid)
-            .gte("date", since30)
+            .gte("date", since120)
             .order("date", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
     ]);
@@ -551,8 +555,12 @@ export function AttributionPageClient() {
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
   const explainedPct = Math.round(explainedRatio * 100);
-  const attributionConfidence =
-    explainedPct >= 75 ? "High" : explainedPct >= 50 ? "Medium" : "Low";
+  const attributionConfidence = attributionConfidenceFromMetrics({
+    explainedRatio,
+    residualAbs: Math.abs(residual),
+    totalPnlAbs: Math.abs(totalPnl),
+    calibration,
+  });
 
   const primary = primaryDriverKey(
     windAttCal,
@@ -810,6 +818,14 @@ export function AttributionPageClient() {
       out.push("Low model confidence: less than 50% of P&L explained");
     } else if (explainedPct < 75) {
       out.push("Moderate confidence: residual still material");
+    }
+    if (calibration.sampleSize < MIN_SAMPLE_SIZE) {
+      out.push(
+        `Calibration sample too small (${calibration.sampleSize}/${MIN_SAMPLE_SIZE}) — using conservative multipliers`,
+      );
+    }
+    if (calibration.fallbackUsed) {
+      out.push("Calibration fallback active due to weak fit quality");
     }
     if (Math.abs(residual) > Math.max(500, Math.abs(totalPnl) * 0.4)) {
       out.push("Residual is large vs total P&L — check regime/shape effects");
