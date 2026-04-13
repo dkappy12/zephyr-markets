@@ -85,6 +85,55 @@ function unplannedSignalImpactGbp(
   return Math.round(bookImpact / 10) * 10;
 }
 
+function parseSignalMagnitudeGw(text: string | null): number | null {
+  if (!text) return null;
+  const gw = text.match(/([\d.]+)\s*GW/i);
+  if (gw) {
+    const n = Number(gw[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+  const mw = text.match(/([\d.]+)\s*MW/i);
+  if (mw) {
+    const n = Number(mw[1]);
+    if (!Number.isFinite(n)) return null;
+    return n / 1000;
+  }
+  return null;
+}
+
+function signalDirectionSign(s: SignalRow): number {
+  const d = (s.direction ?? "").toLowerCase();
+  if (d.includes("bull")) return 1;
+  if (d.includes("bear")) return -1;
+  const t = `${s.title ?? ""} ${s.description ?? ""}`.toLowerCase();
+  if (
+    /low wind|outage|offline|tight|scarcity|demand up|higher demand/.test(t)
+  ) {
+    return 1;
+  }
+  if (
+    /high wind|oversupply|demand down|lower demand|mild weather|long surplus/.test(
+      t,
+    )
+  ) {
+    return -1;
+  }
+  return 0;
+}
+
+function interconnectorSign(s: SignalRow): number {
+  const t = `${s.title ?? ""} ${s.description ?? ""}`.toLowerCase();
+  if (
+    /import (down|drop|fall|reduc)|reduced import|trip|outage|offline/.test(t)
+  ) {
+    return 1;
+  }
+  if (/import (up|rise|increase)|higher import|flows up/.test(t)) {
+    return -1;
+  }
+  return signalDirectionSign(s);
+}
+
 function regimeStyle(regimeRaw: string | null): {
   label: string;
   className: string;
@@ -412,9 +461,34 @@ export function AttributionPageClient() {
       ),
     [positions, premiumAttr.priceResidualMoveGbpMwh],
   );
+  const demandAtt = useMemo(() => {
+    if (netGbMw === 0) return 0;
+    let total = 0;
+    for (const s of demandSignals) {
+      const sign = signalDirectionSign(s);
+      if (sign === 0) continue;
+      const gw = parseSignalMagnitudeGw(s.description) ?? 0.5;
+      const priceImpactGbpMwh = gw * 1.2 * sign;
+      total += priceImpactGbpMwh * netGbMw;
+    }
+    return Math.round(total / 10) * 10;
+  }, [demandSignals, netGbMw]);
+  const interconnectorAtt = useMemo(() => {
+    if (netGbMw === 0) return 0;
+    let total = 0;
+    for (const s of interconnectorSignals) {
+      const sign = interconnectorSign(s);
+      if (sign === 0) continue;
+      const gw = parseSignalMagnitudeGw(s.description) ?? 0.4;
+      const priceImpactGbpMwh = gw * 0.9 * sign;
+      total += priceImpactGbpMwh * netGbMw;
+    }
+    return Math.round(total / 10) * 10;
+  }, [interconnectorSignals, netGbMw]);
 
   const totalPnl = totalTodayPnlGbp(positions, livePrices);
-  const residual = totalPnl - windAtt - gasAtt - remitAtt - shapeAtt;
+  const residual =
+    totalPnl - windAtt - gasAtt - remitAtt - shapeAtt - demandAtt - interconnectorAtt;
   const explainedPnl = totalPnl - residual;
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
@@ -428,6 +502,8 @@ export function AttributionPageClient() {
     remitAtt,
     residual,
     shapeAtt,
+    demandAtt,
+    interconnectorAtt,
   );
 
   const windStackPct = useMemo(() => {
@@ -453,6 +529,27 @@ export function AttributionPageClient() {
   const normScore = parseNum(physLatest?.normalised_score);
 
   const gbNet = netGbPowerSignedMw(positions);
+  const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
+
+  const demandSignals = useMemo(
+    () =>
+      signals.filter((s) =>
+        /demand|load|consumption|margin notice|capacity market notice/i.test(
+          `${s.title ?? ""} ${s.description ?? ""}`,
+        ),
+      ),
+    [signals],
+  );
+
+  const interconnectorSignals = useMemo(
+    () =>
+      signals.filter((s) =>
+        /interconnector|ifa|nemo|britned|eleclink|moyle|east.?west|ewic|nsl|viking/i.test(
+          `${s.title ?? ""} ${s.description ?? ""}`,
+        ),
+      ),
+    [signals],
+  );
 
   const alignmentScore = useMemo(() => {
     if (gbNet.isMixed || normScore == null) return 0;
@@ -502,6 +599,8 @@ export function AttributionPageClient() {
     Math.abs(gasAtt) +
     Math.abs(remitAtt) +
     Math.abs(shapeAtt) +
+    Math.abs(demandAtt) +
+    Math.abs(interconnectorAtt) +
     Math.abs(residual);
   const barPct = (v: number) =>
     absSum > 0 ? Math.round((Math.abs(v) / absSum) * 100) : 0;
@@ -588,10 +687,17 @@ export function AttributionPageClient() {
       gas_attribution_gbp: gasAtt,
       remit_attribution_gbp: remitAtt,
       shape_attribution_gbp: shapeAtt,
+      demand_attribution_gbp: demandAtt,
+      interconnector_attribution_gbp: interconnectorAtt,
       residual_gbp: residual,
       explained_gbp: explainedPnl,
       explained_ratio: explainedRatio,
       attribution_confidence: attributionConfidence,
+      diagnostics: {
+        demand_signals: demandSignals.length,
+        interconnector_signals: interconnectorSignals.length,
+        net_gb_mw: netGbMw,
+      },
       primary_driver: primary,
       total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
       market_intraday_gbp_mwh: marketIntradayGbpMwh,
@@ -640,6 +746,8 @@ export function AttributionPageClient() {
     gasAtt,
     remitAtt,
     shapeAtt,
+    demandAtt,
+    interconnectorAtt,
     residual,
     explainedPnl,
     explainedRatio,
@@ -650,6 +758,34 @@ export function AttributionPageClient() {
     physLatest,
     marketIntradayGbpMwh,
     totalPriceMoveGbpMwh,
+    demandSignals.length,
+    interconnectorSignals.length,
+    netGbMw,
+  ]);
+
+  const diagnostics = useMemo(() => {
+    const out: string[] = [];
+    if (explainedPct < 50) {
+      out.push("Low model confidence: less than 50% of P&L explained");
+    } else if (explainedPct < 75) {
+      out.push("Moderate confidence: residual still material");
+    }
+    if (Math.abs(residual) > Math.max(500, Math.abs(totalPnl) * 0.4)) {
+      out.push("Residual is large vs total P&L — check regime/shape effects");
+    }
+    if (demandSignals.length === 0) {
+      out.push("No demand-linked signals in last 24h");
+    }
+    if (interconnectorSignals.length === 0) {
+      out.push("No interconnector-linked signals in last 24h");
+    }
+    return out;
+  }, [
+    explainedPct,
+    residual,
+    totalPnl,
+    demandSignals.length,
+    interconnectorSignals.length,
   ]);
 
   const bookAlignmentDisplay =
@@ -780,6 +916,16 @@ export function AttributionPageClient() {
                         dir: `${premiumAttr.priceResidualMoveGbpMwh.toFixed(2)} £/MWh residual market move`,
                       },
                       {
+                        name: "Demand surprise",
+                        impact: demandAtt,
+                        dir: `${demandSignals.length} demand-linked signals · proxy sensitivity`,
+                      },
+                      {
+                        name: "Interconnector flow",
+                        impact: interconnectorAtt,
+                        dir: `${interconnectorSignals.length} flow-linked signals · proxy sensitivity`,
+                      },
+                      {
                         name: "Residual",
                         impact: residual,
                         dir: "unexplained after factor decomposition",
@@ -832,6 +978,15 @@ export function AttributionPageClient() {
               Model explains {explainedPct}% of today&apos;s P&amp;L ({formatSignedGbp(explainedPnl)} explained,{" "}
               {formatSignedGbp(residual)} residual) · confidence: {attributionConfidence}.
             </p>
+            {diagnostics.length > 0 ? (
+              <div className="mt-2 space-y-1">
+                {diagnostics.map((d) => (
+                  <p key={d} className="text-xs text-ink-light">
+                    {d}
+                  </p>
+                ))}
+              </div>
+            ) : null}
 
             <button
               type="button"

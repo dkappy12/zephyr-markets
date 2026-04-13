@@ -251,15 +251,33 @@ export function primaryDriverKey(
   remit: number,
   residual: number,
   shape = 0,
-): "wind" | "gas" | "remit" | "residual" | "shape" {
+  demand = 0,
+  interconnector = 0,
+):
+  | "wind"
+  | "gas"
+  | "remit"
+  | "residual"
+  | "shape"
+  | "demand"
+  | "interconnector" {
   const rows: {
-    k: "wind" | "gas" | "remit" | "residual" | "shape";
+    k:
+      | "wind"
+      | "gas"
+      | "remit"
+      | "residual"
+      | "shape"
+      | "demand"
+      | "interconnector";
     a: number;
   }[] = [
     { k: "wind", a: Math.abs(wind) },
     { k: "gas", a: Math.abs(gas) },
     { k: "remit", a: Math.abs(remit) },
     { k: "shape", a: Math.abs(shape) },
+    { k: "demand", a: Math.abs(demand) },
+    { k: "interconnector", a: Math.abs(interconnector) },
     { k: "residual", a: Math.abs(residual) },
   ];
   rows.sort((x, y) => y.a - x.a);
