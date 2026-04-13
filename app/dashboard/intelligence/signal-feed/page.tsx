@@ -308,13 +308,6 @@ export default function SignalFeedPage() {
 
   const deduped = useMemo(() => dedupeByAsset(rows), [rows]);
 
-  useEffect(() => {
-    console.log(
-      "all deduplicated signals:",
-      deduped.map((s) => s.latest.title),
-    );
-  }, [deduped]);
-
   /** Feed row: recent update (24h) OR still active — so long-running outages (e.g. LBAR-1) stay visible. */
   const feedVisible = useMemo(() => {
     const now = new Date();

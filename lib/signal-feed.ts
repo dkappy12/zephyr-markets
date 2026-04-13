@@ -326,11 +326,16 @@ export function severityForRow(
   const planned = /\bPlanned\b/i.test(desc);
   const unplanned = /\bUnplanned\b/i.test(desc);
   const m = mw ?? 0;
-  if (m < 100) return "LOW";
-  if (unplanned && m >= 300) return "HIGH";
-  if (unplanned && m >= 100 && m <= 299) return "MEDIUM";
-  if (planned && m >= 500) return "MEDIUM";
-  if (planned && m < 500) return "LOW";
+  if (unplanned) {
+    if (m >= 400) return "HIGH";
+    if (m >= 100) return "MEDIUM";
+    return "LOW";
+  }
+  if (planned) {
+    if (m >= 800) return "HIGH";
+    if (m >= 300) return "MEDIUM";
+    return "LOW";
+  }
   return "LOW";
 }
 
@@ -358,27 +363,30 @@ export function marketImplication(
   unplanned: boolean,
   planned: boolean,
 ): string {
-  const m = mw ?? 0;
+  const m = Math.max(0, Math.round(mw ?? 0));
   if (assetType === "CCGT" && planned) {
-    return "Planned maintenance — absorbed in day-ahead scheduling";
+    return `Planned maintenance — ${m} MW. Absorbed into day-ahead scheduling; expect minimal spot impact.`;
   }
   if (assetType === "CCGT" && unplanned && m > 500) {
-    return "Significant thermal capacity loss — supports price at current gas SRMC levels";
+    return `Significant thermal loss — ${m} MW removed from dispatch stack. Price supportive at current SRMC levels.`;
   }
-  if (assetType === "CCGT" && unplanned && m > 200) {
-    return "Moderate thermal loss — marginal price impact depending on wind output";
+  if (assetType === "CCGT" && unplanned && m >= 200) {
+    return `Moderate thermal loss — ${m} MW offline. Marginal impact; wind output will determine if gas plant fills the gap.`;
+  }
+  if (assetType === "CCGT" && unplanned) {
+    return `Minor thermal loss — ${m} MW offline. Likely absorbed with current system margin.`;
   }
   if (assetType === "WIND" && unplanned) {
-    return "Wind capacity constraint — reduces renewable oversupply pressure";
+    return `Wind constraint — ${m} MW offline. Reduces renewable oversupply pressure; slightly supportive for gas-marginal periods.`;
   }
   if (assetType === "INTERCONNECTOR" && unplanned) {
-    return "Import capacity loss — reduces GB supply buffer";
+    return `Import capacity loss — ${m} MW. Reduces GB supply buffer; price impact depends on current import level.`;
   }
   if (assetType === "NUCLEAR") {
-    return "Baseload reduction — increases residual demand";
+    return `Nuclear baseload reduction — ${m} MW. Increases residual demand by equivalent amount; gas or imports fill gap.`;
   }
   if (assetType === "STORAGE") {
-    return "Storage derate — may shift balancing and intraday spreads";
+    return `Storage derate — ${m} MW. May widen balancing and intraday spreads around peak periods.`;
   }
   return "Monitor for system impact";
 }
