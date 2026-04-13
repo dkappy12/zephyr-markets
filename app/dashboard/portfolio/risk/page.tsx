@@ -355,21 +355,32 @@ export default function RiskPage() {
   );
 
   const marketExposure = useMemo(() => {
-    const bucket: Record<string, { value: number; unit: "MW" | "tCO2" }> = {};
+    const bucket: Record<
+      string,
+      { valueForPct: number; displayValue: number; unit: string }
+    > = {};
     for (const p of positions) {
       const market = (p.market ?? "Unknown").toUpperCase();
       const size = Math.abs(p.size ?? 0);
-      const isCarbon = market === "UKA" || market === "EUA" || (p.instrument_type ?? "").toLowerCase().includes("carbon");
-      const value = market === "NBP" ? size / 293.1 : size;
+      const unit = (p.unit ?? "").trim() || "units";
+      const valueForPct = market === "NBP" ? size / 293.1 : size;
       const key = market;
-      if (!bucket[key]) bucket[key] = { value: 0, unit: isCarbon ? "tCO2" : "MW" };
-      bucket[key].value += value;
-      if (isCarbon) bucket[key].unit = "tCO2";
+      if (!bucket[key]) {
+        bucket[key] = { valueForPct: 0, displayValue: 0, unit };
+      }
+      bucket[key].valueForPct += valueForPct;
+      bucket[key].displayValue += size;
+      if (bucket[key].unit === "units") {
+        bucket[key].unit = unit;
+      }
     }
     const rows = Object.entries(bucket).map(([market, v]) => ({ market, ...v }));
-    const total = rows.reduce((s, r) => s + Math.abs(r.value), 0);
+    const total = rows.reduce((s, r) => s + Math.abs(r.valueForPct), 0);
     return rows
-      .map((r) => ({ ...r, pct: total > 0 ? (Math.abs(r.value) / total) * 100 : 0 }))
+      .map((r) => ({
+        ...r,
+        pct: total > 0 ? (Math.abs(r.valueForPct) / total) * 100 : 0,
+      }))
       .sort((a, b) => b.pct - a.pct);
   }, [positions]);
 
@@ -468,7 +479,9 @@ export default function RiskPage() {
                 {dailyPnLSeries.length < 5 ? "—" : formatGbp(Math.abs(var99))}
               </p>
               <p className="mt-1 text-xs text-ink-light">
-                {dailyPnLSeries.length < 5 ? "Need 5+ days" : `Historical · ${dailyPnLSeries.length} days`}
+                {dailyPnLSeries.length < 5
+                  ? "Need 5+ days of data"
+                  : `Historical · ${dailyPnLSeries.length} days`}
               </p>
             </div>
             <div>
@@ -650,7 +663,13 @@ export default function RiskPage() {
                     <div key={m.market}>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-ink">{m.market}</span>
-                        <span className="text-ink-mid">{m.pct.toFixed(0)}% · {m.value.toFixed(1)} {m.unit}</span>
+                        <span className="text-ink-mid">
+                          {m.pct.toFixed(0)}% ·{" "}
+                          {m.displayValue.toLocaleString("en-GB", {
+                            maximumFractionDigits: 1,
+                          })}{" "}
+                          {m.unit}
+                        </span>
                       </div>
                       <div className="mt-1 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
                         <div className="h-full rounded-sm" style={{ width: `${m.pct}%`, backgroundColor: BRAND_GREEN }} />
@@ -698,9 +717,8 @@ export default function RiskPage() {
                   <div className="h-full" style={{ width: `${longPct}%`, backgroundColor: BRAND_GREEN }} />
                   <div className="h-full" style={{ width: `${shortPct}%`, backgroundColor: TERRACOTTA }} />
                 </div>
-                <p className="mt-2 text-xs text-ink-light">
-                  MW-denominated positions only · gas positions excluded from MW
-                  delta
+                <p className="mt-1 text-xs text-ink-light">
+                  MW positions only · gas positions in therms excluded
                 </p>
               </div>
             </div>
