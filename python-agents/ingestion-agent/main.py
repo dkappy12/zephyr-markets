@@ -1427,6 +1427,28 @@ async def insert_physical_premium_http(
     resp.raise_for_status()
 
 
+async def fetch_gbp_eur_rate(http: httpx.AsyncClient) -> float:
+    try:
+        resp = await http.get(
+            "https://api.frankfurter.app/latest?from=EUR&to=GBP",
+            timeout=10.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            rate = data["rates"]["GBP"]
+            logger.info("fx_rate: EUR/GBP = %.4f", rate)
+            return rate
+        else:
+            logger.warning(
+                "fx_rate: failed HTTP %s, using fallback 0.86",
+                resp.status_code,
+            )
+            return 0.86
+    except Exception as e:
+        logger.warning("fx_rate: error %s, using fallback 0.86", e)
+        return 0.86
+
+
 async def calculate_physical_premium() -> None:
     """CCGT-anchored SRMC implied price vs market; append to physical_premium."""
     _require_supabase_env()
@@ -1434,6 +1456,7 @@ async def calculate_physical_premium() -> None:
     calculated_at = now_utc.isoformat()
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
+        gbp_eur_rate = await fetch_gbp_eur_rate(http)
         wind_ms: float | None = None
         try:
             wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)
@@ -1559,7 +1582,7 @@ async def calculate_physical_premium() -> None:
         total_carbon_cost = UKA_PRICE_GBP_PER_T + CPS_GBP_PER_T
         srmc_gbp_mwh: float | None = None
         if ttf_eur_mwh is not None:
-            ttf_gbp_mwh = ttf_eur_mwh * GBP_EUR_RATE
+            ttf_gbp_mwh = ttf_eur_mwh * gbp_eur_rate
             gas_component = ttf_gbp_mwh / ETA_CCGT
             carbon_component = total_carbon_cost * EF_TCO2_PER_MWH_EL
             srmc_gbp_mwh = gas_component + carbon_component + VOM_GBP_PER_MWH
@@ -1637,6 +1660,7 @@ async def calculate_physical_premium() -> None:
             "solar_gw": solar_gw,
             "residual_demand_gw": residual_demand_gw,
             "ttf_eur_mwh": ttf_eur_mwh,
+            "gbp_eur_rate": gbp_eur_rate,
             "srmc_gbp_mwh": srmc_gbp_mwh,
             "remit_mw_lost": remit_total_mw,
             "remit_planned_mw": remit_planned_mw,
