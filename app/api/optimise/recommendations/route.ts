@@ -40,6 +40,26 @@ function finaliseDailyAverage(
   return out;
 }
 
+function optimiserQuality(input: {
+  historicalScenarioCount: number;
+  candidatePackageCount: number;
+  fallbackUsed: boolean;
+}): { quality: "high" | "medium" | "low"; warnings: string[] } {
+  const warnings: string[] = [];
+  if (input.fallbackUsed) {
+    warnings.push("No historical scenarios available; using fallback distribution.");
+  }
+  if (input.historicalScenarioCount < 20) {
+    warnings.push("Historical scenario depth is below 20 days.");
+  }
+  if (input.candidatePackageCount < 30) {
+    warnings.push("Hedge search space is narrow; recommendations may be unstable.");
+  }
+  if (warnings.length >= 2) return { quality: "low", warnings };
+  if (warnings.length === 1) return { quality: "medium", warnings };
+  return { quality: "high", warnings };
+}
+
 async function fetchGbpPerEur(): Promise<number> {
   try {
     const resp = await fetch(
@@ -157,6 +177,11 @@ export async function GET(req: Request) {
       maxTrades,
       includeStress,
     });
+    const quality = optimiserQuality({
+      historicalScenarioCount: result.diagnostics.historicalScenarioCount,
+      candidatePackageCount: result.diagnostics.candidatePackageCount,
+      fallbackUsed: result.diagnostics.fallbackUsed,
+    });
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -165,6 +190,8 @@ export async function GET(req: Request) {
       maxTrades,
       includeStress,
       gbpPerEur,
+      quality: quality.quality,
+      qualityWarnings: quality.warnings,
       ...result,
     });
   } catch (error: unknown) {

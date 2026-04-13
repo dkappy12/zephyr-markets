@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 const MODEL = "claude-haiku-4-5-20251001";
+const REDACT_KEYS = [
+  "name",
+  "email",
+  "phone",
+  "counterparty",
+  "account",
+  "iban",
+  "swift",
+  "address",
+  "trader",
+  "book",
+  "portfolio",
+];
 
 const SYSTEM_PROMPT = `You are a trading position classifier for an energy markets intelligence platform. Your job is to analyse rows from a trading CSV export and classify each row as energy-relevant or not. You must handle any CSV format from any broker or exchange — Trayport, ICE, Bloomberg TOMS, Marex, Tradition, BGC, GFI, or any other. Be flexible with column names and formats.
 
@@ -42,6 +56,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = (await req.json()) as {
       headers?: string[];
       rows?: Record<string, unknown>[];
@@ -56,7 +79,8 @@ export async function POST(req: Request) {
     }
 
     const slice = rows.slice(0, 100);
-    const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows: ${JSON.stringify(slice)}`;
+    const redactedSlice = slice.map(redactRow);
+    const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows (sensitive fields redacted): ${JSON.stringify(redactedSlice)}`;
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -127,13 +151,40 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ classified });
+    // Keep user-facing row context local; do not forward raw rows externally.
+    const merged = classified.map((entry, idx) => {
+      if (!entry || typeof entry !== "object") return entry;
+      return {
+        ...entry,
+        original_row: slice[idx] ?? null,
+      };
+    });
+
+    return NextResponse.json({ classified: merged });
   } catch (e: unknown) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
       { status: 500 },
     );
   }
+}
+
+function redactRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    const lowered = key.toLowerCase();
+    const isSensitive = REDACT_KEYS.some((s) => lowered.includes(s));
+    if (isSensitive) {
+      out[key] = "[REDACTED]";
+      continue;
+    }
+    if (typeof value === "string") {
+      out[key] = value.length > 120 ? `${value.slice(0, 120)}…` : value;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 function extractJsonArray(text: string): string | null {

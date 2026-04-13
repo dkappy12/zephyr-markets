@@ -11,6 +11,8 @@ type ApiResponse = {
   maxTrades: number;
   includeStress: boolean;
   gbpPerEur: number;
+  quality: "high" | "medium" | "low";
+  qualityWarnings: string[];
   before: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   after: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   deltas: {
@@ -47,6 +49,7 @@ type ApiResponse = {
     historicalScenarioCount: number;
     stressScenarioCount: number;
     fallbackUsed: boolean;
+    candidatePackageCount: number;
   };
 };
 
@@ -199,6 +202,36 @@ export default function OptimisePage() {
 
       {!loading && data && (
         <>
+          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Model Quality
+            </p>
+            <p
+              className={`mt-2 text-sm ${
+                data.quality === "high"
+                  ? "text-[#1D6B4E]"
+                  : data.quality === "medium"
+                    ? "text-amber-700"
+                    : "text-[#8B3A3A]"
+              }`}
+            >
+              {data.quality.toUpperCase()}
+            </p>
+            <p className="mt-1 text-xs text-ink-mid">
+              Historical scenarios {data.diagnostics.historicalScenarioCount} · Candidate
+              packages {data.diagnostics.candidatePackageCount}
+            </p>
+            {data.qualityWarnings.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {data.qualityWarnings.map((w) => (
+                  <p key={w} className="text-xs text-ink-mid">
+                    {w}
+                  </p>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="grid gap-3 md:grid-cols-3">
             {cards.map((c) => (
               <article

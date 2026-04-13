@@ -201,18 +201,21 @@ function quantileLoss(sortedLossesAsc: number[], confidence: number): number {
 
 function computeRiskMetrics(
   positions: PositionRow[],
-  scenarios: Scenario[],
+  empiricalScenarios: Scenario[],
+  stressScenariosInput: Scenario[],
   gbpPerEur: number,
   confidence: number,
 ): RiskMetrics {
-  const losses = scenarios.map((s) => -positions.reduce((sum, p) => sum + pnlForPosition(p, s, gbpPerEur), 0));
+  const losses = empiricalScenarios.map(
+    (s) => -positions.reduce((sum, p) => sum + pnlForPosition(p, s, gbpPerEur), 0),
+  );
   const sorted = [...losses].sort((a, b) => a - b);
   const varLoss = quantileLoss(sorted, confidence);
   const tail = losses.filter((l) => l >= varLoss);
   const cvarLoss = tail.length > 0 ? tail.reduce((s, v) => s + v, 0) / tail.length : varLoss;
-  const stressLosses = scenarios
-    .filter((s) => s.source === "stress")
-    .map((s) => -positions.reduce((sum, p) => sum + pnlForPosition(p, s, gbpPerEur), 0));
+  const stressLosses = stressScenariosInput.map(
+    (s) => -positions.reduce((sum, p) => sum + pnlForPosition(p, s, gbpPerEur), 0),
+  );
   const worstStressLoss =
     stressLosses.length > 0 ? Math.max(...stressLosses) : varLoss;
   return { varLoss, cvarLoss, worstStressLoss };
@@ -347,16 +350,21 @@ export function optimisePortfolio(input: {
     includeStress,
   } = input;
 
-  const scopedScenarios = includeStress
-    ? scenarios
-    : scenarios.filter((s) => s.source === "historical");
-  const fallbackScenarios =
-    scopedScenarios.length > 0
-      ? scopedScenarios
-      : STRESS_SCENARIOS;
-  const fallbackUsed = scopedScenarios.length === 0;
+  const historicalScenarios = scenarios.filter((s) => s.source === "historical");
+  const stressOnlyScenarios = includeStress
+    ? scenarios.filter((s) => s.source === "stress")
+    : [];
+  const empiricalScenarios =
+    historicalScenarios.length > 0 ? historicalScenarios : STRESS_SCENARIOS;
+  const fallbackUsed = historicalScenarios.length === 0;
 
-  const before = computeRiskMetrics(positions, fallbackScenarios, gbpPerEur, confidence);
+  const before = computeRiskMetrics(
+    positions,
+    empiricalScenarios,
+    stressOnlyScenarios,
+    gbpPerEur,
+    confidence,
+  );
 
   const options = generateTradeOptions(positions);
   const combos = cartesianCombos(options).filter((c) => c.length <= maxTrades);
@@ -364,7 +372,13 @@ export function optimisePortfolio(input: {
   const scored = combos.map((trades) => {
     const synthetic = trades.map(asSyntheticPosition);
     const combined = [...positions, ...synthetic];
-    const after = computeRiskMetrics(combined, fallbackScenarios, gbpPerEur, confidence);
+    const after = computeRiskMetrics(
+      combined,
+      empiricalScenarios,
+      stressOnlyScenarios,
+      gbpPerEur,
+      confidence,
+    );
     const objectiveValue =
       (objective === "cvar" ? after.cvarLoss : after.varLoss) +
       tradeCostPenalty(trades);
@@ -387,7 +401,8 @@ export function optimisePortfolio(input: {
   const recommendations: Recommendation[] = best.trades.map((trade) => {
     const singleAfter = computeRiskMetrics(
       [...positions, asSyntheticPosition(trade)],
-      fallbackScenarios,
+      empiricalScenarios,
+      stressOnlyScenarios,
       gbpPerEur,
       confidence,
     );
@@ -407,7 +422,7 @@ export function optimisePortfolio(input: {
         `lot step ${lotStepForMarket(trade.market)} ${trade.unit}`,
         `max ${maxTrades} trades`,
       ],
-      confidence: confidenceLabel(fallbackScenarios.length, singleImprovement),
+      confidence: confidenceLabel(empiricalScenarios.length, singleImprovement),
     };
   });
 
@@ -429,9 +444,9 @@ export function optimisePortfolio(input: {
     recommendations,
     alternatives,
     diagnostics: {
-      scenarioCount: fallbackScenarios.length,
-      historicalScenarioCount: fallbackScenarios.filter((s) => s.source === "historical").length,
-      stressScenarioCount: fallbackScenarios.filter((s) => s.source === "stress").length,
+      scenarioCount: empiricalScenarios.length + stressOnlyScenarios.length,
+      historicalScenarioCount: historicalScenarios.length,
+      stressScenarioCount: stressOnlyScenarios.length,
       fallbackUsed,
       candidatePackageCount: combos.length,
     },

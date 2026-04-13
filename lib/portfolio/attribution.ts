@@ -6,6 +6,7 @@ import {
   netDeltaMw,
   nbpPnlGbp,
   PositionRow,
+  ttfToNbpPencePerTherm,
   type LivePrices,
 } from "@/lib/portfolio/book";
 
@@ -16,13 +17,8 @@ export const GAS_TTF_GBP_PER_EUR_MWH = GBP_PER_EUR;
 /** £/MWh per 100 MW REMIT delta. */
 export const REMIT_SENS_GBP_PER_100MW = 0.5;
 
-/**
- * NBP p/th from TTF (EUR/MWh) — attribution page convention (spec: ×100).
- * Differs from Book’s `ttfToNbpPencePerTherm` (×10) intentionally for this view.
- */
-export function attributionTtfToNbpPencePerTherm(ttfEurMwh: number): number {
-  return (ttfEurMwh * GBP_PER_EUR * 100) / MWH_TO_THERM;
-}
+/** Canonical NBP conversion shared with Book/Risk/Optimise. */
+export const attributionTtfToNbpPencePerTherm = ttfToNbpPencePerTherm;
 
 export function dirMult(direction: string | null): number {
   const d = (direction ?? "").toLowerCase();
