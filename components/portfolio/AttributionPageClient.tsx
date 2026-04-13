@@ -15,6 +15,7 @@ import {
   totalTodayPnlGbp,
   type PhysicalPremiumInput,
 } from "@/lib/portfolio/attribution";
+import { calibrateAttributionMultipliers } from "@/lib/portfolio/attribution-calibration";
 import {
   formatGbpColored,
   GBP_PER_EUR,
@@ -201,6 +202,7 @@ function toPhysicalPremiumInput(row: PhysicalRow | null): PhysicalPremiumInput {
 type PortfolioPnlRow = {
   date: string;
   total_pnl: number | null;
+  attribution_json?: Record<string, unknown> | null;
 };
 
 /** Text before ` — ` / ` – ` / ` - ` (aligned with signal feed). */
@@ -375,7 +377,7 @@ export function AttributionPageClient() {
       uid
         ? supabase
             .from("portfolio_pnl")
-            .select("date, total_pnl")
+            .select("date, total_pnl, attribution_json")
             .eq("user_id", uid)
             .gte("date", since30)
             .order("date", { ascending: true })
@@ -506,9 +508,45 @@ export function AttributionPageClient() {
     return Math.round(total / 10) * 10;
   }, [interconnectorSignals, netGbMw]);
 
+  const calibration = useMemo(() => {
+    const samples = pnlHistory
+      .map((r) => {
+        const y = parseNum(r.total_pnl);
+        if (y == null) return null;
+        const j = (r.attribution_json ?? {}) as Record<string, unknown>;
+        return {
+          y,
+          x: {
+            wind: parseNum(j.wind_attribution_gbp) ?? 0,
+            gas: parseNum(j.gas_attribution_gbp) ?? 0,
+            remit: parseNum(j.remit_attribution_gbp) ?? 0,
+            shape: parseNum(j.shape_attribution_gbp) ?? 0,
+            demand: parseNum(j.demand_attribution_gbp) ?? 0,
+            interconnector: parseNum(j.interconnector_attribution_gbp) ?? 0,
+          },
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+    return calibrateAttributionMultipliers(samples, 3);
+  }, [pnlHistory]);
+
+  const windAttCal = windAtt * calibration.multipliers.wind;
+  const gasAttCal = gasAtt * calibration.multipliers.gas;
+  const remitAttCal = remitAtt * calibration.multipliers.remit;
+  const shapeAttCal = shapeAtt * calibration.multipliers.shape;
+  const demandAttCal = demandAtt * calibration.multipliers.demand;
+  const interconnectorAttCal =
+    interconnectorAtt * calibration.multipliers.interconnector;
+
   const totalPnl = totalTodayPnlGbp(positions, livePrices);
   const residual =
-    totalPnl - windAtt - gasAtt - remitAtt - shapeAtt - demandAtt - interconnectorAtt;
+    totalPnl -
+    windAttCal -
+    gasAttCal -
+    remitAttCal -
+    shapeAttCal -
+    demandAttCal -
+    interconnectorAttCal;
   const explainedPnl = totalPnl - residual;
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
@@ -517,13 +555,13 @@ export function AttributionPageClient() {
     explainedPct >= 75 ? "High" : explainedPct >= 50 ? "Medium" : "Low";
 
   const primary = primaryDriverKey(
-    windAtt,
-    gasAtt,
-    remitAtt,
+    windAttCal,
+    gasAttCal,
+    remitAttCal,
     residual,
-    shapeAtt,
-    demandAtt,
-    interconnectorAtt,
+    shapeAttCal,
+    demandAttCal,
+    interconnectorAttCal,
   );
 
   const windStackPct = useMemo(() => {
@@ -592,12 +630,12 @@ export function AttributionPageClient() {
   const totalFmt = formatGbpColored(totalPnl);
 
   const absSum =
-    Math.abs(windAtt) +
-    Math.abs(gasAtt) +
-    Math.abs(remitAtt) +
-    Math.abs(shapeAtt) +
-    Math.abs(demandAtt) +
-    Math.abs(interconnectorAtt) +
+    Math.abs(windAttCal) +
+    Math.abs(gasAttCal) +
+    Math.abs(remitAttCal) +
+    Math.abs(shapeAttCal) +
+    Math.abs(demandAttCal) +
+    Math.abs(interconnectorAttCal) +
     Math.abs(residual);
   const barPct = (v: number) =>
     absSum > 0 ? Math.round((Math.abs(v) / absSum) * 100) : 0;
@@ -680,12 +718,12 @@ export function AttributionPageClient() {
     const attributionJson = {
       generated_at: new Date().toISOString(),
       total_pnl: totalPnl,
-      wind_attribution_gbp: windAtt,
-      gas_attribution_gbp: gasAtt,
-      remit_attribution_gbp: remitAtt,
-      shape_attribution_gbp: shapeAtt,
-      demand_attribution_gbp: demandAtt,
-      interconnector_attribution_gbp: interconnectorAtt,
+      wind_attribution_gbp: windAttCal,
+      gas_attribution_gbp: gasAttCal,
+      remit_attribution_gbp: remitAttCal,
+      shape_attribution_gbp: shapeAttCal,
+      demand_attribution_gbp: demandAttCal,
+      interconnector_attribution_gbp: interconnectorAttCal,
       residual_gbp: residual,
       explained_gbp: explainedPnl,
       explained_ratio: explainedRatio,
@@ -694,6 +732,11 @@ export function AttributionPageClient() {
         demand_signals: demandSignals.length,
         interconnector_signals: interconnectorSignals.length,
         net_gb_mw: netGbMw,
+        calibration_sample_size: calibration.sampleSize,
+        calibration_r2: calibration.r2,
+        calibration_lambda: calibration.lambda,
+        calibration_fallback: calibration.fallbackUsed,
+        calibration_multipliers: calibration.multipliers,
       },
       primary_driver: primary,
       total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
@@ -717,9 +760,9 @@ export function AttributionPageClient() {
         user_id: userId,
         date: utcToday(),
         total_pnl: totalPnl,
-        wind_attribution_gbp: windAtt,
-        gas_attribution_gbp: gasAtt,
-        remit_attribution_gbp: remitAtt,
+        wind_attribution_gbp: windAttCal,
+        gas_attribution_gbp: gasAttCal,
+        remit_attribution_gbp: remitAttCal,
         residual_gbp: residual,
         carbon_attribution_gbp: 0,
         primary_driver: primary,
@@ -739,12 +782,13 @@ export function AttributionPageClient() {
     hasPositions,
     loading,
     totalPnl,
-    windAtt,
-    gasAtt,
-    remitAtt,
-    shapeAtt,
-    demandAtt,
-    interconnectorAtt,
+    windAttCal,
+    gasAttCal,
+    remitAttCal,
+    shapeAttCal,
+    demandAttCal,
+    interconnectorAttCal,
+    calibration,
     residual,
     explainedPnl,
     explainedRatio,
@@ -776,6 +820,9 @@ export function AttributionPageClient() {
     if (interconnectorSignals.length === 0) {
       out.push("No interconnector-linked signals in last 24h");
     }
+    out.push(
+      `Calibration: n=${calibration.sampleSize}, R²=${calibration.r2.toFixed(2)}, λ=${calibration.lambda}${calibration.fallbackUsed ? " (fallback multipliers)" : ""}`,
+    );
     return out;
   }, [
     explainedPct,
@@ -783,6 +830,10 @@ export function AttributionPageClient() {
     totalPnl,
     demandSignals.length,
     interconnectorSignals.length,
+    calibration.sampleSize,
+    calibration.r2,
+    calibration.lambda,
+    calibration.fallbackUsed,
   ]);
 
   const bookAlignmentDisplay =
@@ -894,32 +945,32 @@ export function AttributionPageClient() {
                     [
                       {
                         name: "Wind generation",
-                        impact: windAtt,
+                        impact: windAttCal,
                         dir: `${windStackPct.toFixed(0)}% stack · ${premiumAttr.windMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Gas prices (TTF)",
-                        impact: gasAtt,
+                        impact: gasAttCal,
                         dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${premiumAttr.gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "REMIT outages",
-                        impact: remitAtt,
+                        impact: remitAttCal,
                         dir: `${remitStressPct.toFixed(0)}% system stress · ${premiumAttr.remitMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Shape / basis",
-                        impact: shapeAtt,
+                        impact: shapeAttCal,
                         dir: `${premiumAttr.priceResidualMoveGbpMwh.toFixed(2)} £/MWh residual market move`,
                       },
                       {
                         name: "Demand surprise",
-                        impact: demandAtt,
+                        impact: demandAttCal,
                         dir: `${demandSignals.length} demand-linked signals · proxy sensitivity`,
                       },
                       {
                         name: "Interconnector flow",
-                        impact: interconnectorAtt,
+                        impact: interconnectorAttCal,
                         dir: `${interconnectorSignals.length} flow-linked signals · proxy sensitivity`,
                       },
                       {
