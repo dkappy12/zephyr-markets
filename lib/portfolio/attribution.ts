@@ -260,3 +260,150 @@ export function primaryDriverKey(
   rows.sort((x, y) => y.a - x.a);
   return rows[0].k;
 }
+
+/** Latest physical model row fields used for premium-based attribution. */
+export type PhysicalPremiumInput = {
+  wind_gw: number | null;
+  solar_gw: number | null;
+  residual_demand_gw: number | null;
+  srmc_gbp_mwh: number | null;
+  market_price_gbp_mwh: number | null;
+  implied_price_gbp_mwh: number | null;
+  premium_value: number | null;
+  remit_mw_lost: number | null;
+};
+
+const EPS = 1e-6;
+
+/**
+ * Intraday GB DA move (£/MWh) from market_prices, else premium/implied gap from physical model.
+ */
+export function resolveTotalPriceMoveGbpMwh(opts: {
+  marketIntradayGbpMwh: number | null;
+  physical: PhysicalPremiumInput;
+}): number {
+  const { marketIntradayGbpMwh: intra, physical } = opts;
+  if (
+    intra != null &&
+    Number.isFinite(intra) &&
+    Math.abs(intra) > EPS
+  ) {
+    return intra;
+  }
+  const pv = physical.premium_value;
+  if (pv != null && Number.isFinite(pv) && Math.abs(pv) > EPS) {
+    return pv;
+  }
+  const mp = physical.market_price_gbp_mwh;
+  const ip = physical.implied_price_gbp_mwh;
+  if (
+    mp != null &&
+    ip != null &&
+    Number.isFinite(mp) &&
+    Number.isFinite(ip)
+  ) {
+    return mp - ip;
+  }
+  return 0;
+}
+
+export function partitionPriceMoveGbpMwh(
+  totalGbpMwh: number,
+  p: PhysicalPremiumInput,
+): { wind: number; gas: number; remit: number; residual: number } {
+  const w = Math.max(0, Number(p.wind_gw) || 0);
+  const s = Math.max(0, Number(p.solar_gw) || 0);
+  const r = Math.max(0, Number(p.residual_demand_gw) || 0);
+  const denom = w + s + r;
+  const windShare = denom > EPS ? w / denom : 0;
+
+  const mkt = Number(p.market_price_gbp_mwh);
+  const srmc = Number(p.srmc_gbp_mwh);
+  let gasShare =
+    mkt > EPS && Number.isFinite(srmc) && Number.isFinite(mkt)
+      ? srmc / mkt
+      : 0;
+  gasShare = Math.min(1, Math.max(0, gasShare));
+
+  const remitMw = Math.max(0, Number(p.remit_mw_lost) || 0);
+  let remitShare = remitMw / 5000;
+  remitShare = Math.min(1, Math.max(0, remitShare));
+
+  const windMove = windShare * totalGbpMwh;
+  const gasMove = gasShare * totalGbpMwh;
+  const remitMove = remitShare * totalGbpMwh;
+  const residual = totalGbpMwh - windMove - gasMove - remitMove;
+  return { wind: windMove, gas: gasMove, remit: remitMove, residual };
+}
+
+export function premiumWindGbpPosition(
+  p: PositionRow,
+  windMoveGbpMwh: number,
+): number {
+  if (!isGbPowerMarket(p)) return 0;
+  if ((p.unit ?? "").toLowerCase() !== "mw") return 0;
+  const dm = dirMult(p.direction);
+  const sz = Number(p.size);
+  if (!Number.isFinite(sz)) return 0;
+  return windMoveGbpMwh * sz * dm;
+}
+
+export function premiumRemitGbpPosition(
+  p: PositionRow,
+  remitMoveGbpMwh: number,
+): number {
+  return premiumWindGbpPosition(p, remitMoveGbpMwh);
+}
+
+export function premiumGasGbpPosition(
+  p: PositionRow,
+  gasMoveGbpMwh: number,
+): number {
+  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
+  const dm = dirMult(p.direction);
+  const sz = Number(p.size);
+  if (!Number.isFinite(sz)) return 0;
+  if (m === "gb_power" && (p.unit ?? "").toLowerCase() === "mw") {
+    return gasMoveGbpMwh * sz * dm;
+  }
+  if (m === "ttf" || m === "other_gas") {
+    return gasMoveGbpMwh * sz * dm;
+  }
+  if (m === "nbp") {
+    return gasMoveGbpMwh * (sz / 1000) * dm;
+  }
+  return 0;
+}
+
+export function computePremiumAttributionGbp(
+  totalPriceMoveGbpMwh: number,
+  physical: PhysicalPremiumInput,
+  positions: PositionRow[],
+): {
+  windGbp: number;
+  gasGbp: number;
+  remitGbp: number;
+  windMoveGbpMwh: number;
+  gasMoveGbpMwh: number;
+  remitMoveGbpMwh: number;
+  priceResidualMoveGbpMwh: number;
+} {
+  const part = partitionPriceMoveGbpMwh(totalPriceMoveGbpMwh, physical);
+  let windGbp = 0;
+  let gasGbp = 0;
+  let remitGbp = 0;
+  for (const p of positions) {
+    windGbp += premiumWindGbpPosition(p, part.wind);
+    gasGbp += premiumGasGbpPosition(p, part.gas);
+    remitGbp += premiumRemitGbpPosition(p, part.remit);
+  }
+  return {
+    windGbp,
+    gasGbp,
+    remitGbp,
+    windMoveGbpMwh: part.wind,
+    gasMoveGbpMwh: part.gas,
+    remitMoveGbpMwh: part.remit,
+    priceResidualMoveGbpMwh: part.residual,
+  };
+}

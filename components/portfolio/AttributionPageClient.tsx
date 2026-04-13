@@ -2,20 +2,17 @@
 
 import {
   bookAlignmentCopy,
-  gasAttributionForPosition,
-  isGasMarket,
+  computePremiumAttributionGbp,
   isGbPowerMarket,
   netGbPowerSignedMw,
   parsePhysicalDirection,
-  positionTodayPnlGbp,
+  premiumGasGbpPosition,
+  premiumRemitGbpPosition,
+  premiumWindGbpPosition,
   primaryDriverKey,
-  remitAttributionForPosition,
-  remitPriceImpactGbpPerMwh,
-  sumGasAttribution,
-  sumRemitAttribution,
-  sumWindAttribution,
+  resolveTotalPriceMoveGbpMwh,
   totalTodayPnlGbp,
-  windAttributionForPosition,
+  type PhysicalPremiumInput,
 } from "@/lib/portfolio/attribution";
 import {
   formatGbpColored,
@@ -26,7 +23,6 @@ import {
 } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
 import type { SignalRow } from "@/lib/signals";
-import { dedupeSignalRowsByTitleDescription } from "@/lib/signals";
 import { format, subDays } from "date-fns";
 import { motion } from "framer-motion";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -66,41 +62,20 @@ function formatSignedGbp(n: number): string {
   return `${sign}£${formatted}`;
 }
 
-function parseMwFromText(s: string): number | null {
-  const m = s.match(/(\d{1,6})\s*(?:MW|mw|MWh)/i);
+/** REMIT body text: "derated by XXX.XMW" */
+function parseDeratedMwFromDescription(description: string | null): number | null {
+  if (!description) return null;
+  const m = description.match(/derated\s+by\s+([\d.]+)\s*MW/i);
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
 }
 
-function signalRelevantToBook(
-  row: SignalRow,
-  hasGbPower: boolean,
-  hasGas: boolean,
-): boolean {
-  const text = `${row.title}\n${row.description ?? ""}`;
-  const ccgt = /\bccgt\b/i.test(text);
-  const wind = /\bwind\b/i.test(text);
-  const gasOrIco = /\b(?:gas|interconnector)\b/i.test(text);
-  if (hasGbPower && ccgt) return true;
-  if (hasGbPower && wind) return true;
-  if (hasGas && gasOrIco) return true;
-  return false;
-}
-
-function estimateSignalGbpImpact(
-  row: SignalRow,
-  positions: PositionRow[],
-  windTotal: number,
-  remitTotal: number,
+function unplannedSignalImpactGbp(
+  parsedMw: number,
+  netPowerDeltaMw: number,
 ): number {
-  const mw =
-    parseMwFromText(`${row.title} ${row.description ?? ""}`) ?? 250;
-  const { signedMw, isMixed } = netGbPowerSignedMw(positions);
-  if (!isMixed && Math.abs(signedMw) > 0) {
-    return remitPriceImpactGbpPerMwh(mw) * signedMw;
-  }
-  return 0.12 * (Math.abs(windTotal) + Math.abs(remitTotal));
+  return parsedMw * 0.5 * (netPowerDeltaMw / 1000);
 }
 
 function regimeStyle(regimeRaw: string | null): {
@@ -129,12 +104,43 @@ function regimeStyle(regimeRaw: string | null): {
 type PhysicalRow = {
   calculated_at: string;
   wind_gw: number | null;
+  solar_gw: number | null;
+  residual_demand_gw: number | null;
+  srmc_gbp_mwh: number | null;
+  market_price_gbp_mwh: number | null;
+  implied_price_gbp_mwh: number | null;
+  premium_value: number | null;
   ttf_eur_mwh: number | null;
   remit_mw_lost: number | null;
   normalised_score: number | null;
   direction: string | null;
   regime: string | null;
 };
+
+function toPhysicalPremiumInput(row: PhysicalRow | null): PhysicalPremiumInput {
+  if (!row) {
+    return {
+      wind_gw: null,
+      solar_gw: null,
+      residual_demand_gw: null,
+      srmc_gbp_mwh: null,
+      market_price_gbp_mwh: null,
+      implied_price_gbp_mwh: null,
+      premium_value: null,
+      remit_mw_lost: null,
+    };
+  }
+  return {
+    wind_gw: row.wind_gw,
+    solar_gw: row.solar_gw,
+    residual_demand_gw: row.residual_demand_gw,
+    srmc_gbp_mwh: row.srmc_gbp_mwh,
+    market_price_gbp_mwh: row.market_price_gbp_mwh,
+    implied_price_gbp_mwh: row.implied_price_gbp_mwh,
+    premium_value: row.premium_value,
+    remit_mw_lost: row.remit_mw_lost,
+  };
+}
 
 type PortfolioPnlRow = {
   date: string;
@@ -148,7 +154,9 @@ export function AttributionPageClient() {
   const [loading, setLoading] = useState(true);
   const [livePrices, setLivePrices] = useState<LivePrices | null>(null);
   const [physLatest, setPhysLatest] = useState<PhysicalRow | null>(null);
-  const [physStart, setPhysStart] = useState<PhysicalRow | null>(null);
+  const [marketIntradayGbpMwh, setMarketIntradayGbpMwh] = useState<number | null>(
+    null,
+  );
   const [signals, setSignals] = useState<SignalRow[]>([]);
   const [pnlHistory, setPnlHistory] = useState<PortfolioPnlRow[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -233,14 +241,14 @@ export function AttributionPageClient() {
     setUserId(uid);
 
     const today = utcToday();
-    const dayStart = `${today}T00:00:00.000Z`;
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const since30 = format(subDays(new Date(), 30), "yyyy-MM-dd");
 
     const [
       posRes,
       physLate,
-      physEarly,
+      mpTodayFirst,
+      mpTodayLast,
       sigRes,
       histRes,
     ] = await Promise.all([
@@ -255,18 +263,25 @@ export function AttributionPageClient() {
       supabase
         .from("physical_premium")
         .select(
-          "calculated_at, wind_gw, ttf_eur_mwh, remit_mw_lost, normalised_score, direction, regime",
+          "calculated_at, wind_gw, solar_gw, residual_demand_gw, srmc_gbp_mwh, market_price_gbp_mwh, implied_price_gbp_mwh, premium_value, ttf_eur_mwh, remit_mw_lost, normalised_score, direction, regime",
         )
         .order("calculated_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
       supabase
-        .from("physical_premium")
-        .select(
-          "calculated_at, wind_gw, ttf_eur_mwh, remit_mw_lost, normalised_score, direction, regime",
-        )
-        .gte("calculated_at", dayStart)
-        .order("calculated_at", { ascending: true })
+        .from("market_prices")
+        .select("price_gbp_mwh")
+        .or("market.eq.N2EX,market.eq.APX")
+        .eq("price_date", today)
+        .order("settlement_period", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("market_prices")
+        .select("price_gbp_mwh")
+        .or("market.eq.N2EX,market.eq.APX")
+        .eq("price_date", today)
+        .order("settlement_period", { ascending: false })
         .limit(1)
         .maybeSingle(),
       supabase
@@ -276,7 +291,7 @@ export function AttributionPageClient() {
         )
         .gte("created_at", since24h)
         .order("created_at", { ascending: false })
-        .limit(80),
+        .limit(200),
       uid
         ? supabase
             .from("portfolio_pnl")
@@ -291,7 +306,22 @@ export function AttributionPageClient() {
     else setPositions([]);
 
     setPhysLatest((physLate.data as PhysicalRow) ?? null);
-    setPhysStart((physEarly.data as PhysicalRow) ?? null);
+
+    const openP = mpTodayFirst.data
+      ? Number(
+          (mpTodayFirst.data as { price_gbp_mwh?: unknown }).price_gbp_mwh,
+        )
+      : NaN;
+    const closeP = mpTodayLast.data
+      ? Number(
+          (mpTodayLast.data as { price_gbp_mwh?: unknown }).price_gbp_mwh,
+        )
+      : NaN;
+    if (Number.isFinite(openP) && Number.isFinite(closeP)) {
+      setMarketIntradayGbpMwh(closeP - openP);
+    } else {
+      setMarketIntradayGbpMwh(null);
+    }
 
     setSignals((sigRes.data ?? []) as SignalRow[]);
     setPnlHistory((histRes.data ?? []) as PortfolioPnlRow[]);
@@ -312,36 +342,61 @@ export function AttributionPageClient() {
 
   const hasPositions = positions.length > 0;
   const hasGbPower = positions.some((p) => isGbPowerMarket(p));
-  const hasGas = positions.some((p) => isGasMarket(p));
 
   const physDir = parsePhysicalDirection(physLatest?.direction ?? null);
 
-  const deltaWind =
-    parseNum(physLatest?.wind_gw) != null && parseNum(physStart?.wind_gw) != null
-      ? (parseNum(physLatest?.wind_gw) as number) -
-        (parseNum(physStart?.wind_gw) as number)
-      : 0;
+  const physicalInput = useMemo(
+    () => toPhysicalPremiumInput(physLatest),
+    [physLatest],
+  );
 
-  const ttfCur = parseNum(physLatest?.ttf_eur_mwh);
-  const ttfStart = parseNum(physStart?.ttf_eur_mwh);
-  const deltaTtf =
-    ttfCur != null && ttfStart != null ? ttfCur - ttfStart : 0;
+  const totalPriceMoveGbpMwh = useMemo(
+    () =>
+      resolveTotalPriceMoveGbpMwh({
+        marketIntradayGbpMwh,
+        physical: physicalInput,
+      }),
+    [marketIntradayGbpMwh, physicalInput],
+  );
 
-  const deltaRemit =
-    parseNum(physLatest?.remit_mw_lost) != null &&
-    parseNum(physStart?.remit_mw_lost) != null
-      ? (parseNum(physLatest?.remit_mw_lost) as number) -
-        (parseNum(physStart?.remit_mw_lost) as number)
-      : 0;
+  const premiumAttr = useMemo(
+    () =>
+      computePremiumAttributionGbp(
+        totalPriceMoveGbpMwh,
+        physicalInput,
+        positions,
+      ),
+    [totalPriceMoveGbpMwh, physicalInput, positions],
+  );
 
-  const windAtt = sumWindAttribution(positions, deltaWind);
-  const gasAtt = sumGasAttribution(positions, ttfStart, ttfCur);
-  const remitAtt = sumRemitAttribution(positions, deltaRemit);
+  const windAtt = premiumAttr.windGbp;
+  const gasAtt = premiumAttr.gasGbp;
+  const remitAtt = premiumAttr.remitGbp;
 
   const totalPnl = totalTodayPnlGbp(positions, livePrices);
   const residual = totalPnl - windAtt - gasAtt - remitAtt;
 
   const primary = primaryDriverKey(windAtt, gasAtt, remitAtt, residual);
+
+  const windStackPct = useMemo(() => {
+    const w = parseNum(physLatest?.wind_gw) ?? 0;
+    const s = parseNum(physLatest?.solar_gw) ?? 0;
+    const r = parseNum(physLatest?.residual_demand_gw) ?? 0;
+    const d = w + s + r;
+    return d > 0 ? (w / d) * 100 : 0;
+  }, [physLatest]);
+
+  const gasCostSharePct = useMemo(() => {
+    const m = parseNum(physLatest?.market_price_gbp_mwh);
+    const sr = parseNum(physLatest?.srmc_gbp_mwh);
+    if (m == null || sr == null || m <= 0) return 0;
+    return Math.min(100, Math.max(0, (sr / m) * 100));
+  }, [physLatest]);
+
+  const remitStressPct = useMemo(() => {
+    const rm = parseNum(physLatest?.remit_mw_lost) ?? 0;
+    return Math.min(100, (rm / 5000) * 100);
+  }, [physLatest]);
 
   const normScore = parseNum(physLatest?.normalised_score);
 
@@ -405,14 +460,16 @@ export function AttributionPageClient() {
     }))
     .filter((x) => Number.isFinite(x.pnl));
 
-  const dedupedSignals = useMemo(
-    () => dedupeSignalRowsByTitleDescription(signals),
-    [signals],
-  );
-
-  const relevantSignals = dedupedSignals.filter((s) =>
-    signalRelevantToBook(s, hasGbPower, hasGas),
-  );
+  const unplannedSignals = useMemo(() => {
+    if (!hasGbPower) return [];
+    return [...signals]
+      .filter((s) => /unplanned/i.test(s.description ?? ""))
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+      .slice(0, 5);
+  }, [signals, hasGbPower]);
 
   const gaugeContext = useMemo(() => {
     const r = (physLatest?.regime ?? "").toLowerCase();
@@ -440,13 +497,10 @@ export function AttributionPageClient() {
       remit_attribution_gbp: remitAtt,
       residual_gbp: residual,
       primary_driver: primary,
-      deltas: {
-        wind_gw: deltaWind,
-        ttf_eur_mwh: deltaTtf,
-        remit_mw: deltaRemit,
-      },
+      total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
+      market_intraday_gbp_mwh: marketIntradayGbpMwh,
+      premium_model: premiumAttr,
       physical: physLatest,
-      physical_start_of_day: physStart,
     };
 
     const snapshot = positions.map((p) => ({
@@ -474,9 +528,10 @@ export function AttributionPageClient() {
         positions_snapshot: snapshot,
       };
 
-      const { error } = await supabase.from("portfolio_pnl").upsert(row, {
-        onConflict: "user_id,date",
-      });
+      const { error } = await supabase.from("portfolio_pnl").upsert(
+        row,
+        { onConflict: "user_id,date" },
+      );
       if (error) setPersistErr(error.message);
       else setPersistErr(null);
     })();
@@ -493,10 +548,8 @@ export function AttributionPageClient() {
     supabase,
     positions,
     physLatest,
-    physStart,
-    deltaWind,
-    deltaTtf,
-    deltaRemit,
+    marketIntradayGbpMwh,
+    totalPriceMoveGbpMwh,
   ]);
 
   const bookAlignmentDisplay =
@@ -599,17 +652,17 @@ export function AttributionPageClient() {
                       {
                         name: "Wind generation",
                         impact: windAtt,
-                        dir: `${deltaWind >= 0 ? "↑" : "↓"} ${deltaWind >= 0 ? "+" : "−"}${Math.abs(deltaWind).toFixed(1)} GW`,
+                        dir: `${windStackPct.toFixed(0)}% stack · ${premiumAttr.windMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Gas prices (TTF)",
                         impact: gasAtt,
-                        dir: `${deltaTtf >= 0 ? "↑" : "↓"} ${deltaTtf >= 0 ? "+" : "−"}€${Math.abs(deltaTtf).toFixed(2)}/MWh`,
+                        dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${premiumAttr.gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "REMIT outages",
                         impact: remitAtt,
-                        dir: `${deltaRemit >= 0 ? "+" : "−"}${Math.abs(Math.round(deltaRemit))} MW vs open`,
+                        dir: `${remitStressPct.toFixed(0)}% system stress · ${premiumAttr.remitMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Residual",
@@ -677,19 +730,18 @@ export function AttributionPageClient() {
             {detailOpen ? (
               <div className="mt-4 space-y-4 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/40 px-4 py-4">
                 {positions.map((p) => {
-                  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-                  const w =
-                    m === "gb_power"
-                      ? windAttributionForPosition(deltaWind, p)
-                      : 0;
-                  const g =
-                    ttfStart != null && ttfCur != null
-                      ? gasAttributionForPosition(ttfStart, ttfCur, p)
-                      : 0;
-                  const r =
-                    m === "gb_power"
-                      ? remitAttributionForPosition(deltaRemit, p)
-                      : 0;
+                  const w = premiumWindGbpPosition(
+                    p,
+                    premiumAttr.windMoveGbpMwh,
+                  );
+                  const g = premiumGasGbpPosition(
+                    p,
+                    premiumAttr.gasMoveGbpMwh,
+                  );
+                  const r = premiumRemitGbpPosition(
+                    p,
+                    premiumAttr.remitMoveGbpMwh,
+                  );
                   const sub = w + g + r;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";
@@ -744,31 +796,27 @@ export function AttributionPageClient() {
             <h2 className="mt-1 font-serif text-xl text-ink">
               Active signals relevant to your positions
             </h2>
-            {relevantSignals.length === 0 ? (
+            {unplannedSignals.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 No active REMIT signals directly affecting your current positions.
               </p>
             ) : (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {relevantSignals.map((s) => {
-                  const est = estimateSignalGbpImpact(
-                    s,
-                    positions,
-                    windAtt,
-                    remitAtt,
+                {unplannedSignals.map((s) => {
+                  const parsedMw = parseDeratedMwFromDescription(
+                    s.description,
                   );
+                  const netMw = gbNet.isMixed ? 0 : gbNet.signedMw;
+                  const est =
+                    parsedMw != null
+                      ? unplannedSignalImpactGbp(parsedMw, netMw)
+                      : 0;
                   const estFmt = formatGbpColored(est);
-                  const mw = parseMwFromText(
-                    `${s.title} ${s.description ?? ""}`,
-                  );
                   const gbPos = positions.find((p) => isGbPowerMarket(p));
-                  const gasPos = positions.find((p) => isGasMarket(p));
                   const anchor =
                     gbPos != null
                       ? `${gbPos.direction === "short" ? "short" : "long"} ${gbPos.instrument ?? "GB power"}`
-                      : gasPos != null
-                        ? `${gasPos.direction === "short" ? "short" : "long"} ${gasPos.instrument ?? "gas"}`
-                        : "book";
+                      : "book";
                   return (
                     <article
                       key={s.id}
@@ -777,9 +825,12 @@ export function AttributionPageClient() {
                       <p className="text-[11px] font-semibold text-ink">
                         {s.title}
                       </p>
-                      {mw != null ? (
+                      {parsedMw != null ? (
                         <p className="mt-1 text-[11px] text-ink-mid">
-                          {mw.toLocaleString("en-GB")} MW offline
+                          {parsedMw.toLocaleString("en-GB", {
+                            maximumFractionDigits: 1,
+                          })}{" "}
+                          MW offline (unplanned)
                         </p>
                       ) : null}
                       <p className="mt-2 border-l-2 border-[#1D6B4E] pl-2 text-[12px] italic leading-snug text-ink-mid">
