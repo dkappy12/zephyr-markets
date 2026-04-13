@@ -1468,16 +1468,89 @@ def _remit_active_planned_unplanned_mw(
     return planned_mw, unplanned_mw, active_outage_count, total_signals_24h
 
 
+def _residual_demand_premium_gbp_mwh(rd: float) -> float:
+    """
+    Piecewise-linear residual demand premium above SRMC.
+    Breakpoints reflect GB merit order: cheap CCGTs → expensive OCGTs → peakers → scarcity.
+    Research basis: Ghelasi & Ziel (2025), Kanamura & Ohashi (2007), GB supply curve structure.
+    Breakpoints:
+      0-15 GW:  £1.50/MWh per GW (renewable-dominated, low premium)
+      15-25 GW: £2.50/MWh per GW (mid-merit CCGTs marginal)
+      25-32 GW: £5.00/MWh per GW (expensive OCGTs entering)
+      >32 GW:   £15.00/MWh per GW (peakers and scarcity, hockey-stick steepening)
+    """
+    if rd <= 0:
+        return 0.0
+    premium = 0.0
+    # Segment 1: 0 to 15 GW
+    seg1 = min(rd, 15.0)
+    premium += seg1 * 1.50
+    if rd <= 15.0:
+        return premium
+    # Segment 2: 15 to 25 GW
+    seg2 = min(rd - 15.0, 10.0)
+    premium += seg2 * 2.50
+    if rd <= 25.0:
+        return premium
+    # Segment 3: 25 to 32 GW
+    seg3 = min(rd - 25.0, 7.0)
+    premium += seg3 * 5.00
+    if rd <= 32.0:
+        return premium
+    # Segment 4: above 32 GW (scarcity)
+    seg4 = rd - 32.0
+    premium += seg4 * 15.00
+    return premium
+
+
+def _wind_price_suppression_gbp_mwh(wind_gw: float) -> float:
+    """
+    Piecewise wind price suppression effect on implied price.
+    Research basis: ECIU (2024/2025), UK DML causal study showing U-shaped relationship.
+    At low penetration: moderate suppression ~£2.5/GW
+    At mid penetration (5-15 GW): lower suppression ~£1.8/GW (saturation effect)
+    At high penetration (>15 GW): stronger suppression ~£3.5/GW (merit-order intensifies)
+    Applied as a downward adjustment to the gas-dominated implied price.
+    """
+    if wind_gw <= 0:
+        return 0.0
+    suppression = 0.0
+    # Segment 1: 0 to 5 GW
+    seg1 = min(wind_gw, 5.0)
+    suppression += seg1 * 2.5
+    if wind_gw <= 5.0:
+        return suppression
+    # Segment 2: 5 to 15 GW
+    seg2 = min(wind_gw - 5.0, 10.0)
+    suppression += seg2 * 1.8
+    if wind_gw <= 15.0:
+        return suppression
+    # Segment 3: above 15 GW
+    seg3 = wind_gw - 15.0
+    suppression += seg3 * 3.5
+    return suppression
+
+
 def _remit_adder_per_gw(available_margin_gw: float) -> float:
+    """
+    Price adder per GW of REMIT capacity lost, based on GB LoLP x VoLL framework.
+    VoLL = £6,000/MWh (Ofgem). De-rated margin for winter 2025/26 = 6.1 GW.
+    Research basis: GB Reserve Scarcity Price activation, January 2025 event (£5,750/MWh
+    at 1.7 GW shortfall), Ward et al. (2019) merit order steepening.
+    """
+    if available_margin_gw > 10:
+        return 1.5    # Comfortable: pure merit order effect
     if available_margin_gw > 8:
-        return 2.0
+        return 3.0    # Adequate: modest tightening premium
     if available_margin_gw > 6:
-        return 5.5
+        return 6.0    # Watch: balancing mechanism premium emerging
     if available_margin_gw > 4:
-        return 8.0
+        return 12.0   # Tight: EMN territory, significant BM premium
     if available_margin_gw > 2:
-        return 16.5
-    return 50.0
+        return 30.0   # Very tight: Reserve Scarcity Price activation range
+    if available_margin_gw > 0:
+        return 100.0  # Critical: approaching VoLL, January 2025 territory
+    return 200.0      # Deficit: extreme scarcity
 
 
 async def _fetch_weather_wind_closest_now(
@@ -1730,11 +1803,22 @@ async def calculate_physical_premium() -> None:
         remit_price_adder = remit_gw * adder_per_gw
 
         rd = residual_demand_gw
+        rd_premium_mwh = _residual_demand_premium_gbp_mwh(rd)
+        wind_suppression_mwh = _wind_price_suppression_gbp_mwh(wg)
         if rd < 15.0:
             premium_regime = "renewable"
             renewable_surplus_gw = 15.0 - rd
             implied = -2.0 * renewable_surplus_gw + 10.0
             implied = implied + remit_price_adder
+            logger.debug(
+                "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
+                "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                rd,
+                wind_suppression_mwh,
+                rd_premium_mwh,
+                remit_price_adder,
+                available_margin_gw,
+            )
             implied_price_gbp_mwh = max(implied, -60.0)
         elif rd < 22.0:
             premium_regime = "transitional"
@@ -1742,19 +1826,43 @@ async def calculate_physical_premium() -> None:
                 transition_factor = (rd - 15.0) / 7.0
                 renewable_price = -2.0 * (15.0 - rd) + 10.0
                 gas_price = (
-                    srmc_gbp_mwh + (rd * 2.5) + (rd**2 * 0.15)
+                    srmc_gbp_mwh
+                    + rd_premium_mwh
+                    - wind_suppression_mwh
                 )
                 implied = (
                     renewable_price * (1.0 - transition_factor)
                     + gas_price * transition_factor
                 )
                 implied = implied + remit_price_adder
+                logger.debug(
+                    "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
+                    "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                    rd,
+                    wind_suppression_mwh,
+                    rd_premium_mwh,
+                    remit_price_adder,
+                    available_margin_gw,
+                )
                 implied_price_gbp_mwh = max(implied, -60.0)
         else:
             premium_regime = "gas-dominated"
             if srmc_gbp_mwh is not None:
-                implied = srmc_gbp_mwh + (rd * 2.5) + (rd**2 * 0.15)
+                implied = (
+                    srmc_gbp_mwh
+                    + rd_premium_mwh
+                    - wind_suppression_mwh
+                )
                 implied = implied + remit_price_adder
+                logger.debug(
+                    "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
+                    "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                    rd,
+                    wind_suppression_mwh,
+                    rd_premium_mwh,
+                    remit_price_adder,
+                    available_margin_gw,
+                )
                 implied_price_gbp_mwh = max(implied, -60.0)
 
         premium_value: float | None = None
