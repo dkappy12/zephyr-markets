@@ -2711,7 +2711,7 @@ WATCH LIST
 Exactly three bullet lines starting with • (bullet character). Each one line, specific, and actionable. Reference actual asset names, prices, or GW figures from the data.
 
 BOOK TOUCHPOINTS
-1-2 sentences connecting today's physical picture to how a generic long or short GB power or gas position would be affected. Be direct about the P&L implication.
+Write nothing substantive here (a single word "reserved" is fine). Book-specific touchpoints are generated in the web app from each user's live open positions.
 
 Do not use markdown bold or headings other than the exact headers above. Do not add extra sections."""
 
@@ -2789,7 +2789,8 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             "weather_watch": weather_s,
             "one_risk": one_risk_s,
             "watch_list": watch_s,
-            "book_touchpoints": book_s,
+            # Book-specific copy is generated in the Next.js app from the user's open positions.
+            "book_touchpoints": None,
             "articles": articles,
             "raw_response": raw_text,
             "physical_premium_score": score_store,

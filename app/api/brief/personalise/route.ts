@@ -36,15 +36,42 @@ function extractAnthropicText(rawText: string): string {
     .trim();
 }
 
+type FocusPosition = {
+  dir: string;
+  size: number;
+  unit: string;
+  label: string;
+  market: string;
+  tp: number | null;
+};
+
+/** Guaranteed book-specific copy derived only from platform position rows (no generic long/short templates). */
+function buildDeterministicBookTouchpoints(
+  focus: FocusPosition[],
+  score: number,
+  direction: string,
+): string {
+  const intro = `Physical premium is ${score} (${direction}). Your open positions on Zephyr:`;
+  const parts = focus.map((p) => {
+    const sz = Number.isFinite(p.size) ? Math.abs(p.size) : 0;
+    const px =
+      p.tp == null || !Number.isFinite(p.tp)
+        ? "entry unknown"
+        : `entry ${p.tp}`;
+    return `${p.label} — ${p.dir} ${sz} ${p.unit} (${p.market}), ${px}`;
+  });
+  return `${intro} ${parts.join(" ")} Map each line to today’s drivers using the overnight summary, weather/residual demand, and risk sections above.`;
+}
+
+function labelsPresentInText(text: string, labels: string[]): boolean {
+  if (labels.length === 0) return false;
+  const lower = text.toLowerCase();
+  return labels.every((l) => l.length > 0 && lower.includes(l.toLowerCase()));
+}
+
 export async function POST(req: Request) {
   try {
     const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) {
-      return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY is not configured" },
-        { status: 500 },
-      );
-    }
 
     const supabase = await createClient();
 
@@ -86,6 +113,20 @@ export async function POST(req: Request) {
     const focusPositions = [...normalizedPositions]
       .sort((a, b) => Math.abs(b.size) - Math.abs(a.size))
       .slice(0, 4);
+
+    if (focusPositions.length === 0) {
+      return NextResponse.json(
+        { error: "No open positions to personalise" },
+        { status: 400 },
+      );
+    }
+
+    const deterministic = buildDeterministicBookTouchpoints(
+      focusPositions,
+      score,
+      direction,
+    );
+
     const requiredTokens = focusPositions.map((_, idx) => `[P${idx + 1}]`);
     const requiredLabels = focusPositions.map((p) => p.label).filter(Boolean);
     const positionLines = focusPositions
@@ -110,12 +151,15 @@ Requirements:
 3) No abstract commentary without token references.
 4) Keep one paragraph and concrete numbers only.`;
 
-    async function runAnthropic(prompt: string): Promise<string> {
+    async function runAnthropic(
+      apiKey: string,
+      prompt: string,
+    ): Promise<string> {
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-api-key": key,
+          "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
@@ -148,37 +192,37 @@ Requirements:
       return hasAllTokens && hasAllLabels;
     }
 
+    if (!key) {
+      return NextResponse.json({ text: deterministic });
+    }
+
     let text = "";
     try {
-      text = await runAnthropic(userPrompt);
+      text = await runAnthropic(key, userPrompt);
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
+          key,
           `${userPrompt}\n\nYour previous answer was not specific enough. Rewrite and include every required token and label explicitly.`,
         );
       }
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : String(error) },
-        { status: 500 },
-      );
+    } catch {
+      return NextResponse.json({ text: deterministic });
     }
 
     if (!validatePersonalisedText(text)) {
-      return NextResponse.json(
-        {
-          error:
-            "Personalised text did not reference the user's actual open positions",
-        },
-        { status: 500 },
-      );
+      return NextResponse.json({ text: deterministic });
     }
 
     const cleaned = text.replace(/\[P\d+\]\s*/g, "").trim();
-    if (!cleaned) {
-      return NextResponse.json(
-        { error: "Personalised text was empty after formatting" },
-        { status: 500 },
-      );
+    if (!cleaned || !labelsPresentInText(cleaned, requiredLabels)) {
+      return NextResponse.json({ text: deterministic });
+    }
+
+    const genericLongShort =
+      /\b(long|short)\s+gb\s+power\s+positions?\b/i.test(cleaned) ||
+      /\bshort\s+gas\s+positions?\b/i.test(cleaned);
+    if (genericLongShort) {
+      return NextResponse.json({ text: deterministic });
     }
 
     return NextResponse.json({ text: cleaned });
