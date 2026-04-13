@@ -10,7 +10,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   (upsert by report_date + location).
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
   `market_prices` (upsert by price_date + settlement_period + market).
-- TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
+- TTF/NBP gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - FX rates: Frankfurter EUR/GBP daily fix → Supabase `fx_rates` (upsert on rate_date + base + quote).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 - Physical premium: CCGT SRMC model → Supabase `physical_premium` (append-only history).
@@ -107,11 +107,14 @@ MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
 
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
+NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
 HUB_TTF = "TTF"
+HUB_NBP = "NBP"
 TTF_POLL_MINUTES = 15
+GAS_BACKFILL_DAYS = 180
 SOLAR_POLL_MINUTES = 5
 
 # Physical premium (CCGT SRMC merit order, Ward et al. 2019; Hagfors & Bunn 2016; Ghelasi & Ziel 2025)
@@ -1175,33 +1178,33 @@ async def fetch_ttf_price() -> None:
         return
 
     today_utc = datetime.now(timezone.utc).date()
-    today_rows = [t for t in parsed if t[0].date() == today_utc]
-    if today_rows:
-        latest_dt, latest_price, _latest_status = today_rows[0]
-        selection = "today"
-    else:
-        latest_dt, latest_price, _latest_status = max(parsed, key=lambda x: x[0])
-        selection = "fallback"
+    cutoff = today_utc - timedelta(days=GAS_BACKFILL_DAYS)
+    backfill_rows = [t for t in parsed if t[0].date() >= cutoff]
+    if not backfill_rows:
+        backfill_rows = [max(parsed, key=lambda x: x[0])]
 
-    price_time_iso = latest_dt.astimezone(timezone.utc).isoformat()
-    gas_day_label = latest_dt.strftime("%Y-%m-%d")
-
-    row = {
-        "price_time": price_time_iso,
-        "hub": HUB_TTF,
-        "price_eur_mwh": latest_price,
-        "source": GAS_PRICE_SOURCE_DEFAULT,
-        "fetched_at": fetched_at,
-    }
+    payload = [
+        {
+            "price_time": dt.astimezone(timezone.utc).isoformat(),
+            "hub": HUB_TTF,
+            "price_eur_mwh": price,
+            "source": GAS_PRICE_SOURCE_DEFAULT,
+            "fetched_at": fetched_at,
+        }
+        for dt, price, _ in backfill_rows
+    ]
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
-        await upsert_gas_prices_http(http, [row])
+        await upsert_gas_prices_http(http, payload)
+
+    latest_dt, latest_price, _latest_status = max(backfill_rows, key=lambda x: x[0])
+    gas_day_label = latest_dt.strftime("%Y-%m-%d")
 
     logger.info(
         "ttf_cycle: TTF NGP = €%.2f/MWh for gas day %s (%s)",
         latest_price,
         gas_day_label,
-        selection,
+        f"upserted {len(payload)} rows",
     )
 
 
@@ -1210,6 +1213,95 @@ def scheduled_ttf() -> None:
         asyncio.run(fetch_ttf_price())
     except Exception as e:
         logger.error("TTF cycle aborted: %s", e, exc_info=True)
+
+
+async def fetch_nbp_price() -> None:
+    """Fetch EEX NBP NGP CSV; upsert today's UTC gas day if present, else latest Gasday."""
+    _require_supabase_env()
+    fetched_at = datetime.now(timezone.utc).isoformat()
+
+    logger.debug(
+        "nbp_cycle: SSL verification disabled for EEX gasandregistry domain",
+    )
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "text/csv,text/plain,*/*",
+            "User-Agent": "ZephyrMarkets-NBP-Ingestion/1.0",
+        },
+        follow_redirects=True,
+        verify=False,
+    ) as http:
+        resp = await http.get(NBP_NGP_CSV_URL, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        text = resp.text
+
+    rows = _ttf_csv_dict_rows(text)
+    logger.debug("nbp_cycle: first 3 parsed CSV rows: %s", rows[:3])
+
+    if not rows:
+        logger.warning("nbp_cycle: empty NBP CSV")
+        return
+
+    hdrs = list(rows[0].keys())
+    gasday_col, price_col, status_col = _ttf_resolve_columns(hdrs)
+    if price_col is None or gasday_col is None:
+        logger.error(
+            "nbp_cycle: could not resolve Gasday/IndexValue columns in headers=%s",
+            hdrs,
+        )
+        return
+
+    parsed: list[tuple[datetime, float, str]] = []
+    for row in rows:
+        dt = _ttf_parse_gasday_dd_mm_yyyy(row.get(gasday_col, ""))
+        price = _ttf_parse_index_value_eur(row.get(price_col, ""))
+        if dt is None or price is None:
+            continue
+        status_txt = ""
+        if status_col and status_col in row:
+            status_txt = (row.get(status_col) or "").strip()
+        parsed.append((dt, price, status_txt))
+
+    if not parsed:
+        logger.warning("nbp_cycle: no parseable NBP rows (headers=%s)", hdrs)
+        return
+
+    today_utc = datetime.now(timezone.utc).date()
+    cutoff = today_utc - timedelta(days=GAS_BACKFILL_DAYS)
+    backfill_rows = [t for t in parsed if t[0].date() >= cutoff]
+    if not backfill_rows:
+        backfill_rows = [max(parsed, key=lambda x: x[0])]
+
+    payload = [
+        {
+            "price_time": dt.astimezone(timezone.utc).isoformat(),
+            "hub": HUB_NBP,
+            "price_eur_mwh": price,
+            "source": "EEX NGP NBP",
+            "fetched_at": fetched_at,
+        }
+        for dt, price, _ in backfill_rows
+    ]
+
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        await upsert_gas_prices_http(http, payload)
+
+    latest_dt, latest_price, _latest_status = max(backfill_rows, key=lambda x: x[0])
+    gas_day_label = latest_dt.strftime("%Y-%m-%d")
+
+    logger.info(
+        "nbp_cycle: NBP NGP = %.2f for gas day %s (%s)",
+        latest_price,
+        gas_day_label,
+        f"upserted {len(payload)} rows",
+    )
+
+
+def scheduled_nbp() -> None:
+    try:
+        asyncio.run(fetch_nbp_price())
+    except Exception as e:
+        logger.error("NBP cycle aborted: %s", e, exc_info=True)
 
 
 async def upsert_solar_outturn_http(
@@ -3117,7 +3209,7 @@ def main() -> None:
     logger.info(
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
-        "| TTF NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
+        "| TTF NGP every %s min | NBP NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
         "| morning brief daily 06:00 (host TZ; use UTC)",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
@@ -3129,6 +3221,7 @@ def main() -> None:
         MARKET_INDEX_POLL_MINUTES,
         MID_DATASET_URL,
         TTF_POLL_MINUTES,
+        TTF_POLL_MINUTES,
         SOLAR_POLL_MINUTES,
         PHYSICAL_PREMIUM_POLL_MINUTES,
     )
@@ -3138,6 +3231,7 @@ def main() -> None:
     scheduled_storage()
     scheduled_market_prices()
     scheduled_ttf()
+    scheduled_nbp()
     scheduled_solar()
     scheduled_physical_premium()
     scheduled_morning_brief()
@@ -3145,6 +3239,7 @@ def main() -> None:
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
     schedule.every(MARKET_INDEX_POLL_MINUTES).minutes.do(scheduled_market_prices)
     schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_ttf)
+    schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_nbp)
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
