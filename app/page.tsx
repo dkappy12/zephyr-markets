@@ -1,9 +1,11 @@
 "use client";
 
+import { createBrowserClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
-import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
+import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -18,25 +20,7 @@ const fadeUp = {
   }),
 };
 
-const tags = [
-  "GB Power",
-  "NBP",
-  "TTF",
-  "Carbon",
-  "EUA",
-] as const;
-
-const tickerItems = [
-  "GB BASeload · 52.4",
-  "NBP Day-Ahead · 78.2",
-  "TTF Month · 34.10",
-  "EU Carbon Dec · 68.20",
-  "GB Baseload Week · 51.2",
-  "System Wind · 12.8 GW",
-  "Interconnector Nemo · 880 MW",
-  "Rough Storage · 82%",
-  "REMIT · 3 new alerts",
-] as const;
+const tags = ["GB Power · N2EX", "European Gas · TTF/NBP", "REMIT · Live outages"] as const;
 
 const PLAN_COMPARISON_ROWS: {
   feature: string;
@@ -115,20 +99,111 @@ const PLAN_COMPARISON_ROWS: {
 ];
 
 export default function Home() {
+  const [tickerItems, setTickerItems] = useState<string[] | null>(null);
+  const [brief, setBrief] = useState<{
+    text: string;
+    generatedAt: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    async function loadLandingData() {
+      const [physRes, powerRes, gasRes, signalRes, briefRes] = await Promise.all([
+        supabase
+          .from("physical_premium")
+          .select("normalised_score,direction")
+          .order("calculated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("market_prices")
+          .select("price_gbp_mwh")
+          .order("price_date", { ascending: false })
+          .order("settlement_period", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("gas_prices")
+          .select("price_eur_mwh")
+          .eq("hub", "TTF")
+          .order("price_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("signals")
+          .select("*", { count: "exact", head: true })
+          .gte("created_at", since),
+        supabase
+          .from("brief_entries")
+          .select("executive_summary,overnight_summary,generated_at,created_at")
+          .order("generated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (briefRes.data && !briefRes.error) {
+        const executive = briefRes.data.executive_summary;
+        const overnight = briefRes.data.overnight_summary;
+        setBrief({
+          text:
+            (typeof executive === "string" && executive.trim() !== ""
+              ? executive
+              : typeof overnight === "string"
+                ? overnight
+                : "") ?? "",
+          generatedAt:
+            typeof briefRes.data.generated_at === "string"
+              ? briefRes.data.generated_at
+              : typeof briefRes.data.created_at === "string"
+                ? briefRes.data.created_at
+                : null,
+        });
+      } else {
+        setBrief(null);
+      }
+
+      if (physRes.error || powerRes.error || gasRes.error || signalRes.error) {
+        setTickerItems(null);
+        return;
+      }
+
+      const score = Number(physRes.data?.normalised_score);
+      const dir = String(physRes.data?.direction ?? "STABLE").toUpperCase();
+      const power = Number(powerRes.data?.price_gbp_mwh);
+      const ttf = Number(gasRes.data?.price_eur_mwh);
+      const signalCount = signalRes.count ?? 0;
+      if (!Number.isFinite(score) || !Number.isFinite(power) || !Number.isFinite(ttf)) {
+        setTickerItems(null);
+        return;
+      }
+
+      setTickerItems([
+        `Physical premium · ${score >= 0 ? "+" : ""}${score.toFixed(1)} ${dir}`,
+        `GB day-ahead · £${power.toFixed(2)}/MWh`,
+        `TTF · €${ttf.toFixed(2)}/MWh`,
+        `Signals 24h · ${signalCount}`,
+      ]);
+    }
+
+    void loadLandingData();
+  }, []);
+
+  const briefTimeLabel = useMemo(() => {
+    if (!brief?.generatedAt) return null;
+    try {
+      return formatInTimeZone(new Date(brief.generatedAt), "UTC", "EEEE d MMMM · HH:mm 'UTC'");
+    } catch {
+      return null;
+    }
+  }, [brief?.generatedAt]);
+
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
       <section className="relative overflow-hidden border-b-[0.5px] border-ivory-border">
         <div className="pointer-events-none absolute inset-0 z-0 min-h-[420px]">
           <TopoBackground className="h-full w-full min-h-[420px]" lineOpacity={0.25} />
-        </div>
-        <div className="pointer-events-none absolute right-0 top-0 z-[1] h-[300px] w-[300px] opacity-90">
-          <TriangulationMesh
-            className="h-full w-full"
-            width={300}
-            height={300}
-            opacity={0.12}
-            strokeWidth={1}
-          />
         </div>
         <div className="relative z-10 mx-auto max-w-[1100px] px-4 pb-16 pt-[120px] sm:px-6 sm:pb-24 sm:pt-[128px] lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
@@ -139,7 +214,7 @@ export default function Home() {
               animate="show"
               className="font-serif text-4xl font-medium leading-[1.08] tracking-tight text-ink sm:text-5xl lg:text-[3.25rem]"
             >
-              The physical world, translated into financial intelligence.
+              Know the physical picture before markets open.
             </motion.h1>
             <motion.p
               custom={1}
@@ -148,8 +223,9 @@ export default function Home() {
               animate="show"
               className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-ink-mid sm:text-lg"
             >
-              Real-time physical intelligence for GB and Northwest European
-              energy traders.
+              Zephyr is a real-time intelligence platform for GB power and
+              European gas traders. Physical premium score, REMIT signal feed,
+              and an AI-generated morning brief - updated every 5 minutes.
             </motion.p>
             <motion.div
               custom={2}
@@ -162,13 +238,13 @@ export default function Home() {
                 href="/signup"
                 className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] bg-ink px-6 text-sm font-semibold tracking-normal text-ivory transition-colors duration-200 hover:bg-[#1f1d1a]"
               >
-                Get early access
+                Start free
               </Link>
               <Link
-                href="#how-it-works"
+                href="/dashboard/brief"
                 className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] border border-ink bg-transparent px-6 text-sm font-semibold tracking-normal text-ink transition-colors duration-200 hover:bg-ivory-dark/40"
               >
-                See how it works
+                View today&apos;s brief
               </Link>
             </motion.div>
             <motion.div
@@ -191,35 +267,64 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="border-b-[0.5px] border-ivory-border bg-ink text-ivory">
-        <div className="relative overflow-hidden py-2">
-          <div className="animate-ticker-marquee flex w-max gap-12 whitespace-nowrap font-sans text-[9px] font-medium uppercase tracking-[0.2em] text-ivory/90">
-            {[...tickerItems, ...tickerItems].map((line, i) => (
-              <span key={`${line}-${i}`}>{line}</span>
-            ))}
+      {tickerItems && tickerItems.length > 0 ? (
+        <div className="border-b-[0.5px] border-ivory-border bg-ink text-ivory">
+          <div className="relative overflow-hidden py-2">
+            <div className="animate-ticker-marquee flex w-max gap-12 whitespace-nowrap font-sans text-[9px] font-medium uppercase tracking-[0.2em] text-ivory/90">
+              {[...tickerItems, ...tickerItems].map((line, i) => (
+                <span key={`${line}-${i}`}>{line}</span>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
-      <section
-        id="how-it-works"
-        className="border-b-[0.5px] border-ivory-border py-24 sm:py-32"
-      >
+      <section className="border-b-[0.5px] border-ivory-border py-16 sm:py-20">
+        <div className="mx-auto max-w-[900px] px-4 sm:px-6 lg:px-8">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            This morning&apos;s brief
+          </p>
+          {brief?.text ? (
+            <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
+              <blockquote className="border-l-2 border-[#1D6B4E] pl-4 font-serif text-lg leading-relaxed text-ink">
+                {brief.text}
+              </blockquote>
+              <p className="mt-4 text-xs text-ink-light">
+                {briefTimeLabel ?? "—"}
+              </p>
+              <Link
+                href="/dashboard/brief"
+                className="mt-3 inline-block text-sm font-medium text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+              >
+                Read full brief →
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
+              <p className="italic text-ink-mid">
+                The morning brief publishes daily at 06:00 UTC.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="border-b-[0.5px] border-ivory-border py-24 sm:py-32">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="grid gap-10 md:grid-cols-3 md:gap-0 md:divide-x-[0.5px] md:divide-ivory-border">
-            <FeatureColumn
-              title="Physical signals"
-              body="REMIT filings, interconnector flows, and wind error land as tradable context for GB Power, NBP, and TTF."
+            <OutcomeColumn
+              title="Know what moved overnight"
+              body="The morning brief synthesises REMIT outages, gas moves, and wind forecasts into a 200-word trader read. Published at 06:00 UTC before GB markets open."
               className="md:pr-8"
             />
-            <FeatureColumn
-              title="Book-native intelligence"
-              body="Each signal is scored against your open positions and hedge gaps. You see what matters to your P&amp;L, not a generic headline feed."
+            <OutcomeColumn
+              title="See which outages matter to your book"
+              body="The signal feed parses every REMIT notice, classifies it by asset type and severity, and tells you the market implication in plain English."
               className="md:px-8"
             />
-            <FeatureColumn
-              title="Morning brief and attribution"
-              body="06:00 GMT brief. Intraday P&amp;L attribution by physical driver so you know what moved the book."
+            <OutcomeColumn
+              title="Understand where the market is vs fundamentals"
+              body="The physical premium score compares the N2EX day-ahead price against a CCGT-anchored SRMC model updated every 5 minutes. Know when the market is mispriced before you trade."
               className="md:pl-8"
             />
           </div>
@@ -241,7 +346,7 @@ export default function Home() {
             <PricingCard
               name="Free"
               price="£0"
-              blurb="Two-hour delayed signals, 08:00 brief, GB Power and NBP."
+              blurb="Physical premium score, morning brief (06:00 UTC), and signal feed. No credit card required."
               cta="Start free"
               href="/signup"
               emphasis={false}
@@ -348,26 +453,15 @@ export default function Home() {
       </section>
 
       <footer className="border-t-[0.5px] border-ivory-border py-10">
-        <div className="mx-auto flex max-w-[1100px] flex-col items-center justify-between gap-6 px-4 sm:flex-row sm:px-6 lg:px-8">
-          <p className="font-serif text-2xl text-ink">Zephyr</p>
-          <p className="text-xs text-ink-mid">
-            © 2026 Zephyr Markets. GB &amp; NW Europe.
-          </p>
-          <div className="flex gap-6 text-xs font-medium uppercase tracking-[0.12em] text-ink-mid">
-            <Link href="/login" className="hover:text-ink">
-              Log in
-            </Link>
-            <Link href="/signup" className="hover:text-ink">
-              Sign up
-            </Link>
-          </div>
+        <div className="mx-auto max-w-[1100px] px-4 text-center text-xs text-ink-mid sm:px-6 lg:px-8">
+          Zephyr Markets © 2026 · contact@zephyr.markets · Privacy · Terms
         </div>
       </footer>
     </div>
   );
 }
 
-function FeatureColumn({
+function OutcomeColumn({
   title,
   body,
   className = "",
