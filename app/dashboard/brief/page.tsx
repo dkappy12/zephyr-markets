@@ -27,6 +27,8 @@ type BriefRow = {
   one_risk: string | null;
   watch_list: string | null;
   book_touchpoints: string | null;
+  /** Snapshot from brief generation; prefer live `physical_premium` for score/direction when calling personalise. */
+  physical_premium_score?: number | null;
   articles: BriefArticle[] | null;
 };
 
@@ -223,7 +225,7 @@ export default function BriefPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      const [briefRes, posRes] = await Promise.all([
+      const [briefRes, posRes, ppRes] = await Promise.all([
         supabase
           .from("brief_entries")
           .select("*")
@@ -237,6 +239,12 @@ export default function BriefPage() {
               .eq("user_id", user.id)
               .eq("is_closed", false)
           : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("physical_premium")
+          .select("normalised_score, direction")
+          .order("calculated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (!briefRes.error && briefRes.data) {
@@ -260,7 +268,7 @@ export default function BriefPage() {
 
       if (!briefRes.error && briefRes.data && open.length > 0) {
         setBookTouchpointLoading(true);
-        const b = briefRes.data as BriefRow & { normalised_score?: number; direction?: string };
+        const b = briefRes.data as BriefRow;
         try {
           const {
             data: { session },
@@ -271,6 +279,24 @@ export default function BriefPage() {
           if (session?.access_token) {
             headers.Authorization = `Bearer ${session.access_token}`;
           }
+          const pp = ppRes.data as
+            | { normalised_score?: number | null; direction?: string | null }
+            | null
+            | undefined;
+          const scoreFromPp =
+            pp?.normalised_score != null && Number.isFinite(Number(pp.normalised_score))
+              ? Number(pp.normalised_score)
+              : null;
+          const scoreFromBrief =
+            b.physical_premium_score != null &&
+            Number.isFinite(Number(b.physical_premium_score))
+              ? Number(b.physical_premium_score)
+              : null;
+          const normalisedScore = scoreFromPp ?? scoreFromBrief ?? 0;
+          const premiumDirection =
+            (typeof pp?.direction === "string" && pp.direction.trim() !== ""
+              ? pp.direction
+              : null) ?? "STABLE";
           const resp = await fetch("/api/brief/personalise", {
             method: "POST",
             headers,
@@ -278,8 +304,8 @@ export default function BriefPage() {
             body: JSON.stringify({
               overnight_summary: b.overnight_summary ?? b.executive_summary ?? "",
               one_risk: b.one_risk ?? "",
-              normalised_score: (b as unknown as { normalised_score?: number }).normalised_score ?? 0,
-              direction: (b as unknown as { direction?: string }).direction ?? "STABLE",
+              normalised_score: normalisedScore,
+              direction: premiumDirection,
               positions: open,
             }),
           });

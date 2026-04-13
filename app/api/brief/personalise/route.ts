@@ -45,22 +45,32 @@ type FocusPosition = {
   tp: number | null;
 };
 
+function formatSize(size: number, unit: string): string {
+  const u = unit.toLowerCase();
+  const abs = Number.isFinite(size) ? Math.abs(size) : 0;
+  if (u === "therm" && abs >= 1000) {
+    return `${abs.toLocaleString("en-GB")} therm`;
+  }
+  return `${abs} ${unit}`.trim();
+}
+
 /** Guaranteed book-specific copy derived only from platform position rows (no generic long/short templates). */
 function buildDeterministicBookTouchpoints(
   focus: FocusPosition[],
   score: number,
   direction: string,
 ): string {
-  const intro = `Physical premium is ${score} (${direction}). Your open positions on Zephyr:`;
+  const scoreLabel = Number.isFinite(score) ? score.toFixed(1) : String(score);
+  const intro = `Physical premium ${scoreLabel} (${direction}). Your open lines:`;
   const parts = focus.map((p) => {
-    const sz = Number.isFinite(p.size) ? Math.abs(p.size) : 0;
+    const sz = formatSize(p.size, p.unit);
     const px =
       p.tp == null || !Number.isFinite(p.tp)
-        ? "entry unknown"
-        : `entry ${p.tp}`;
-    return `${p.label} — ${p.dir} ${sz} ${p.unit} (${p.market}), ${px}`;
+        ? "trade unknown"
+        : `trade ${p.tp}`;
+    return `${p.label}: ${p.dir} ${sz} (${p.market}), ${px}`;
   });
-  return `${intro} ${parts.join(" ")} Map each line to today’s drivers using the overnight summary, weather/residual demand, and risk sections above.`;
+  return `${intro} ${parts.join(" · ")}`;
 }
 
 function labelsPresentInText(text: string, labels: string[]): boolean {
