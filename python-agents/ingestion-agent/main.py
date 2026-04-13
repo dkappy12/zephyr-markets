@@ -129,6 +129,7 @@ THERMAL_CAPACITY_GW = 45.0
 WIND_MS_TO_GW = 17.0 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
+PREMIUM_MODEL_VERSION = "v1.0.0"
 
 
 def demand_baseline_gw_utc(hour: int) -> float:
@@ -292,6 +293,19 @@ def _fx_rates_rest_url() -> str:
 def _physical_premium_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/physical_premium"
+
+
+def _premium_predictions_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/premium_predictions"
+
+
+def _current_settlement_period(now_utc: datetime) -> int:
+    """GB settlement periods: SP1 = 00:00-00:30 UTC, SP2 = 00:30-01:00, etc.
+    SP = floor(minutes_since_midnight / 30) + 1, capped at 48."""
+    minutes = now_utc.hour * 60 + now_utc.minute
+    sp = (minutes // 30) + 1
+    return min(sp, 48)
 
 
 def _brief_entries_rest_url() -> str:
@@ -1603,6 +1617,22 @@ async def insert_physical_premium_http(
     resp.raise_for_status()
 
 
+async def insert_premium_prediction_http(
+    client: httpx.AsyncClient, row: dict[str, Any]
+) -> None:
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    resp = await client.post(
+        _premium_predictions_rest_url(),
+        headers=headers,
+        json=row,
+    )
+    resp.raise_for_status()
+
+
 async def fetch_gbp_eur_rate(http: httpx.AsyncClient) -> float:
     try:
         resp = await http.get(
@@ -1898,6 +1928,43 @@ async def calculate_physical_premium() -> None:
         }
 
         await insert_physical_premium_http(http, row)
+
+        # Log prediction for self-improvement engine validation
+        # actual_price_gbp_mwh will be filled by the nightly accuracy job
+        if implied_price_gbp_mwh is not None and market_price_gbp_mwh is not None:
+            try:
+                settlement_period = _current_settlement_period(now_utc)
+                prediction_row: dict[str, Any] = {
+                    "prediction_timestamp": calculated_at,
+                    "target_date": now_utc.date().isoformat(),
+                    "target_settlement_period": settlement_period,
+                    "model_version": PREMIUM_MODEL_VERSION,
+                    "wind_gw": wind_gw,
+                    "solar_gw": solar_gw,
+                    "residual_demand_gw": residual_demand_gw,
+                    "effective_rd_gw": float(effective_rd),
+                    "unplanned_remit_gw": float(unplanned_gw),
+                    "ttf_eur_mwh": ttf_eur_mwh,
+                    "srmc_gbp_mwh": srmc_gbp_mwh,
+                    "regime": premium_regime,
+                    "predicted_price_gbp_mwh": implied_price_gbp_mwh,
+                    "actual_price_gbp_mwh": None,
+                    "error_gbp_mwh": None,
+                    "absolute_error_gbp_mwh": None,
+                    "signed_error_gbp_mwh": None,
+                    "day_of_week": now_utc.weekday(),
+                    "is_filled": False,
+                }
+                await insert_premium_prediction_http(http, prediction_row)
+                logger.debug(
+                    "prediction_log: logged prediction sp=%d predicted=£%.2f market=£%.2f regime=%s",
+                    settlement_period,
+                    implied_price_gbp_mwh,
+                    market_price_gbp_mwh,
+                    premium_regime or "unknown",
+                )
+            except Exception as e:
+                logger.warning("prediction_log: failed to log prediction: %s", e)
 
         ip = implied_price_gbp_mwh
         mp = market_price_gbp_mwh
