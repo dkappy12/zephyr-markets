@@ -343,6 +343,11 @@ export default function RiskPage() {
   );
   const diversificationBenefit = sumIndividualVaRs - Math.abs(var95);
   const totalRiskBase = Math.max(Math.abs(var95), 1);
+  const anyPositionRiskOver100 =
+    !noHistory &&
+    perPositionRisk.some(
+      ({ worst }) => (Math.abs(worst?.pnl ?? 0) / totalRiskBase) * 100 > 100,
+    );
 
   const scenarioResults = useMemo(
     () => STRESS_SCENARIOS.map((s) => ({ scenario: s, ...calculateScenarioImpact(s, positions, gbpEurRate) })),
@@ -394,16 +399,25 @@ export default function RiskPage() {
     };
   }, [positions, today]);
 
-  const netLongMW = positions
+  const mwPositions = positions.filter(
+    (p) => (p.unit ?? "").toLowerCase() === "mw",
+  );
+  const netLongMW = mwPositions
     .filter((p) => p.direction === "long")
     .reduce((sum, p) => sum + (p.size ?? 0), 0);
-  const netShortMW = positions
+  const netShortMW = mwPositions
     .filter((p) => p.direction === "short")
     .reduce((sum, p) => sum + (p.size ?? 0), 0);
   const netDelta = netLongMW - netShortMW;
   const totalExposure = netLongMW + netShortMW;
-  const longPct = totalExposure > 0 ? Number(((netLongMW / totalExposure) * 100).toFixed(0)) : 0;
-  const shortPct = 100 - longPct;
+  const longPct =
+    totalExposure > 0
+      ? Number(((netLongMW / totalExposure) * 100).toFixed(0))
+      : 0;
+  const shortPct =
+    totalExposure > 0
+      ? Number(((netShortMW / totalExposure) * 100).toFixed(0))
+      : 0;
 
   const hasPositions = positions.length > 0;
   const noHistory = dailyPnLSeries.length === 0;
@@ -451,10 +465,10 @@ export default function RiskPage() {
             <div>
               <p className={sectionLabel}>99% 1-day VaR</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {dailyPnLSeries.length < 2 ? "—" : formatGbp(Math.abs(var99))}
+                {dailyPnLSeries.length < 5 ? "—" : formatGbp(Math.abs(var99))}
               </p>
               <p className="mt-1 text-xs text-ink-light">
-                {dailyPnLSeries.length < 2 ? "Need 2+ days" : `Historical · ${dailyPnLSeries.length} days`}
+                {dailyPnLSeries.length < 5 ? "Need 5+ days" : `Historical · ${dailyPnLSeries.length} days`}
               </p>
             </div>
             <div>
@@ -570,6 +584,12 @@ export default function RiskPage() {
             {noHistory ? (
               <p className="mt-2 text-xs text-ink-light">Risk metrics accumulate with price history</p>
             ) : null}
+            {anyPositionRiskOver100 ? (
+              <p className="mt-2 text-xs text-ink-light">
+                Individual positions can exceed 100% when others offset portfolio
+                risk.
+              </p>
+            ) : null}
             {diversificationBenefit > 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 Diversification benefit: {formatGbp(diversificationBenefit)} (your positions partially offset each other&apos;s risk)
@@ -678,6 +698,10 @@ export default function RiskPage() {
                   <div className="h-full" style={{ width: `${longPct}%`, backgroundColor: BRAND_GREEN }} />
                   <div className="h-full" style={{ width: `${shortPct}%`, backgroundColor: TERRACOTTA }} />
                 </div>
+                <p className="mt-2 text-xs text-ink-light">
+                  MW-denominated positions only · gas positions excluded from MW
+                  delta
+                </p>
               </div>
             </div>
           </section>
