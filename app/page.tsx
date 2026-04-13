@@ -5,7 +5,7 @@ import { TopoBackground } from "@/components/ui/TopoBackground";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -190,14 +190,18 @@ export default function Home() {
     void loadLandingData();
   }, []);
 
-  const briefTimeLabel = useMemo(() => {
-    if (!brief?.generatedAt) return null;
+  let briefTimeLabel: string | null = null;
+  if (brief?.generatedAt) {
     try {
-      return formatInTimeZone(new Date(brief.generatedAt), "UTC", "EEEE d MMMM · HH:mm 'UTC'");
+      briefTimeLabel = formatInTimeZone(
+        new Date(brief.generatedAt),
+        "UTC",
+        "EEEE d MMMM · HH:mm 'UTC'",
+      );
     } catch {
-      return null;
+      briefTimeLabel = null;
     }
-  }, [brief?.generatedAt]);
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
