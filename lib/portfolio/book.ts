@@ -116,11 +116,25 @@ export type LivePrices = {
   gbPowerGbpMwh: number | null;
   gbPowerOpenGbpMwh: number | null;
   ttfEurMwh: number | null;
+  /** Same as ttfEurMwh × GBP_PER_EUR — for display only; P&amp;L uses EUR × rate. */
   ttfGbpMwh: number | null;
+  ttfOpenEurMwh: number | null;
   ttfOpenGbpMwh: number | null;
   nbpPencePerTherm: number | null;
   nbpOpenPencePerTherm: number | null;
 };
+
+/** TTF (and EUR/MWh) P&amp;L in £: diff in EUR/MWh × size, then × GBP_PER_EUR. */
+export function eurMwhPnlToGbp(
+  direction: string | null,
+  entryEurMwh: number | null,
+  markEurMwh: number | null,
+  sizeMwh: number | null,
+): number | null {
+  const eur = linearPnl(direction, entryEurMwh, markEurMwh, sizeMwh);
+  if (eur == null) return null;
+  return eur * GBP_PER_EUR;
+}
 
 /**
  * NBP forward proxy from TTF (EUR/MWh): £/MWh → £/therm, then to pence/therm.

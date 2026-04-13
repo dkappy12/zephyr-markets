@@ -24,7 +24,13 @@ Return ONLY a JSON array with no preamble, no markdown, no backticks. Each eleme
 "instrument": string (human readable instrument name),
 "original_row": object (the original row fields as key-value pairs)
 
-The array must have exactly one object per input row, in the same order as the input rows.`;
+The array must have exactly one object per input row, in the same order as the input rows.
+
+CRITICAL — trade_price:
+trade_price must be extracted EXACTLY from the CSV row — it is the price at which the trade was executed, not the current market price. Never substitute, infer, or estimate a price from live markets or benchmarks. If no executed trade price is visible in the row, return null. The trade_price field is critical for P&L accuracy.
+
+CRITICAL — currency:
+For TTF and other EUR-denominated markets, set currency to "EUR" and trade_price as the numeric value in EUR/MWh (or appropriate EUR unit) exactly as in the CSV. Do not convert EUR trade prices to GBP at extraction time.`;
 
 export async function POST(req: Request) {
   try {

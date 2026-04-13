@@ -9,6 +9,7 @@ import {
 import { createBrowserClient } from "@/lib/supabase/client";
 import type { ClassifiedPosition } from "@/lib/portfolio/book";
 import {
+  eurMwhPnlToGbp,
   formatGbpColored,
   GBP_PER_EUR,
   linearPnl,
@@ -30,6 +31,7 @@ function utcToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Live marks for P&amp;L (GB power in £/MWh; NBP in p/th). TTF uses EUR in eurMwhPnlToGbp. */
 function pricePoints(
   p: PositionRow,
   lp: LivePrices | null,
@@ -41,7 +43,7 @@ function pricePoints(
     return which === "current" ? lp.gbPowerGbpMwh : lp.gbPowerOpenGbpMwh;
   }
   if (m === "ttf") {
-    return which === "current" ? lp.ttfGbpMwh : lp.ttfOpenGbpMwh;
+    return null;
   }
   if (m === "nbp") {
     return which === "current" ? lp.nbpPencePerTherm : lp.nbpOpenPencePerTherm;
@@ -50,16 +52,45 @@ function pricePoints(
   return null;
 }
 
-function formatPriceCell(p: PositionRow, v: number | null): string {
-  if (v == null) return "—";
-  const m = (p.market ?? "").toLowerCase();
-  if (m === "nbp" || (p.unit ?? "").toLowerCase().includes("therm")) {
-    return `${v.toFixed(2)}p/th`;
+/** Entry column: always `trade_price` from DB, formatted by market/currency (never live). */
+function formatEntryPrice(p: PositionRow): string {
+  if (p.trade_price == null || !Number.isFinite(p.trade_price)) return "—";
+  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
+  const u = (p.unit ?? "").toLowerCase();
+  const ccy = (p.currency ?? "").toUpperCase();
+  if (m === "nbp" || u.includes("therm")) {
+    return `${p.trade_price.toFixed(2)}p/th`;
   }
-  if ((p.currency ?? "").toUpperCase() === "EUR" && m === "ttf") {
-    return `€${(v / GBP_PER_EUR).toFixed(2)}/MWh`;
+  if (
+    ccy === "EUR" ||
+    m === "ttf" ||
+    m === "german_power" ||
+    m === "french_power" ||
+    m === "nordic_power"
+  ) {
+    return `€${p.trade_price.toFixed(2)}/MWh`;
   }
-  return `£${v.toFixed(2)}`;
+  return `£${p.trade_price.toFixed(2)}`;
+}
+
+/** Current column: live marks only (never reuse entry). */
+function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
+  if (!lp) return "—";
+  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
+  if (m === "uka" || m === "eua") return "—";
+  if (m === "gb_power") {
+    const v = lp.gbPowerGbpMwh;
+    return v != null ? `£${v.toFixed(2)}` : "—";
+  }
+  if (m === "ttf") {
+    const v = lp.ttfEurMwh;
+    return v != null ? `€${v.toFixed(2)}/MWh` : "—";
+  }
+  if (m === "nbp") {
+    const v = lp.nbpPencePerTherm;
+    return v != null ? `${v.toFixed(2)}p/th` : "—";
+  }
+  return "—";
 }
 
 export function BookPageClient() {
@@ -182,6 +213,7 @@ export function BookPageClient() {
       gbPowerOpenGbpMwh: Number.isFinite(gbpOpen) ? gbpOpen : null,
       ttfEurMwh: Number.isFinite(ttfEur) ? ttfEur : null,
       ttfGbpMwh: ttfGbp,
+      ttfOpenEurMwh: Number.isFinite(ttfEurOpen) ? ttfEurOpen : null,
       ttfOpenGbpMwh: ttfOpenGbp,
       nbpPencePerTherm:
         Number.isFinite(ttfEur) ? ttfToNbpPencePerTherm(ttfEur) : null,
@@ -244,7 +276,7 @@ export function BookPageClient() {
     setImportBusy(true);
     try {
       for (const item of keeping) {
-        const { error } = await supabase.from("positions").insert({
+        const row = {
           user_id: userId,
           direction: item.direction,
           instrument: item.instrument ?? "Unknown",
@@ -262,7 +294,12 @@ export function BookPageClient() {
           is_hypothetical: false,
           is_closed: false,
           raw_csv_row: JSON.stringify(item.original_row ?? {}),
+        };
+        console.log("Inserting position with trade_price:", row.trade_price, {
+          market: row.market,
+          currency: row.currency,
         });
+        const { error } = await supabase.from("positions").insert(row);
         if (error) throw error;
       }
       showToast(`${keeping.length} positions imported successfully`, "ok");
@@ -294,6 +331,26 @@ export function BookPageClient() {
         discard_reason: "Removed by user before import",
       },
     ]);
+  }
+
+  async function clearAllPositions() {
+    if (!userId) return;
+    if (
+      !window.confirm(
+        "Delete all positions in your book? This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    const { error } = await supabase
+      .from("positions")
+      .delete()
+      .eq("user_id", userId);
+    if (error) showToast(error.message, "err");
+    else {
+      showToast("Book cleared", "ok");
+      await loadPositions();
+    }
   }
 
   async function deletePosition(id: string) {
@@ -448,6 +505,15 @@ export function BookPageClient() {
                   : "—"}
               </p>
             </div>
+            <div className="ml-auto flex items-end">
+              <button
+                type="button"
+                onClick={() => void clearAllPositions()}
+                className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-light underline-offset-2 hover:text-[#8B3A3A] hover:underline"
+              >
+                Clear book
+              </button>
+            </div>
           </motion.div>
 
           <div className="overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
@@ -468,20 +534,43 @@ export function BookPageClient() {
               </thead>
               <tbody>
                 {positions.map((p) => {
-                  const mlow = (p.market ?? "").toLowerCase();
-                  /** NBP: prices in p/th, size in therms → £ = pnl_pence / 100 */
+                  const mlow = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
                   const isNbp = mlow === "nbp";
+                  const isTtf = mlow === "ttf";
                   const cur = pricePoints(p, livePrices, "current");
                   const opn = pricePoints(p, livePrices, "open");
-                  const total = isNbp
-                    ? nbpPnlGbp(p.direction, p.trade_price, cur, p.size)
-                    : linearPnl(p.direction, p.trade_price, cur, p.size);
-                  const today =
-                    opn != null && cur != null
-                      ? isNbp
-                        ? nbpPnlGbp(p.direction, opn, cur, p.size)
-                        : linearPnl(p.direction, opn, cur, p.size)
-                      : null;
+                  const lp = livePrices;
+
+                  let total: number | null = null;
+                  let today: number | null = null;
+
+                  if (isNbp) {
+                    const mark = lp?.nbpPencePerTherm ?? null;
+                    const open = lp?.nbpOpenPencePerTherm ?? null;
+                    total = nbpPnlGbp(p.direction, p.trade_price, mark, p.size);
+                    if (mark != null && open != null) {
+                      today = nbpPnlGbp(p.direction, open, mark, p.size);
+                    }
+                  } else if (isTtf && lp) {
+                    const curE = lp.ttfEurMwh;
+                    const opE = lp.ttfOpenEurMwh;
+                    total = eurMwhPnlToGbp(
+                      p.direction,
+                      p.trade_price,
+                      curE,
+                      p.size,
+                    );
+                    if (curE != null && opE != null) {
+                      today = eurMwhPnlToGbp(p.direction, opE, curE, p.size);
+                    }
+                  } else {
+                    total = linearPnl(p.direction, p.trade_price, cur, p.size);
+                    today =
+                      opn != null && cur != null
+                        ? linearPnl(p.direction, opn, cur, p.size)
+                        : null;
+                  }
+
                   const curCell =
                     mlow === "uka" ? (
                     <span title="Live UKA feed coming soon" className="cursor-help">
@@ -492,7 +581,7 @@ export function BookPageClient() {
                       —
                     </span>
                   ) : (
-                    formatPriceCell(p, cur)
+                    formatCurrentPrice(p, livePrices)
                   );
                   const tFmt =
                     total != null ? formatGbpColored(total) : null;
@@ -527,9 +616,7 @@ export function BookPageClient() {
                         {p.tenor ?? "—"}
                       </td>
                       <td className="px-3 py-3 tabular-nums text-ink-mid">
-                        {p.trade_price != null
-                          ? formatPriceCell(p, p.trade_price)
-                          : "—"}
+                        {formatEntryPrice(p)}
                       </td>
                       <td className="px-3 py-3 tabular-nums">{curCell}</td>
                       <td
