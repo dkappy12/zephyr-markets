@@ -272,6 +272,7 @@ export default function WeatherPage() {
     wind_gw: number | null;
     solar_gw: number | null;
     residual_demand_gw: number | null;
+    srmc_gbp_mwh: number | null;
     calculated_at: string | null;
   } | null>(null);
   const [solarToday, setSolarToday] = useState<SolarRow[]>([]);
@@ -319,7 +320,7 @@ export default function WeatherPage() {
         supabase
           .from("physical_premium")
           .select(
-            "wind_gw, solar_gw, residual_demand_gw, calculated_at",
+            "wind_gw, solar_gw, residual_demand_gw, srmc_gbp_mwh, calculated_at",
           )
           .order("calculated_at", { ascending: false })
           .limit(1)
@@ -364,6 +365,7 @@ export default function WeatherPage() {
           wind_gw: parseNum(p.wind_gw),
           solar_gw: parseNum(p.solar_gw),
           residual_demand_gw: parseNum(p.residual_demand_gw),
+          srmc_gbp_mwh: parseNum(p.srmc_gbp_mwh),
           calculated_at:
             p.calculated_at != null ? String(p.calculated_at) : null,
         });
@@ -635,7 +637,7 @@ export default function WeatherPage() {
   }, [hourly]);
 
   const negWindows = useMemo(
-    () => negativePriceWindows(hourly, 5),
+    () => negativePriceWindows(hourly, RENEWABLE_DOM_GW),
     [hourly],
   );
 
@@ -772,6 +774,7 @@ export default function WeatherPage() {
   }, [tempStats]);
 
   const residualGradientId = "residualGradient";
+  const srmcRefGbp = ppLatest?.srmc_gbp_mwh ?? SRMC_REF_GBP;
 
   const gradMax = useMemo(() => {
     const m = Math.max(
@@ -1090,7 +1093,9 @@ export default function WeatherPage() {
                 {lowestWind.gw.toFixed(1)} GW
               </p>
             ) : null}
-            <p>Duration below 10 GW threshold: {hoursBelowDrought} hours total</p>
+            <p>
+              Duration below {WIND_DROUGHT_GW} GW threshold: {hoursBelowDrought} hours total
+            </p>
             {largestRamp ? (
               <p>
                 Largest single ramp: ±{largestRamp.gw.toFixed(1)} GW over 3 hours
@@ -1099,7 +1104,7 @@ export default function WeatherPage() {
             ) : null}
             <MarketImplicationBox className="mt-2">
               Wind drought periods create gas-marginal conditions. CCGT SRMC at
-              £{SRMC_REF_GBP.toFixed(2)}/MWh provides the price ceiling.
+              £{srmcRefGbp.toFixed(2)}/MWh provides the price ceiling.
             </MarketImplicationBox>
           </div>
         </div>
@@ -1490,7 +1495,7 @@ export default function WeatherPage() {
             </ul>
           ) : (
             <p className="mt-1 text-[11px] text-ink-mid">
-              No periods with residual &lt; 5 GW in forecast.
+              No periods with residual &lt; {RENEWABLE_DOM_GW} GW in forecast.
             </p>
           )}
         </div>

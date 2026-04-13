@@ -7,10 +7,10 @@ export const WIND_MS_TO_GW = 2.125;
 export const SOLAR_RAD_TO_GW = 0.0167;
 
 export const APRIL_TEMP_NORM_C = 9.0;
-export const WIND_DROUGHT_GW = 10;
+export const WIND_DROUGHT_GW = 15;
 export const HIGH_WIND_GW = 20;
 export const GAS_MARGINAL_GW = 22;
-export const RENEWABLE_DOM_GW = 10;
+export const RENEWABLE_DOM_GW = 15;
 export const SRMC_REF_GBP = 107.87;
 export const RAMP_THRESHOLD_GW = 5;
 
