@@ -45,34 +45,6 @@ type FocusPosition = {
   tp: number | null;
 };
 
-function formatSize(size: number, unit: string): string {
-  const u = unit.toLowerCase();
-  const abs = Number.isFinite(size) ? Math.abs(size) : 0;
-  if (u === "therm" && abs >= 1000) {
-    return `${abs.toLocaleString("en-GB")} therm`;
-  }
-  return `${abs} ${unit}`.trim();
-}
-
-/** Guaranteed book-specific copy derived only from platform position rows (no generic long/short templates). */
-function buildDeterministicBookTouchpoints(
-  focus: FocusPosition[],
-  score: number,
-  direction: string,
-): string {
-  const scoreLabel = Number.isFinite(score) ? score.toFixed(1) : String(score);
-  const intro = `Physical premium ${scoreLabel} (${direction}). Your open lines:`;
-  const parts = focus.map((p) => {
-    const sz = formatSize(p.size, p.unit);
-    const px =
-      p.tp == null || !Number.isFinite(p.tp)
-        ? "trade unknown"
-        : `trade ${p.tp}`;
-    return `${p.label}: ${p.dir} ${sz} (${p.market}), ${px}`;
-  });
-  return `${intro} ${parts.join(" · ")}`;
-}
-
 function labelsPresentInText(text: string, labels: string[]): boolean {
   if (labels.length === 0) return false;
   const lower = text.toLowerCase();
@@ -82,6 +54,12 @@ function labelsPresentInText(text: string, labels: string[]): boolean {
 export async function POST(req: Request) {
   try {
     const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) {
+      return NextResponse.json(
+        { error: "ANTHROPIC_API_KEY is not configured" },
+        { status: 500 },
+      );
+    }
 
     const supabase = await createClient();
 
@@ -131,12 +109,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const deterministic = buildDeterministicBookTouchpoints(
-      focusPositions,
-      score,
-      direction,
-    );
-
     const requiredTokens = focusPositions.map((_, idx) => `[P${idx + 1}]`);
     const requiredLabels = focusPositions.map((p) => p.label).filter(Boolean);
     const positionLines = focusPositions
@@ -154,12 +126,12 @@ export async function POST(req: Request) {
 The trader's open positions (actual book):
 ${positionLines}
 
-Write 2-3 sentences about these positions only.
+Write one natural analyst paragraph (2-4 sentences) about these positions only.
 Requirements:
-1) Mention each token exactly once or more: ${requiredTokens.join(", ")}
-2) Tie each token to whether today's physical setup helps or hurts that specific line.
-3) No abstract commentary without token references.
-4) Keep one paragraph and concrete numbers only.`;
+1) Mention each token at least once: ${requiredTokens.join(", ")}
+2) For each token, explain why today's physical setup is favorable or unfavorable for that line.
+3) Explicitly connect to current drivers (physical premium score/direction, weather-residual context, and one_risk).
+4) Sound like a human GB energy markets analyst. No bullet points. No templates. No placeholders.`;
 
     async function runAnthropic(
       apiKey: string,
@@ -176,7 +148,7 @@ Requirements:
           model: "claude-sonnet-4-20250514",
           max_tokens: 300,
           system:
-            "You are Zephyr's market intelligence engine. You write concise, direct analysis for professional energy traders. One paragraph maximum. No padding. Active voice. Specific numbers only. Every sentence must refer to the trader's listed positions.",
+            "You are Zephyr's market intelligence engine. You write concise, direct analysis for professional energy traders. One paragraph maximum. No padding. Active voice. Specific numbers only.",
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -202,37 +174,51 @@ Requirements:
       return hasAllTokens && hasAllLabels;
     }
 
-    if (!key) {
-      return NextResponse.json({ text: deterministic });
-    }
-
     let text = "";
     try {
       text = await runAnthropic(key, userPrompt);
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
           key,
-          `${userPrompt}\n\nYour previous answer was not specific enough. Rewrite and include every required token and label explicitly.`,
+          `${userPrompt}\n\nRewrite in a more natural analyst voice. Include every required token and clearly tie each position to today's physical drivers.`,
         );
       }
-    } catch {
-      return NextResponse.json({ text: deterministic });
+      if (!validatePersonalisedText(text)) {
+        text = await runAnthropic(
+          key,
+          `${userPrompt}\n\nFinal pass: this must be position-specific. Mention every required token and avoid generic language.`,
+        );
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
     }
 
     if (!validatePersonalisedText(text)) {
-      return NextResponse.json({ text: deterministic });
+      return NextResponse.json(
+        { error: "Personalised output was not specific to the user's book" },
+        { status: 500 },
+      );
     }
 
     const cleaned = text.replace(/\[P\d+\]\s*/g, "").trim();
     if (!cleaned || !labelsPresentInText(cleaned, requiredLabels)) {
-      return NextResponse.json({ text: deterministic });
+      return NextResponse.json(
+        { error: "Personalised output omitted one or more open positions" },
+        { status: 500 },
+      );
     }
 
     const genericLongShort =
       /\b(long|short)\s+gb\s+power\s+positions?\b/i.test(cleaned) ||
       /\bshort\s+gas\s+positions?\b/i.test(cleaned);
     if (genericLongShort) {
-      return NextResponse.json({ text: deterministic });
+      return NextResponse.json(
+        { error: "Personalised output was generic, not book-specific" },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ text: cleaned });
