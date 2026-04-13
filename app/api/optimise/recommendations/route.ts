@@ -196,6 +196,7 @@ export async function GET(req: Request) {
       fallbackUsed: result.diagnostics.fallbackUsed,
       nbpProxyUsed: result.diagnostics.nbpProxyUsed,
     });
+    const blocked = quality.quality === "low";
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -206,7 +207,13 @@ export async function GET(req: Request) {
       gbpPerEur,
       quality: quality.quality,
       qualityWarnings: quality.warnings,
+      blocked,
+      blockedReason: blocked
+        ? "Recommendations are blocked because model quality is low."
+        : null,
       ...result,
+      recommendations: blocked ? [] : result.recommendations,
+      alternatives: blocked ? [] : result.alternatives,
     });
   } catch (error: unknown) {
     return NextResponse.json(

@@ -13,6 +13,8 @@ type ApiResponse = {
   gbpPerEur: number;
   quality: "high" | "medium" | "low";
   qualityWarnings: string[];
+  blocked: boolean;
+  blockedReason: string | null;
   before: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   after: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   deltas: {
@@ -203,6 +205,26 @@ export default function OptimisePage() {
 
       {!loading && data && (
         <>
+          {data.blocked && (
+            <section className="rounded-[4px] border-[0.5px] border-[#8B3A3A]/40 bg-[#8B3A3A]/5 p-4">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#8B3A3A]">
+                Reliability Gate Active
+              </p>
+              <p className="mt-2 text-sm text-[#8B3A3A]">
+                {data.blockedReason ?? "Recommendations are blocked at current model quality."}
+              </p>
+              {data.qualityWarnings.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {data.qualityWarnings.map((w) => (
+                    <p key={w} className="text-xs text-ink-mid">
+                      {w}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Model Quality
@@ -255,7 +277,11 @@ export default function OptimisePage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Recommended Package
             </p>
-            {data.recommendations.length === 0 ? (
+            {data.blocked ? (
+              <p className="mt-3 text-sm text-ink-mid">
+                Recommendations are intentionally hidden until reliability improves.
+              </p>
+            ) : data.recommendations.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 No hedge package improves the selected objective under current constraints.
               </p>
@@ -284,15 +310,21 @@ export default function OptimisePage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Alternative Packages
             </p>
-            <div className="mt-3 space-y-2 text-sm text-ink-mid">
-              {data.alternatives.map((alt) => (
-                <p key={alt.rank}>
-                  #{alt.rank}: {alt.trades.length} trade(s) · CVaR improvement{" "}
-                  {formatGbp(alt.deltas.cvar95Reduction)} · Worst stress improvement{" "}
-                  {formatGbp(alt.deltas.worstStressReduction)}
-                </p>
-              ))}
-            </div>
+            {data.blocked ? (
+              <p className="mt-3 text-sm text-ink-mid">
+                Alternatives hidden while reliability gate is active.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2 text-sm text-ink-mid">
+                {data.alternatives.map((alt) => (
+                  <p key={alt.rank}>
+                    #{alt.rank}: {alt.trades.length} trade(s) · CVaR improvement{" "}
+                    {formatGbp(alt.deltas.cvar95Reduction)} · Worst stress improvement{" "}
+                    {formatGbp(alt.deltas.worstStressReduction)}
+                  </p>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-xs text-ink-mid">
