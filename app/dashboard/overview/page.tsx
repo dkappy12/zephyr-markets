@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
@@ -413,12 +414,12 @@ export default function OverviewPage() {
           Upload a curve snapshot or positions file. Zephyr maps signals to
           your exposures.
         </p>
-        <button
-          type="button"
+        <Link
+          href="/dashboard/portfolio/book"
           className="mt-4 rounded-[4px] border-[0.5px] border-gold/50 bg-ivory px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gold transition-colors duration-200 hover:bg-ivory-dark"
         >
           Import portfolio
-        </button>
+        </Link>
       </motion.div>
     </div>
   );

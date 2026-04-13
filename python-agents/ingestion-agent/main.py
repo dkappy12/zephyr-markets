@@ -2702,7 +2702,7 @@ OVERNIGHT SUMMARY
 What the physical world has done since the previous close. Reference the physical premium score direction, wind and solar generation levels, any significant REMIT outages that came in overnight, and how the market price compares to the physically-implied price. Be specific with numbers. 2-3 sentences.
 
 WEATHER WATCH
-Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. 2-3 sentences.
+Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. The renewable-to-gas regime transition threshold is 15 GW of residual demand — use this figure if referencing regime switches in the watch list or weather watch. 2-3 sentences.
 
 ONE RISK THE MARKET MAY BE UNDERPRICING
 The single most important contrarian physical signal in the current data. Look for disconnects between the market price and the physical implied price, REMIT capacity that could clear and tighten the system, wind forecast drops that would switch regime from renewable to gas-dominated, or storage levels that signal supply tightness. Be specific and quantified. 2-3 sentences.
