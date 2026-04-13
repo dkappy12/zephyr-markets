@@ -417,13 +417,21 @@ export function AttributionPageClient() {
   }, [supabase, loadPrices]);
 
   useEffect(() => {
-    void loadAll();
+    const t = setTimeout(() => {
+      void loadAll();
+    }, 0);
+    return () => clearTimeout(t);
   }, [loadAll]);
 
   useEffect(() => {
-    void loadPrices();
+    const t0 = setTimeout(() => {
+      void loadPrices();
+    }, 0);
     const t = setInterval(() => void loadPrices(), 120_000);
-    return () => clearInterval(t);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(t);
+    };
   }, [loadPrices]);
 
   const hasPositions = positions.length > 0;
@@ -610,7 +618,7 @@ export function AttributionPageClient() {
 
   const bookAlign = bookAlignmentCopy(physDir, positions);
 
-  const scoreLine = useMemo(() => {
+  const scoreLine = (() => {
     const ns = normScore;
     if (ns == null || !Number.isFinite(ns)) {
       return { text: "—", className: "text-ink-mid" };
@@ -633,7 +641,7 @@ export function AttributionPageClient() {
       text: `${sign}${abs} ${tag}`,
       className: cls,
     };
-  }, [normScore, physDir]);
+  })();
 
   const totalFmt = formatGbpColored(totalPnl);
 

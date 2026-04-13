@@ -24,7 +24,6 @@ import {
   WIND_MS_TO_GW,
   WARM_GOLD,
   WARM_GOLD_DARK,
-  windGwFromMs,
 } from "@/lib/weather-intelligence";
 import { format, parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
@@ -384,7 +383,6 @@ export default function WeatherPage() {
       }
     }
 
-    setLoading(true);
     load().finally(() => setLoading(false));
   }, []);
 
@@ -447,7 +445,7 @@ export default function WeatherPage() {
 
   const statCurrentWind = useMemo(() => {
     if (hourly.length === 0) return null;
-    const now = Date.now();
+    const now = new Date().getTime();
     let best = hourly[0]!;
     let bd = Infinity;
     for (const h of hourly) {

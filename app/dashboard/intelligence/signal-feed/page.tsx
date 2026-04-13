@@ -272,12 +272,14 @@ export default function SignalFeedPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    loadSignals().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+    const t = setTimeout(() => {
+      void loadSignals().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    }, 0);
     return () => {
       cancelled = true;
+      clearTimeout(t);
     };
   }, [loadSignals]);
 
@@ -307,7 +309,6 @@ export default function SignalFeedPage() {
   const deduped = useMemo(() => dedupeByAsset(rows), [rows]);
 
   useEffect(() => {
-    // eslint-disable-next-line no-console
     console.log(
       "all deduplicated signals:",
       deduped.map((s) => s.latest.title),
@@ -317,7 +318,7 @@ export default function SignalFeedPage() {
   /** Feed row: recent update (24h) OR still active — so long-running outages (e.g. LBAR-1) stay visible. */
   const feedVisible = useMemo(() => {
     const now = new Date();
-    const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+    const cutoff24h = now.getTime() - 24 * 60 * 60 * 1000;
     return deduped.filter((d) => {
       const latest = d.latest;
       if (isOutageExpired(latest, now)) return showCleared;
@@ -354,10 +355,6 @@ export default function SignalFeedPage() {
     () => filteredSorted.slice(0, visibleCount),
     [filteredSorted, visibleCount],
   );
-
-  useEffect(() => {
-    setVisibleCount(10);
-  }, [activeTab, sortMode, showCleared]);
 
   const allRecentCleared = useMemo(() => {
     const now = new Date();
@@ -426,7 +423,10 @@ export default function SignalFeedPage() {
               <button
                 key={t}
                 type="button"
-                onClick={() => setActiveTab(t)}
+                onClick={() => {
+                  setActiveTab(t);
+                  setVisibleCount(10);
+                }}
                 className={`rounded-[4px] border-[0.5px] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors duration-200 ${
                   on
                     ? "border-ink bg-ivory-dark text-ink"
@@ -442,7 +442,10 @@ export default function SignalFeedPage() {
           <input
             type="checkbox"
             checked={showCleared}
-            onChange={(e) => setShowCleared(e.target.checked)}
+            onChange={(e) => {
+              setShowCleared(e.target.checked);
+              setVisibleCount(10);
+            }}
             className="rounded border-ivory-border text-ink accent-[#8B3A3A]"
           />
           <span>Show cleared outages</span>
@@ -455,7 +458,10 @@ export default function SignalFeedPage() {
               <button
                 key={m}
                 type="button"
-                onClick={() => setSortMode(m)}
+                onClick={() => {
+                  setSortMode(m);
+                  setVisibleCount(10);
+                }}
                 className={`rounded-[4px] border-[0.5px] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] ${
                   on
                     ? "border-ink bg-ivory-dark text-ink"

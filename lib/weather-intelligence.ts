@@ -77,7 +77,7 @@ export function buildHourlyPoints(
   const solarFactor = options?.solarRadToGw ?? SOLAR_RAD_TO_GW;
   const out: HourlyForecastPoint[] = [];
   for (const r of rows) {
-    let w100 = windGwFromMs(r.w100);
+    const w100 = windGwFromMs(r.w100);
     let w10 = windGwFromMs(r.w10);
     if (w100 == null) continue;
     if (w10 == null) w10 = w100;
