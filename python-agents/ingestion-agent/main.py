@@ -133,15 +133,23 @@ PREMIUM_MODEL_VERSION = "v1.0.0"
 
 
 def demand_baseline_gw_utc(hour: int) -> float:
+    """
+    GB electricity demand baseline by UTC hour (approximate spring/summer values).
+    These are typical April-September values. Winter demand is ~15-20% higher
+    but the Kalman filter will calibrate seasonal adjustments over time.
+
+    Source: NESO demand data, typical April GB outturn ~28-34 GW.
+    Peak demand in April is typically 30-32 GW (evening), not 38 GW (winter peak).
+    """
     if 0 <= hour < 6:
-        return 28.0
+        return 24.0   # overnight minimum: ~24 GW in spring
     if 6 <= hour < 9:
-        return 34.0
+        return 28.0   # morning ramp
     if 9 <= hour < 17:
-        return 36.0
+        return 30.0   # daytime plateau
     if 17 <= hour < 21:
-        return 38.0
-    return 32.0
+        return 32.0   # evening peak (spring, not winter)
+    return 27.0       # late evening wind-down
 
 CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
 # Further reading step 2 (JSON format only, no tools).
@@ -1491,35 +1499,49 @@ def _remit_active_planned_unplanned_mw(
 def _residual_demand_premium_gbp_mwh(rd: float) -> float:
     """
     Piecewise-linear residual demand premium above SRMC.
-    Breakpoints reflect GB merit order: cheap CCGTs → expensive OCGTs → peakers → scarcity.
-    Research basis: Ghelasi & Ziel (2025), Kanamura & Ohashi (2007), GB supply curve structure.
+
+    Recalibrated 2026-04-13 based on observed GB market data:
+    - At rd=27-31 GW, market traded at ~£97-110 vs SRMC £112 (premium near zero)
+    - Implies the supply curve is essentially flat in the 20-32 GW range
+    - Only steepens significantly above 32 GW where peakers genuinely enter
+    - Above 35 GW the hockey-stick effect applies (scarcity territory)
+
+    Research basis: Ghelasi & Ziel (2025), Kanamura & Ohashi (2007).
+    Kalman filter will continue to adjust these slopes as validation data accumulates.
+
     Breakpoints:
-      0-15 GW:  £1.50/MWh per GW (renewable-dominated, low premium)
-      15-25 GW: £2.50/MWh per GW (mid-merit CCGTs marginal)
-      25-32 GW: £5.00/MWh per GW (expensive OCGTs entering)
-      >32 GW:   £15.00/MWh per GW (peakers and scarcity, hockey-stick steepening)
+      0-20 GW:  £0.00/MWh per GW (renewables dominant, price below SRMC)
+      20-28 GW: £0.50/MWh per GW (cheap CCGTs marginal, small premium)
+      28-32 GW: £1.50/MWh per GW (mid-merit CCGTs, modest premium)
+      32-35 GW: £5.00/MWh per GW (expensive plant entering)
+      >35 GW:   £20.00/MWh per GW (peakers and scarcity)
     """
     if rd <= 0:
         return 0.0
     premium = 0.0
-    # Segment 1: 0 to 15 GW
-    seg1 = min(rd, 15.0)
-    premium += seg1 * 1.50
-    if rd <= 15.0:
+    # Segment 1: 0 to 20 GW (flat — renewables dominant)
+    seg1 = min(rd, 20.0)
+    premium += seg1 * 0.0
+    if rd <= 20.0:
         return premium
-    # Segment 2: 15 to 25 GW
-    seg2 = min(rd - 15.0, 10.0)
-    premium += seg2 * 2.50
-    if rd <= 25.0:
+    # Segment 2: 20 to 28 GW (cheap CCGTs, small premium)
+    seg2 = min(rd - 20.0, 8.0)
+    premium += seg2 * 0.50
+    if rd <= 28.0:
         return premium
-    # Segment 3: 25 to 32 GW
-    seg3 = min(rd - 25.0, 7.0)
-    premium += seg3 * 5.00
+    # Segment 3: 28 to 32 GW (mid-merit, modest premium)
+    seg3 = min(rd - 28.0, 4.0)
+    premium += seg3 * 1.50
     if rd <= 32.0:
         return premium
-    # Segment 4: above 32 GW (scarcity)
-    seg4 = rd - 32.0
-    premium += seg4 * 15.00
+    # Segment 4: 32 to 35 GW (expensive plant)
+    seg4 = min(rd - 32.0, 3.0)
+    premium += seg4 * 5.00
+    if rd <= 35.0:
+        return premium
+    # Segment 5: above 35 GW (scarcity)
+    seg5 = rd - 35.0
+    premium += seg5 * 20.00
     return premium
 
 
