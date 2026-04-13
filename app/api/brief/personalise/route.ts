@@ -36,11 +36,20 @@ export async function POST(req: Request) {
     }
 
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
+
+    const authHeader = req.headers.get("authorization");
+    const bearer =
+      authHeader && authHeader.toLowerCase().startsWith("bearer ")
+        ? authHeader.slice(7).trim()
+        : null;
+
+    const fromCookies = await supabase.auth.getUser();
+    let user = fromCookies.data.user;
+    if (!user && bearer) {
+      const fromJwt = await supabase.auth.getUser(bearer);
+      user = fromJwt.data.user ?? null;
+    }
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

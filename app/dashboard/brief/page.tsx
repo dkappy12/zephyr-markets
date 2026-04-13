@@ -262,9 +262,19 @@ export default function BriefPage() {
         setBookTouchpointLoading(true);
         const b = briefRes.data as BriefRow & { normalised_score?: number; direction?: string };
         try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const headers: Record<string, string> = {
+            "content-type": "application/json",
+          };
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`;
+          }
           const resp = await fetch("/api/brief/personalise", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers,
+            credentials: "same-origin",
             body: JSON.stringify({
               overnight_summary: b.overnight_summary ?? b.executive_summary ?? "",
               one_risk: b.one_risk ?? "",
@@ -418,6 +428,10 @@ export default function BriefPage() {
               <p className="text-sm italic leading-relaxed text-ink-light">
                 Import positions in the Book tab to see how today&apos;s physical
                 signals affect your specific exposures.
+              </p>
+            ) : row?.book_touchpoints?.trim() ? (
+              <p className="font-serif text-lg leading-relaxed text-ink">
+                {row.book_touchpoints.trim()}
               </p>
             ) : (
               <p className="text-sm italic leading-relaxed text-ink-light">
