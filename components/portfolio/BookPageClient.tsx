@@ -295,10 +295,6 @@ export function BookPageClient() {
           is_closed: false,
           raw_csv_row: JSON.stringify(item.original_row ?? {}),
         };
-        console.log("Inserting position with trade_price:", row.trade_price, {
-          market: row.market,
-          currency: row.currency,
-        });
         const { error } = await supabase.from("positions").insert(row);
         if (error) throw error;
       }
