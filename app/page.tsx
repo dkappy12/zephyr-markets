@@ -65,7 +65,7 @@ const PLAN_COMPARISON_ROWS: {
   },
   {
     feature: "Portfolio positions",
-    free: "—",
+    free: "-",
     pro: "30 positions",
     team: "Unlimited",
   },
@@ -77,20 +77,20 @@ const PLAN_COMPARISON_ROWS: {
   },
   {
     feature: "API access",
-    free: "—",
-    pro: "—",
+    free: "-",
+    pro: "-",
     team: "Full REST API",
   },
   {
     feature: "Data export",
-    free: "—",
-    pro: "—",
+    free: "-",
+    pro: "-",
     team: "✓",
   },
   {
     feature: "Team management",
-    free: "—",
-    pro: "—",
+    free: "-",
+    pro: "-",
     team: "Admin + invitations",
   },
   {
@@ -234,7 +234,7 @@ function LiveTicker() {
     return () => clearInterval(interval);
   }, []);
 
-  // Don't render until we have data — avoids flash of empty ticker
+  // Don't render until we have data (avoids flash of empty ticker)
   if (items.length === 0) return null;
 
   // Repeat items enough times to guarantee full width coverage regardless of screen size
@@ -302,7 +302,7 @@ export default function Home() {
               animate="show"
               className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-ink-mid sm:text-lg"
             >
-              Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief —
+              Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief,
               sized to your book.
             </motion.p>
           </div>
@@ -354,26 +354,15 @@ export default function Home() {
             </div>
           </motion.div>
 
-          <motion.div
+          <motion.p
             custom={3}
             variants={fadeUp}
             initial="hidden"
             animate="show"
-            className="mx-auto mt-10 flex max-w-lg flex-col items-stretch justify-center gap-3 sm:flex-row sm:justify-center sm:gap-4"
+            className="mt-6 text-center text-sm text-ink-mid"
           >
-            <Link
-              href="/signup"
-              className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] bg-ink px-6 text-sm font-semibold tracking-normal text-ivory ring-1 ring-ivory/10 transition-colors duration-200 hover:bg-[#1f1d1a]"
-            >
-              Start free
-            </Link>
-            <Link
-              href="/dashboard/brief"
-              className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] border border-ink bg-ivory px-6 text-sm font-semibold tracking-normal text-ink transition-colors duration-200 hover:bg-ivory-dark/40"
-            >
-              View today&apos;s brief
-            </Link>
-          </motion.div>
+            Free to start. No credit card required.
+          </motion.p>
         </div>
       </section>
 
@@ -391,7 +380,7 @@ export default function Home() {
               Every REMIT notice. Scored. In plain English.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
-              Unplanned baseload, planned maintenance, interconnector derates — the
+              Unplanned baseload, planned maintenance, interconnector derates - the
               same feed you get in-product, with MW impact and a desk-ready read.
             </p>
           </motion.div>
@@ -399,7 +388,7 @@ export default function Home() {
             <LandingSignalCard
               meta="UNPLANNED · HIGH · 645 MW"
               title="T_DRAXX-4 · Drax Power Station Unit 4"
-              detail="Unavailable from 13 Apr 06:00 — return unknown"
+              detail="Unavailable from 13 Apr 06:00 - return unknown"
               implication="645 MW of baseload removed without notice. Tightens residual demand by ~1.5 GW when wind drops below 8 GW. Watch GB Power front-month."
               severity="high"
               assetLabel="Other"
@@ -407,14 +396,14 @@ export default function Home() {
             <LandingSignalCard
               meta="PLANNED · MEDIUM · 920 MW"
               title="T_MRWD-1 · Mereworth Gas Turbine"
-              detail="Maintenance outage 14–22 Apr"
-              implication="Scheduled peaker maintenance. Market has priced this — no immediate action unless unplanned extension."
+              detail="Maintenance outage 14-22 Apr"
+              implication="Scheduled peaker maintenance. Market has priced this - no immediate action unless unplanned extension."
               severity="medium"
               assetLabel="CCGT"
             />
             <LandingSignalCard
               meta="INTERCONNECTOR · HIGH · 1,000 MW"
-              title="IFA1 · France–GB Interconnector"
+              title="IFA1 · France-GB Interconnector"
               detail="Reduced capacity from 2,000 MW to 1,000 MW"
               implication="Half of IFA1 flow removed. With French nuclear at 72% availability, this reduces import optionality during peak demand periods."
               severity="high"
@@ -467,7 +456,7 @@ export default function Home() {
                 <p className={bookTouchpointsLabel}>BOOK TOUCHPOINTS</p>
                 <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
                   The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
-                  well-supported — today&apos;s physical conditions suggest the
+                  well-supported - today&apos;s physical conditions suggest the
                   market is underpricing tightness risk by £17/MWh. The short
                   25,000 therm NBP Winter 2026 is correctly positioned given
                   temperature-suppressed demand; TTF at €50/MWh with weak heating
@@ -482,9 +471,18 @@ export default function Home() {
       <section className="border-b-[0.5px] border-ivory-border py-14 sm:py-20">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
-            <ProductStat value="5 min" label="Premium score refresh" />
-            <ProductStat value="06:00 GMT" label="Morning brief, every day" />
-            <ProductStat value="48 SP" label="Settlement periods tracked daily" />
+            <ProductStat
+              value="Every 5 min"
+              label="SRMC model recalculated against live TTF, wind and REMIT"
+            />
+            <ProductStat
+              value="60 sec"
+              label="REMIT notice to scored signal in your feed"
+            />
+            <ProductStat
+              value="8 sources"
+              label="Elexon, EEX, PV_Live, GIE AGSI, Nord Pool, Open-Meteo and more"
+            />
           </div>
         </div>
       </section>
@@ -748,7 +746,7 @@ function PlanComparisonCell({
   highlight?: boolean;
 }) {
   const isCheck = value === "✓";
-  const isDash = value === "—";
+  const isDash = value === "-";
   return (
     <td
       className={`px-4 py-3 text-center align-middle text-sm ${
