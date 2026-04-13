@@ -50,6 +50,7 @@ function optimiserQuality(input: {
   candidatePackageCount: number;
   fallbackUsed: boolean;
   nbpProxyUsed: boolean;
+  stabilityPass: boolean;
 }): { quality: "high" | "medium" | "low"; warnings: string[] } {
   const warnings: string[] = [];
   if (input.fallbackUsed) {
@@ -63,6 +64,9 @@ function optimiserQuality(input: {
   }
   if (input.candidatePackageCount < 30) {
     warnings.push("Hedge search space is narrow; recommendations may be unstable.");
+  }
+  if (!input.stabilityPass) {
+    warnings.push("Top packages are unstable; recommendation ranking may be noisy.");
   }
   if (warnings.length >= 2) return { quality: "low", warnings };
   if (warnings.length === 1) return { quality: "medium", warnings };
@@ -218,6 +222,7 @@ export async function GET(req: Request) {
       candidatePackageCount: result.diagnostics.candidatePackageCount,
       fallbackUsed: result.diagnostics.fallbackUsed,
       nbpProxyUsed: result.diagnostics.nbpProxyUsed,
+      stabilityPass: result.diagnostics.stabilityPass,
     });
     const blocked = quality.quality === "low";
 
@@ -234,6 +239,11 @@ export async function GET(req: Request) {
       blockedReason: blocked
         ? "Recommendations are blocked because model quality is low."
         : null,
+      provenance: {
+        power: "market_prices (N2EX/APX daily avg)",
+        gas: "gas_prices (TTF+NBP daily avg)",
+        fx: "Frankfurter ECB latest + fx_rates historical",
+      },
       ...result,
       recommendations: blocked ? [] : result.recommendations,
       alternatives: blocked ? [] : result.alternatives,

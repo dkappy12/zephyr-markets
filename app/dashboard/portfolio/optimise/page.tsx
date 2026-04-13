@@ -15,6 +15,11 @@ type ApiResponse = {
   qualityWarnings: string[];
   blocked: boolean;
   blockedReason: string | null;
+  provenance: {
+    power: string;
+    gas: string;
+    fx: string;
+  };
   before: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   after: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   deltas: {
@@ -53,6 +58,11 @@ type ApiResponse = {
     fallbackUsed: boolean;
     candidatePackageCount: number;
     nbpProxyUsed: boolean;
+    stabilityIndex: number;
+    stabilityPass: boolean;
+    noAction: boolean;
+    noActionReason: string | null;
+    guardrailFilteredCount: number;
   };
 };
 
@@ -274,6 +284,13 @@ export default function OptimisePage() {
               Historical scenarios {data.diagnostics.historicalScenarioCount} · Candidate
               packages {data.diagnostics.candidatePackageCount}
             </p>
+            <p className="mt-1 text-xs text-ink-mid">
+              Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · Index{" "}
+              {data.diagnostics.stabilityIndex.toFixed(3)}
+              {data.diagnostics.guardrailFilteredCount > 0
+                ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered by stress guardrail`
+                : ""}
+            </p>
             {data.qualityWarnings.length > 0 && (
               <div className="mt-2 space-y-1">
                 {data.qualityWarnings.map((w) => (
@@ -313,7 +330,8 @@ export default function OptimisePage() {
               </p>
             ) : data.recommendations.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
-                No hedge package improves the selected objective under current constraints.
+                {data.diagnostics.noActionReason ??
+                  "No hedge package improves the selected objective under current constraints."}
               </p>
             ) : (
               <div className="mt-3 space-y-3">
@@ -329,6 +347,9 @@ export default function OptimisePage() {
                     <p className="mt-1 text-xs text-ink-mid">
                       CVaR impact {formatGbp(r.impact.cvar95Reduction)} · VaR impact{" "}
                       {formatGbp(r.impact.var95Reduction)} · Confidence {r.confidence}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-mid">
+                      Constraints: {r.constraintsApplied.join(" · ")}
                     </p>
                   </div>
                 ))}
@@ -363,6 +384,10 @@ export default function OptimisePage() {
             {data.diagnostics.stressScenarioCount} stress) · FX EUR/GBP{" "}
             {data.gbpPerEur.toFixed(4)} · Generated {new Date(data.generatedAt).toLocaleString()}
             {data.diagnostics.fallbackUsed && " · Fallback scenario set used"}
+            <p className="mt-2">
+              Provenance: Power {data.provenance.power} · Gas {data.provenance.gas} · FX{" "}
+              {data.provenance.fx}
+            </p>
           </section>
         </>
       )}

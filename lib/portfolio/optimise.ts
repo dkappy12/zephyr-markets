@@ -66,6 +66,11 @@ export type OptimiseResult = {
     fallbackUsed: boolean;
     candidatePackageCount: number;
     nbpProxyUsed: boolean;
+    stabilityIndex: number;
+    stabilityPass: boolean;
+    noAction: boolean;
+    noActionReason: string | null;
+    guardrailFilteredCount: number;
   };
 };
 
@@ -313,6 +318,15 @@ function tradeCostPenalty(trades: HedgeTrade[]): number {
   }, 0);
 }
 
+function objectiveLoss(metrics: RiskMetrics, objective: OptimiseObjective): number {
+  return objective === "cvar" ? metrics.cvarLoss : metrics.varLoss;
+}
+
+function relativeImprovement(before: number, after: number): number {
+  const denom = Math.max(Math.abs(before), 1);
+  return (before - after) / denom;
+}
+
 function confidenceLabel(
   scenarioCount: number,
   improvement: number,
@@ -385,25 +399,44 @@ export function optimisePortfolio(input: {
       confidence,
     );
     const objectiveValue =
-      (objective === "cvar" ? after.cvarLoss : after.varLoss) +
-      tradeCostPenalty(trades);
+      objectiveLoss(after, objective) + tradeCostPenalty(trades);
     return { trades, after, objectiveValue };
   });
 
-  scored.sort((a, b) => a.objectiveValue - b.objectiveValue);
-  const best = scored[0] ?? {
+  const STRESS_GUARDRAIL_TOLERANCE = 0.02;
+  const MIN_RELATIVE_IMPROVEMENT = 0.02;
+  const beforeObjective = objectiveLoss(before, objective);
+  const guardrailScored = scored.filter((row) => {
+    const stressWorsening = row.after.worstStressLoss - before.worstStressLoss;
+    if (stressWorsening <= 0) return true;
+    const allowed = Math.max(1, before.worstStressLoss * STRESS_GUARDRAIL_TOLERANCE);
+    return stressWorsening <= allowed;
+  });
+  const guardrailFilteredCount = Math.max(0, scored.length - guardrailScored.length);
+  const effectiveScored = guardrailScored.length > 0 ? guardrailScored : scored;
+
+  effectiveScored.sort((a, b) => a.objectiveValue - b.objectiveValue);
+  const best = effectiveScored[0] ?? {
     trades: [] as HedgeTrade[],
     after: before,
-    objectiveValue: objective === "cvar" ? before.cvarLoss : before.varLoss,
+    objectiveValue: beforeObjective,
   };
+  const bestRelImprovement = relativeImprovement(beforeObjective, objectiveLoss(best.after, objective));
+  const noAction = best.trades.length === 0 || bestRelImprovement < MIN_RELATIVE_IMPROVEMENT;
+  const selected = noAction
+    ? {
+        trades: [] as HedgeTrade[],
+        after: before,
+      }
+    : best;
 
   const deltas = {
-    var95Reduction: before.varLoss - best.after.varLoss,
-    cvar95Reduction: before.cvarLoss - best.after.cvarLoss,
-    worstStressReduction: before.worstStressLoss - best.after.worstStressLoss,
+    var95Reduction: before.varLoss - selected.after.varLoss,
+    cvar95Reduction: before.cvarLoss - selected.after.cvarLoss,
+    worstStressReduction: before.worstStressLoss - selected.after.worstStressLoss,
   };
 
-  const recommendations: Recommendation[] = best.trades.map((trade) => {
+  const recommendations: Recommendation[] = selected.trades.map((trade) => {
     const singleAfter = computeRiskMetrics(
       [...positions, asSyntheticPosition(trade)],
       empiricalScenarios,
@@ -431,7 +464,20 @@ export function optimisePortfolio(input: {
     };
   });
 
-  const alternatives = scored.slice(0, 3).map((row, idx) => ({
+  const topRanks = effectiveScored.slice(0, 3);
+  const objectiveValues = topRanks.map((row) => objectiveLoss(row.after, objective));
+  const mean =
+    objectiveValues.length > 0
+      ? objectiveValues.reduce((s, v) => s + v, 0) / objectiveValues.length
+      : 0;
+  const variance =
+    objectiveValues.length > 0
+      ? objectiveValues.reduce((s, v) => s + (v - mean) ** 2, 0) / objectiveValues.length
+      : 0;
+  const stabilityIndex = mean > 0 ? Math.sqrt(variance) / mean : 0;
+  const stabilityPass = stabilityIndex <= 0.12;
+
+  const alternatives = topRanks.map((row, idx) => ({
     rank: idx + 1,
     trades: row.trades,
     after: row.after,
@@ -444,7 +490,7 @@ export function optimisePortfolio(input: {
 
   return {
     before,
-    after: best.after,
+    after: selected.after,
     deltas,
     recommendations,
     alternatives,
@@ -455,6 +501,13 @@ export function optimisePortfolio(input: {
       fallbackUsed,
       candidatePackageCount: combos.length,
       nbpProxyUsed,
+      stabilityIndex,
+      stabilityPass,
+      noAction,
+      noActionReason: noAction
+        ? `Best package improves ${objective.toUpperCase()} by less than ${(MIN_RELATIVE_IMPROVEMENT * 100).toFixed(0)}%.`
+        : null,
+      guardrailFilteredCount,
     },
   };
 }
