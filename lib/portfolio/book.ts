@@ -122,9 +122,34 @@ export type LivePrices = {
   nbpOpenPencePerTherm: number | null;
 };
 
+/**
+ * NBP forward proxy from TTF (EUR/MWh): £/MWh → £/therm, then to pence/therm.
+ * NBP_p/th ≈ TTF_eur × GBP_per_EUR / therms_per_mwh × 10 (screen range ~80–150p/th).
+ * (Using ×10 here, not ×100, corrects the prior factor-of-10 error vs traded NBP.)
+ */
 export function ttfToNbpPencePerTherm(ttfEurMwh: number): number {
   const gbpMwh = ttfEurMwh * GBP_PER_EUR;
-  return (gbpMwh / MWH_TO_THERM) * 100;
+  return (gbpMwh / MWH_TO_THERM) * 10;
+}
+
+/**
+ * P&L in £ for NBP when entry/current are p/th and size is therms:
+ * (price diff in p/th) × therms = total pence → divide by 100 for £.
+ */
+export function nbpPnlGbp(
+  direction: string | null,
+  entryPencePerTherm: number | null,
+  currentPencePerTherm: number | null,
+  sizeTherms: number | null,
+): number | null {
+  const raw = linearPnl(
+    direction,
+    entryPencePerTherm,
+    currentPencePerTherm,
+    sizeTherms,
+  );
+  if (raw == null) return null;
+  return raw / 100;
 }
 
 export function marketBadge(m: string | null): string {

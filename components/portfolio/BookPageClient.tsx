@@ -15,6 +15,7 @@ import {
   LivePrices,
   marketBadge,
   netDeltaMw,
+  nbpPnlGbp,
   PositionRow,
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
@@ -468,17 +469,18 @@ export function BookPageClient() {
               <tbody>
                 {positions.map((p) => {
                   const mlow = (p.market ?? "").toLowerCase();
+                  /** NBP: prices in p/th, size in therms → £ = pnl_pence / 100 */
+                  const isNbp = mlow === "nbp";
                   const cur = pricePoints(p, livePrices, "current");
                   const opn = pricePoints(p, livePrices, "open");
-                  const total = linearPnl(
-                    p.direction,
-                    p.trade_price,
-                    cur,
-                    p.size,
-                  );
+                  const total = isNbp
+                    ? nbpPnlGbp(p.direction, p.trade_price, cur, p.size)
+                    : linearPnl(p.direction, p.trade_price, cur, p.size);
                   const today =
                     opn != null && cur != null
-                      ? linearPnl(p.direction, opn, cur, p.size)
+                      ? isNbp
+                        ? nbpPnlGbp(p.direction, opn, cur, p.size)
+                        : linearPnl(p.direction, opn, cur, p.size)
                       : null;
                   const curCell =
                     mlow === "uka" ? (
