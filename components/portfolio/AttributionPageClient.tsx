@@ -2,21 +2,21 @@
 
 import {
   bookAlignmentCopy,
+  gasAttributionForPosition,
   isGbPowerMarket,
   netGbPowerSignedMw,
   parsePhysicalDirection,
-  premiumGasGbpPosition,
-  premiumRemitGbpPosition,
   premiumShapeGbpPosition,
-  premiumWindGbpPosition,
   primaryDriverKey,
   remitPriceImpactGbpPerMwh,
   resolveTotalPriceMoveGbpMwh,
+  remitAttributionForPosition,
   sumGasAttribution,
   sumRemitAttribution,
   sumWindAttribution,
   totalTodayPnlGbp,
   type PhysicalPremiumInput,
+  windAttributionForPosition,
   windPriceImpactGbpPerMwh,
 } from "@/lib/portfolio/attribution";
 import {
@@ -185,6 +185,10 @@ type PhysicalRow = {
   regime: string | null;
 };
 
+const CARBON_UKA_GBP_PER_TCO2 = 55;
+const CARBON_EF_TCO2_PER_MWH = 0.366;
+const CARBON_REF_GBP_PER_MWH = CARBON_UKA_GBP_PER_TCO2 * CARBON_EF_TCO2_PER_MWH;
+
 function toPhysicalPremiumInput(row: PhysicalRow | null): PhysicalPremiumInput {
   if (!row) {
     return {
@@ -247,6 +251,7 @@ export function AttributionPageClient() {
   const [loading, setLoading] = useState(true);
   const [livePrices, setLivePrices] = useState<LivePrices | null>(null);
   const [physLatest, setPhysLatest] = useState<PhysicalRow | null>(null);
+  const [baselineWindGw, setBaselineWindGw] = useState<number | null>(null);
   const [marketIntradayGbpMwh, setMarketIntradayGbpMwh] = useState<number | null>(
     null,
   );
@@ -340,6 +345,7 @@ export function AttributionPageClient() {
     const [
       posRes,
       physLate,
+      physWindHist,
       mpTodayFirst,
       mpTodayLast,
       sigRes,
@@ -361,6 +367,11 @@ export function AttributionPageClient() {
         .order("calculated_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("physical_premium")
+        .select("wind_gw")
+        .order("calculated_at", { ascending: false })
+        .limit(168),
       supabase
         .from("market_prices")
         .select("price_gbp_mwh")
@@ -399,6 +410,14 @@ export function AttributionPageClient() {
     else setPositions([]);
 
     setPhysLatest((physLate.data as PhysicalRow) ?? null);
+    const windSamples = ((physWindHist.data ?? []) as Array<{ wind_gw: number | null }>)
+      .map((r) => parseNum(r.wind_gw))
+      .filter((v): v is number => v != null);
+    if (windSamples.length > 0) {
+      setBaselineWindGw(windSamples.reduce((s, v) => s + v, 0) / windSamples.length);
+    } else {
+      setBaselineWindGw(null);
+    }
 
     const openP = mpTodayFirst.data
       ? Number(
@@ -460,7 +479,9 @@ export function AttributionPageClient() {
     [marketIntradayGbpMwh, physicalInput],
   );
 
-  const deltaWindGw = parseNum(physLatest?.wind_gw) ?? 0;
+  const currentWindGw = parseNum(physLatest?.wind_gw) ?? 0;
+  const deltaWindGw =
+    baselineWindGw != null ? currentWindGw - baselineWindGw : currentWindGw;
   const deltaRemitMw = parseNum(physLatest?.remit_mw_lost) ?? 0;
   const ttfStart = livePrices?.ttfOpenEurMwh ?? null;
   const ttfCurrent = livePrices?.ttfEurMwh ?? null;
@@ -477,7 +498,7 @@ export function AttributionPageClient() {
     () => sumWindAttribution(positions, deltaWindGw),
     [positions, deltaWindGw],
   );
-  const gasAtt = useMemo(
+  const gasAttRaw = useMemo(
     () => sumGasAttribution(positions, ttfStart, ttfCurrent),
     [positions, ttfStart, ttfCurrent],
   );
@@ -485,6 +506,21 @@ export function AttributionPageClient() {
     () => sumRemitAttribution(positions, deltaRemitMw),
     [positions, deltaRemitMw],
   );
+  const carbonMoveDirection = gasMoveGbpMwh === 0 ? 0 : Math.sign(gasMoveGbpMwh);
+  const carbonPriceMoveGbpMwh = CARBON_REF_GBP_PER_MWH * carbonMoveDirection;
+  const carbonAtt = useMemo(
+    () =>
+      positions.reduce((sum, p) => {
+        if (!isGbPowerMarket(p)) return sum;
+        if ((p.unit ?? "").toLowerCase() !== "mw") return sum;
+        const dm = (p.direction ?? "").toLowerCase() === "short" ? -1 : 1;
+        const size = Number(p.size ?? 0);
+        if (!Number.isFinite(size)) return sum;
+        return sum + size * dm * carbonPriceMoveGbpMwh;
+      }, 0),
+    [positions, carbonPriceMoveGbpMwh],
+  );
+  const gasAtt = gasAttRaw - carbonAtt;
   const gbNet = netGbPowerSignedMw(positions);
   const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
   const demandSignals = useMemo(
@@ -564,6 +600,7 @@ export function AttributionPageClient() {
   const windAttCal = windAtt * calibration.multipliers.wind;
   const gasAttCal = gasAtt * calibration.multipliers.gas;
   const remitAttCal = remitAtt * calibration.multipliers.remit;
+  const carbonAttCal = carbonAtt;
   const shapeAttCal = shapeAtt * calibration.multipliers.shape;
   const demandAttCal = demandAtt * calibration.multipliers.demand;
   const interconnectorAttCal =
@@ -574,7 +611,8 @@ export function AttributionPageClient() {
     totalPnl -
     windAttCal -
     gasAttCal -
-    remitAttCal;
+    remitAttCal -
+    carbonAttCal;
   const explainedPnl = totalPnl - residual;
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
@@ -588,21 +626,13 @@ export function AttributionPageClient() {
 
   const primary = primaryDriverKey(
     windAttCal,
-    gasAttCal,
+    gasAttCal + carbonAttCal,
     remitAttCal,
     residual,
     shapeAttCal,
     demandAttCal,
     interconnectorAttCal,
   );
-
-  const windStackPct = useMemo(() => {
-    const w = parseNum(physLatest?.wind_gw) ?? 0;
-    const s = parseNum(physLatest?.solar_gw) ?? 0;
-    const r = parseNum(physLatest?.residual_demand_gw) ?? 0;
-    const d = w + s + r;
-    return d > 0 ? (w / d) * 100 : 0;
-  }, [physLatest]);
 
   const gasCostSharePct = useMemo(() => {
     const m = parseNum(physLatest?.market_price_gbp_mwh);
@@ -665,6 +695,7 @@ export function AttributionPageClient() {
     Math.abs(windAttCal) +
     Math.abs(gasAttCal) +
     Math.abs(remitAttCal) +
+    Math.abs(carbonAttCal) +
     Math.abs(shapeAttCal) +
     Math.abs(demandAttCal) +
     Math.abs(interconnectorAttCal) +
@@ -769,6 +800,8 @@ export function AttributionPageClient() {
         calibration_lambda: calibration.lambda,
         calibration_fallback: calibration.fallbackUsed,
         calibration_multipliers: calibration.multipliers,
+        baseline_wind_gw: baselineWindGw,
+        current_wind_gw: currentWindGw,
       },
       primary_driver: primary,
       total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
@@ -805,7 +838,7 @@ export function AttributionPageClient() {
         gas_attribution_gbp: gasAttCal,
         remit_attribution_gbp: remitAttCal,
         residual_gbp: residual,
-        carbon_attribution_gbp: 0,
+        carbon_attribution_gbp: carbonAttCal,
         primary_driver: primary,
         attribution_json: attributionJson,
         positions_snapshot: snapshot,
@@ -826,6 +859,7 @@ export function AttributionPageClient() {
     windAttCal,
     gasAttCal,
     remitAttCal,
+    carbonAttCal,
     shapeAttCal,
     demandAttCal,
     interconnectorAttCal,
@@ -843,6 +877,16 @@ export function AttributionPageClient() {
     demandSignals.length,
     interconnectorSignals.length,
     netGbMw,
+    baselineWindGw,
+    currentWindGw,
+    deltaWindGw,
+    deltaRemitMw,
+    ttfStart,
+    ttfCurrent,
+    windMoveGbpMwh,
+    gasMoveGbpMwh,
+    remitMoveGbpMwh,
+    priceResidualMoveGbpMwh,
   ]);
 
   const waterfallRows = useMemo(() => {
@@ -850,6 +894,7 @@ export function AttributionPageClient() {
       { name: "Wind", value: windAttCal },
       { name: "Gas", value: gasAttCal },
       { name: "REMIT", value: remitAttCal },
+      { name: "Carbon", value: carbonAttCal },
       { name: "Shape", value: shapeAttCal },
       { name: "Demand", value: demandAttCal },
       { name: "Interconnector", value: interconnectorAttCal },
@@ -881,6 +926,7 @@ export function AttributionPageClient() {
     windAttCal,
     gasAttCal,
     remitAttCal,
+    carbonAttCal,
     shapeAttCal,
     demandAttCal,
     interconnectorAttCal,
@@ -1076,7 +1122,7 @@ export function AttributionPageClient() {
                       {
                         name: "Wind generation",
                         impact: windAttCal,
-                        dir: `${windStackPct.toFixed(0)}% stack · ${windMoveGbpMwh.toFixed(2)} £/MWh`,
+                        dir: `Δwind ${deltaWindGw.toFixed(2)} GW vs 7d baseline · ${windMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Gas prices (TTF)",
@@ -1087,6 +1133,11 @@ export function AttributionPageClient() {
                         name: "REMIT outages",
                         impact: remitAttCal,
                         dir: `${remitStressPct.toFixed(0)}% system stress · ${remitMoveGbpMwh.toFixed(2)} £/MWh`,
+                      },
+                      {
+                        name: "Carbon (UKA)",
+                        impact: carbonAttCal,
+                        dir: `UKA ref £${CARBON_UKA_GBP_PER_TCO2}/t · EF ${CARBON_EF_TCO2_PER_MWH.toFixed(3)} t/MWh`,
                       },
                       {
                         name: "Shape / basis",
@@ -1182,19 +1233,20 @@ export function AttributionPageClient() {
             {detailOpen ? (
               <div className="mt-4 space-y-4 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/40 px-4 py-4">
                 {positions.map((p) => {
-                  const w = premiumWindGbpPosition(
+                  const w = windAttributionForPosition(deltaWindGw, p);
+                  const g = gasAttributionForPosition(
+                    ttfStart ?? 0,
+                    ttfCurrent ?? 0,
                     p,
-                    windMoveGbpMwh,
                   );
-                  const g = premiumGasGbpPosition(
-                    p,
-                    gasMoveGbpMwh,
-                  );
-                  const r = premiumRemitGbpPosition(
-                    p,
-                    remitMoveGbpMwh,
-                  );
-                  const sub = w + g + r;
+                  const r = remitAttributionForPosition(deltaRemitMw, p);
+                  const c =
+                    isGbPowerMarket(p) && (p.unit ?? "").toLowerCase() === "mw"
+                      ? ((p.direction ?? "").toLowerCase() === "short" ? -1 : 1) *
+                        (Number.isFinite(Number(p.size ?? 0)) ? Number(p.size ?? 0) : 0) *
+                        carbonPriceMoveGbpMwh
+                      : 0;
+                  const sub = w + g + r + c;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";
                   return (
@@ -1228,6 +1280,14 @@ export function AttributionPageClient() {
                             REMIT factor:{" "}
                             <span className={formatGbpColored(r).className}>
                               {formatGbpColored(r).text}
+                            </span>
+                          </li>
+                        ) : null}
+                        {c !== 0 ? (
+                          <li>
+                            Carbon factor:{" "}
+                            <span className={formatGbpColored(c).className}>
+                              {formatGbpColored(c).text}
                             </span>
                           </li>
                         ) : null}
