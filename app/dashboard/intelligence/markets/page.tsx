@@ -497,11 +497,25 @@ export default function MarketsPage() {
         }
 
         if (gasRes.error || !gasRes.data) {
+          // eslint-disable-next-line no-console
+          console.warn("[Markets TTF] gas query unavailable", {
+            error: gasRes.error?.message ?? null,
+            hubFilter: "TTF",
+            maybeSingle: true,
+          });
           setGasRow(null);
         } else {
           const g = gasRes.data as Record<string, unknown>;
           const pe = parseNum(g.price_eur_mwh);
           if (pe != null) {
+            if (pe <= 0) {
+              // eslint-disable-next-line no-console
+              console.warn("[Markets TTF] non-positive price from gas_prices", {
+                price_eur_mwh: pe,
+                price_time: g.price_time ?? null,
+                hubFilter: "TTF",
+              });
+            }
             setGasRow({
               price_eur_mwh: pe,
               price_time: String(g.price_time ?? ""),
@@ -509,6 +523,11 @@ export default function MarketsPage() {
                 g.fetched_at != null ? String(g.fetched_at) : null,
             });
           } else {
+            // eslint-disable-next-line no-console
+            console.warn("[Markets TTF] missing/invalid price_eur_mwh", {
+              raw: g.price_eur_mwh ?? null,
+              hubFilter: "TTF",
+            });
             setGasRow(null);
           }
         }
@@ -652,7 +671,9 @@ export default function MarketsPage() {
     };
   }, []);
 
-  const ttfEur = gasRow?.price_eur_mwh ?? null;
+  const ttfEurRaw = gasRow?.price_eur_mwh ?? null;
+  const ttfUnavailable = ttfEurRaw == null || ttfEurRaw <= 0;
+  const ttfEur = ttfUnavailable ? null : ttfEurRaw;
 
   /** GB Power chart dashed line: same TTF-derived SRMC as the cost stack (no legacy £108.41 / DB SRMC). */
   const srmcRef =
@@ -1265,10 +1286,15 @@ export default function MarketsPage() {
             TTF gas · CCGT cost stack
           </p>
           <p className="mt-2 font-serif text-3xl tabular-nums text-ink">
-            {loading || ttfEur == null
+            {loading
               ? "…"
+              : ttfEur == null
+                ? "—"
               : `€${ttfEur.toFixed(2)}/MWh`}
           </p>
+          {ttfEur == null ? (
+            <p className="mt-1 text-[11px] text-ink-light">TTF data unavailable</p>
+          ) : null}
           <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
           <p className="mt-1 text-[10px] text-ink-light">
             &quot;Updated&quot; uses ingestion time from the database (

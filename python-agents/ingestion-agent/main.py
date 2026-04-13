@@ -125,10 +125,22 @@ EF_TCO2_PER_MWH_EL = 0.37
 UKA_PRICE_GBP_PER_T = 55.0
 CPS_GBP_PER_T = 18.0
 VOM_GBP_PER_MWH = 2.0
-BASE_DEMAND_GW = 32.0
+THERMAL_CAPACITY_GW = 45.0
 WIND_MS_TO_GW = 17.0 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
+
+
+def demand_baseline_gw_utc(hour: int) -> float:
+    if 0 <= hour < 6:
+        return 28.0
+    if 6 <= hour < 9:
+        return 34.0
+    if 9 <= hour < 17:
+        return 36.0
+    if 17 <= hour < 21:
+        return 38.0
+    return 32.0
 
 CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
 # Further reading step 2 (JSON format only, no tools).
@@ -1687,7 +1699,8 @@ async def calculate_physical_premium() -> None:
 
         wg = wind_gw if wind_gw is not None else 0.0
         sg = solar_gw if solar_gw is not None else 0.0
-        residual_demand_gw = max(BASE_DEMAND_GW - wg - sg, 0.0)
+        baseline_demand_gw = demand_baseline_gw_utc(now_utc.hour)
+        residual_demand_gw = max(baseline_demand_gw - wg - sg, 0.0)
 
         total_carbon_cost = UKA_PRICE_GBP_PER_T + CPS_GBP_PER_T
         srmc_gbp_mwh: float | None = None
@@ -1700,7 +1713,7 @@ async def calculate_physical_premium() -> None:
         implied_price_gbp_mwh: float | None = None
         premium_regime: str | None = None
         remit_gw = remit_total_mw / 1000.0
-        available_margin_gw = BASE_DEMAND_GW - residual_demand_gw - remit_gw
+        available_margin_gw = THERMAL_CAPACITY_GW - residual_demand_gw - remit_gw
         adder_per_gw = _remit_adder_per_gw(available_margin_gw)
         remit_price_adder = remit_gw * adder_per_gw
 
