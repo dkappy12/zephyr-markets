@@ -550,9 +550,6 @@ export default function BriefPage() {
 
         <section>
           <p className={bookTouchpointsLabelClass}>BOOK TOUCHPOINTS</p>
-          <h2 className="mt-2 font-serif text-xl text-ink">
-            How today&apos;s brief affects your book
-          </h2>
           {bookTouchpointLoading ? (
             <div className="mt-3 space-y-2">
               <div className="h-4 w-full rounded bg-ivory-dark animate-pulse" />
