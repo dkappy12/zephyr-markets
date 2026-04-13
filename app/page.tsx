@@ -1,6 +1,6 @@
 "use client";
 
-import { createBrowserClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
 import { motion } from "framer-motion";
@@ -101,69 +101,182 @@ const PLAN_COMPARISON_ROWS: {
   },
 ];
 
-export default function Home() {
-  const [tickerItems, setTickerItems] = useState<string[] | null>(null);
+function LiveTicker() {
+  const [items, setItems] = useState<string[]>([]);
 
   useEffect(() => {
-    const supabase = createBrowserClient();
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    async function fetchTickerData() {
+      const supabase = createClient();
 
-    async function loadTicker() {
-      const [physRes, powerRes, gasRes, signalRes] = await Promise.all([
-        supabase
-          .from("physical_premium")
-          .select("normalised_score,direction")
-          .order("calculated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("market_prices")
-          .select("price_gbp_mwh")
-          .order("price_date", { ascending: false })
-          .order("settlement_period", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("gas_prices")
-          .select("price_eur_mwh")
-          .eq("hub", "TTF")
-          .order("price_time", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("signals")
-          .select("*", { count: "exact", head: true })
-          .gte("created_at", since),
-      ]);
+      // Fetch latest physical premium
+      const { data: premium } = await supabase
+        .from("physical_premium")
+        .select(
+          "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, wind_gw, solar_gw, residual_demand_gw, regime",
+        )
+        .order("calculated_at", { ascending: false })
+        .limit(1)
+        .single();
 
-      if (physRes.error || powerRes.error || gasRes.error || signalRes.error) {
-        setTickerItems(null);
-        return;
+      // Fetch latest N2EX price
+      const { data: n2ex } = await supabase
+        .from("market_prices")
+        .select("price_gbp_mwh, price_time")
+        .eq("market", "N2EX")
+        .order("price_time", { ascending: false })
+        .limit(1)
+        .single();
+
+      // Fetch latest TTF price
+      const { data: ttf } = await supabase
+        .from("gas_prices")
+        .select("price_eur_mwh, price_time")
+        .eq("hub", "TTF")
+        .order("price_time", { ascending: false })
+        .limit(1)
+        .single();
+
+      // Fetch latest NBP price
+      const { data: nbp } = await supabase
+        .from("gas_prices")
+        .select("price_eur_mwh, price_time")
+        .eq("hub", "NBP")
+        .order("price_time", { ascending: false })
+        .limit(1)
+        .single();
+
+      // Fetch EU storage (Germany as proxy)
+      const { data: storage } = await supabase
+        .from("storage_levels")
+        .select("full_pct, country_code")
+        .in("country_code", ["DE", "FR", "NL", "IT"])
+        .order("recorded_at", { ascending: false })
+        .limit(4);
+
+      // Fetch recent REMIT signal count
+      const { count: signalCount } = await supabase
+        .from("signals")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
+      // Build ticker items from live data
+      const built: string[] = [];
+
+      if (premium) {
+        const sign = (premium.normalised_score ?? 0) >= 0 ? "+" : "";
+        built.push(
+          `PHYSICAL PREMIUM · ${sign}${premium.normalised_score?.toFixed(1)} ${premium.direction}`,
+        );
+        if (premium.implied_price_gbp_mwh)
+          built.push(
+            `IMPLIED PRICE · £${Number(premium.implied_price_gbp_mwh).toFixed(2)}/MWH`,
+          );
+        if (premium.wind_gw)
+          built.push(`GB WIND · ${Number(premium.wind_gw).toFixed(1)} GW`);
+        if (premium.solar_gw != null)
+          built.push(`GB SOLAR · ${Number(premium.solar_gw).toFixed(1)} GW`);
+        if (premium.residual_demand_gw)
+          built.push(
+            `RESIDUAL DEMAND · ${Number(premium.residual_demand_gw).toFixed(1)} GW`,
+          );
+        if (premium.regime)
+          built.push(
+            `REGIME · ${premium.regime.toUpperCase().replace("-", " ")}`,
+          );
       }
 
-      const score = Number(physRes.data?.normalised_score);
-      const dir = String(physRes.data?.direction ?? "STABLE").toUpperCase();
-      const power = Number(powerRes.data?.price_gbp_mwh);
-      const ttf = Number(gasRes.data?.price_eur_mwh);
-      const signalCount = signalRes.count ?? 0;
-      if (!Number.isFinite(score) || !Number.isFinite(power) || !Number.isFinite(ttf)) {
-        setTickerItems(null);
-        return;
+      if (n2ex?.price_gbp_mwh) {
+        built.push(`GB DAY-AHEAD · £${Number(n2ex.price_gbp_mwh).toFixed(2)}/MWH`);
       }
 
-      setTickerItems([
-        `Physical premium · ${score >= 0 ? "+" : ""}${score.toFixed(1)} ${dir}`,
-        `GB day-ahead · £${power.toFixed(2)}/MWh`,
-        `TTF · €${ttf.toFixed(2)}/MWh`,
-        `Signals 24h · ${signalCount}`,
-      ]);
+      if (ttf?.price_eur_mwh) {
+        built.push(`TTF · €${Number(ttf.price_eur_mwh).toFixed(2)}/MWH`);
+      }
+
+      if (nbp?.price_eur_mwh) {
+        built.push(`NBP · ${Number(nbp.price_eur_mwh).toFixed(2)} P/THERM`);
+      }
+
+      if (storage && storage.length > 0) {
+        storage.forEach((s) => {
+          if (s.full_pct) {
+            built.push(
+              `${s.country_code} GAS STORAGE · ${Number(s.full_pct).toFixed(1)}% FULL`,
+            );
+          }
+        });
+      }
+
+      if (signalCount != null) {
+        built.push(`REMIT SIGNALS 24H · ${signalCount}`);
+      }
+
+      // Fallback if fetch fails or returns empty
+      if (built.length === 0) {
+        built.push(
+          "PHYSICAL PREMIUM · LIVE",
+          "GB DAY-AHEAD · N2EX",
+          "TTF · EEX NGP",
+          "NBP · ICE",
+          "REMIT · LIVE FEED",
+          "WIND · OPEN-METEO",
+          "SOLAR · PV LIVE",
+          "EU STORAGE · GIE AGSI",
+        );
+      }
+
+      setItems(built);
     }
 
-    void loadTicker();
+    fetchTickerData();
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchTickerData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
+  // Don't render until we have data — avoids flash of empty ticker
+  if (items.length === 0) return null;
+
+  // Repeat items enough times to guarantee full width coverage regardless of screen size
+  const repeated = [...items, ...items, ...items, ...items];
+
+  return (
+    <div className="border-b-[0.5px] border-ivory-border bg-ink text-ivory">
+      <div className="relative overflow-hidden py-2">
+        <div className="animate-ticker-marquee flex w-max gap-12 whitespace-nowrap font-sans text-[9px] font-medium uppercase tracking-[0.2em] text-ivory/90">
+          {repeated.map((line, i) => (
+            <span key={`${line}-${i}`}>{line}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
+      <nav className="sticky top-0 z-50 border-b-[0.5px] border-ivory-border bg-ivory/95 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-[1100px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <Link href="/" className="font-serif text-xl text-ink">
+            Zephyr
+          </Link>
+          <div className="flex items-center gap-6">
+            <Link
+              href="/login"
+              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex h-8 items-center rounded-[4px] bg-ink px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+            >
+              Start free
+            </Link>
+          </div>
+        </div>
+      </nav>
       <section className="relative overflow-hidden border-b-[0.5px] border-ivory-border">
         <div className="pointer-events-none absolute inset-0 z-0 min-h-[560px]">
           <TopoBackground className="h-full w-full min-h-[560px]" lineOpacity={0.25} />
@@ -264,17 +377,7 @@ export default function Home() {
         </div>
       </section>
 
-      {tickerItems && tickerItems.length > 0 ? (
-        <div className="border-b-[0.5px] border-ivory-border bg-ink text-ivory">
-          <div className="relative overflow-hidden py-2">
-            <div className="animate-ticker-marquee flex w-max gap-12 whitespace-nowrap font-sans text-[9px] font-medium uppercase tracking-[0.2em] text-ivory/90">
-              {[...tickerItems, ...tickerItems].map((line, i) => (
-                <span key={`${line}-${i}`}>{line}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <LiveTicker />
 
       <section className="border-b-[0.5px] border-ivory-border py-16 sm:py-24">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
