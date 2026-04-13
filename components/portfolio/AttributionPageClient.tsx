@@ -22,10 +22,7 @@ import {
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
-import {
-  assetNameFromTitle,
-  mwDeratedForRow,
-} from "@/lib/signal-feed";
+import { mwDeratedForRow } from "@/lib/signal-feed";
 import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
 import { motion } from "framer-motion";
@@ -155,6 +152,30 @@ type PortfolioPnlRow = {
   date: string;
   total_pnl: number | null;
 };
+
+/** Text before ` — ` / ` – ` / ` - ` (aligned with signal feed). */
+function titleBeforeSeparator(title: string): string {
+  const t = title.trim();
+  for (const sep of [" — ", " – ", " - "] as const) {
+    const idx = t.indexOf(sep);
+    if (idx !== -1) return t.slice(0, idx).trim();
+  }
+  return t;
+}
+
+/** Group REMIT rows by plant (LNMTH-1/2/3 → LNMTH). */
+function getAssetBase(title: string): string {
+  return titleBeforeSeparator(title).replace(/-\d+$/, "");
+}
+
+function finiteTotalPnlValues(rows: PortfolioPnlRow[]): number[] {
+  const out: number[] = [];
+  for (const r of rows) {
+    const v = r.total_pnl;
+    if (typeof v === "number" && isFinite(v)) out.push(v);
+  }
+  return out;
+}
 
 export function AttributionPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
@@ -462,24 +483,25 @@ export function AttributionPageClient() {
   const barPct = (v: number) =>
     absSum > 0 ? Math.round((Math.abs(v) / absSum) * 100) : 0;
 
-  const chartData = useMemo(
-    () =>
-      pnlHistory
-        .map((r) => ({
-          d: r.date,
-          pnl: Number(r.total_pnl ?? 0),
-        }))
-        .filter((x) => Number.isFinite(x.pnl)),
-    [pnlHistory],
-  );
+  const chartData = useMemo(() => {
+    const out: { d: string; pnl: number }[] = [];
+    for (const r of pnlHistory) {
+      const vals = finiteTotalPnlValues([r]);
+      if (vals.length === 0) continue;
+      out.push({ d: r.date, pnl: vals[0]! });
+    }
+    return out;
+  }, [pnlHistory]);
 
   const chartYDomain = useMemo((): [number, number] => {
-    if (chartData.length === 0) return [0, 1];
-    const vals = chartData.map((x) => x.pnl);
-    const minPnl = Math.min(...vals);
-    const maxPnl = Math.max(...vals);
-    return [Math.min(0, minPnl * 1.1), Math.max(0, maxPnl * 1.1)];
-  }, [chartData]);
+    const nums = finiteTotalPnlValues(pnlHistory);
+    if (nums.length === 0) return [0, 100];
+    const minPnl = Math.min(...nums);
+    const maxPnl = Math.max(...nums);
+    const yMin = Math.min(0, isFinite(minPnl) ? minPnl * 1.1 : 0);
+    const yMax = Math.max(0, isFinite(maxPnl) ? maxPnl * 1.1 : 100);
+    return [yMin, yMax];
+  }, [pnlHistory]);
 
   const chartTodayPoint = useMemo(() => {
     const t = utcToday();
@@ -493,7 +515,7 @@ export function AttributionPageClient() {
     );
     const byAsset = new Map<string, SignalRow[]>();
     for (const row of unplanned) {
-      const asset = assetNameFromTitle(row.title);
+      const asset = getAssetBase(row.title);
       const list = byAsset.get(asset) ?? [];
       list.push(row);
       byAsset.set(asset, list);
@@ -981,7 +1003,9 @@ export function AttributionPageClient() {
                     <YAxis
                       domain={chartYDomain}
                       tick={{ fontSize: 10, fill: "#6b6560" }}
-                      tickFormatter={(v) => `£${v}`}
+                      tickFormatter={(value) =>
+                        `£${Math.round(Number(value)).toLocaleString("en-GB")}`
+                      }
                     />
                     <Tooltip
                       contentStyle={{
