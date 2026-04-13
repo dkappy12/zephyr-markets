@@ -98,7 +98,8 @@ export async function GET(req: Request) {
         .order("price_date", { ascending: true }),
       supabase
         .from("gas_prices")
-        .select("price_time, ttf_eur_mwh")
+        .select("price_time, price_eur_mwh, hub")
+        .eq("hub", "TTF")
         .gte("price_time", `${sinceDate}T00:00:00`)
         .order("price_time", { ascending: true }),
     ]);
@@ -129,7 +130,7 @@ export async function GET(req: Request) {
     const nbpAgg: Record<string, { sum: number; count: number }> = {};
     for (const row of gasRes.data ?? []) {
       const day = parseDateOnly(row.price_time);
-      const ttf = parseNum(row.ttf_eur_mwh);
+      const ttf = parseNum(row.price_eur_mwh);
       if (!day || ttf == null) continue;
       addDailySample(ttfAgg, day, ttf);
       addDailySample(nbpAgg, day, ttfEurMwhToNbpPth(ttf, gbpPerEur));
