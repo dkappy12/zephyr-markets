@@ -108,6 +108,7 @@ MARKET_INDEX_POLL_MINUTES = 30
 
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
+STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
@@ -1216,82 +1217,58 @@ def scheduled_ttf() -> None:
 
 
 async def fetch_nbp_price() -> None:
-    """Fetch EEX NBP NGP CSV; upsert today's UTC gas day if present, else latest Gasday."""
+    """Fetch NBP via public Stooq UK Natural Gas endpoint only."""
     _require_supabase_env()
     fetched_at = datetime.now(timezone.utc).isoformat()
-
-    logger.debug(
-        "nbp_cycle: SSL verification disabled for EEX gasandregistry domain",
-    )
+    logger.debug("nbp_cycle: fetching Stooq quote endpoint for NF.F")
     async with httpx.AsyncClient(
         headers={
-            "Accept": "text/csv,text/plain,*/*",
+            "Accept": "text/plain,text/csv,*/*",
             "User-Agent": "ZephyrMarkets-NBP-Ingestion/1.0",
         },
         follow_redirects=True,
-        verify=False,
     ) as http:
-        resp = await http.get(NBP_NGP_CSV_URL, timeout=HTTP_TIMEOUT)
+        resp = await http.get(STOOQ_NBP_QUOTE_URL, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
-        text = resp.text
-
-    rows = _ttf_csv_dict_rows(text)
-    logger.debug("nbp_cycle: first 3 parsed CSV rows: %s", rows[:3])
-
-    if not rows:
-        logger.warning("nbp_cycle: empty NBP CSV")
+        line = (resp.text or "").strip()
+    if not line:
+        logger.error("nbp_cycle: empty Stooq response; skipping write")
         return
 
-    hdrs = list(rows[0].keys())
-    gasday_col, price_col, status_col = _ttf_resolve_columns(hdrs)
-    if price_col is None or gasday_col is None:
-        logger.error(
-            "nbp_cycle: could not resolve Gasday/IndexValue columns in headers=%s",
-            hdrs,
-        )
+    # Expected Stooq format:
+    # SYMBOL,YYYYMMDD,HHMMSS,open,high,low,close,volume,
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 7:
+        logger.error("nbp_cycle: unexpected Stooq format: %r", line[:120])
+        return
+    symbol = parts[0].upper()
+    date_s = parts[1]
+    close_s = parts[6]
+    if symbol != "NF.F":
+        logger.error("nbp_cycle: unexpected symbol %s", symbol)
+        return
+    try:
+        d = datetime.strptime(date_s, "%Y%m%d").replace(tzinfo=timezone.utc)
+        px = float(close_s)
+    except Exception:
+        logger.error("nbp_cycle: failed parsing quote line %r", line[:160])
         return
 
-    parsed: list[tuple[datetime, float, str]] = []
-    for row in rows:
-        dt = _ttf_parse_gasday_dd_mm_yyyy(row.get(gasday_col, ""))
-        price = _ttf_parse_index_value_eur(row.get(price_col, ""))
-        if dt is None or price is None:
-            continue
-        status_txt = ""
-        if status_col and status_col in row:
-            status_txt = (row.get(status_col) or "").strip()
-        parsed.append((dt, price, status_txt))
-
-    if not parsed:
-        logger.warning("nbp_cycle: no parseable NBP rows (headers=%s)", hdrs)
-        return
-
-    today_utc = datetime.now(timezone.utc).date()
-    cutoff = today_utc - timedelta(days=GAS_BACKFILL_DAYS)
-    backfill_rows = [t for t in parsed if t[0].date() >= cutoff]
-    if not backfill_rows:
-        backfill_rows = [max(parsed, key=lambda x: x[0])]
-
-    payload = [
-        {
-            "price_time": dt.astimezone(timezone.utc).isoformat(),
-            "hub": HUB_NBP,
-            "price_eur_mwh": price,
-            "source": "EEX NGP NBP",
-            "fetched_at": fetched_at,
-        }
-        for dt, price, _ in backfill_rows
-    ]
+    payload = [{
+        "price_time": d.isoformat(),
+        "hub": HUB_NBP,
+        "price_eur_mwh": px,
+        "source": "Stooq UK Natural Gas ICE NF.F",
+        "fetched_at": fetched_at,
+    }]
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
         await upsert_gas_prices_http(http, payload)
 
-    latest_dt, latest_price, _latest_status = max(backfill_rows, key=lambda x: x[0])
-    gas_day_label = latest_dt.strftime("%Y-%m-%d")
-
+    gas_day_label = d.strftime("%Y-%m-%d")
     logger.info(
-        "nbp_cycle: NBP NGP = %.2f for gas day %s (%s)",
-        latest_price,
+        "nbp_cycle: NBP = %.3f for gas day %s (%s)",
+        px,
         gas_day_label,
         f"upserted {len(payload)} rows",
     )
