@@ -1210,12 +1210,24 @@ async def fetch_ttf_price() -> None:
     async with httpx.AsyncClient(follow_redirects=True) as http:
         await upsert_gas_prices_http(http, payload)
 
-    latest_dt, latest_price, _latest_status = max(backfill_rows, key=lambda x: x[0])
-    gas_day_label = latest_dt.strftime("%Y-%m-%d")
+    selected: tuple[datetime, float, str] | None = None
+    today_rows = [t for t in backfill_rows if t[0].date() == today_utc]
+    if today_rows:
+        today_final = [t for t in today_rows if t[2] == "Final NGP"]
+        selected = max(today_final or today_rows, key=lambda x: x[0])
+    if selected is None:
+        final_rows = [t for t in backfill_rows if t[2] == "Final NGP"]
+        if final_rows:
+            selected = max(final_rows, key=lambda x: x[0])
+    if selected is None:
+        selected = max(backfill_rows, key=lambda x: x[0])
+
+    selected_dt, selected_price, _selected_status = selected
+    gas_day_label = selected_dt.strftime("%Y-%m-%d")
 
     logger.info(
         "ttf_cycle: TTF NGP = €%.2f/MWh for gas day %s (%s)",
-        latest_price,
+        selected_price,
         gas_day_label,
         f"upserted {len(payload)} rows",
     )
@@ -1786,10 +1798,6 @@ async def calculate_physical_premium() -> None:
             "gbp_eur_rate": gbp_eur_rate,
             "srmc_gbp_mwh": srmc_gbp_mwh,
             "remit_mw_lost": remit_total_mw,
-            "remit_planned_mw": remit_planned_mw,
-            "remit_unplanned_mw": remit_unplanned_mw,
-            "remit_mw_planned_active": remit_planned_mw,
-            "remit_mw_unplanned_active": remit_unplanned_mw,
             "regime": premium_regime,
             "source": PHYSICAL_PREMIUM_SOURCE,
         }
