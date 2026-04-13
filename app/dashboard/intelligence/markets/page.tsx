@@ -301,6 +301,7 @@ export default function MarketsPage() {
   const [todayRows, setTodayRows] = useState<MidRow[]>([]);
   const [todayDateStr, setTodayDateStr] = useState<string>(utcTodayStr());
   const [gasRow, setGasRow] = useState<GasRow | null>(null);
+  const [gasRows7d, setGasRows7d] = useState<GasRow[]>([]);
   const [storageLatest, setStorageLatest] = useState<StorageRow[]>([]);
   const [storageHistory, setStorageHistory] = useState<StorageRow[]>([]);
   const [tapeRows, setTapeRows] = useState<MidRow[]>([]);
@@ -350,6 +351,7 @@ export default function MarketsPage() {
           mpRes,
           todayRes,
           gasRes,
+          gasHistRes,
           stRes,
           stHistRes,
           tapeRes,
@@ -376,6 +378,12 @@ export default function MarketsPage() {
             .order("price_time", { ascending: false })
             .limit(1)
             .maybeSingle(),
+          supabase
+            .from("gas_prices")
+            .select("price_eur_mwh, price_time, fetched_at")
+            .eq("hub", "TTF")
+            .gte("price_time", `${sevenAgo}T00:00:00.000Z`)
+            .order("price_time", { ascending: true }),
           supabase
             .from("storage_levels")
             .select(
@@ -503,6 +511,26 @@ export default function MarketsPage() {
           } else {
             setGasRow(null);
           }
+        }
+
+        if (gasHistRes.error) {
+          setGasRows7d([]);
+        } else {
+          setGasRows7d(
+            ((gasHistRes.data ?? []) as Record<string, unknown>[])
+              .map((g) => {
+                const pe = parseNum(g.price_eur_mwh);
+                const pt = g.price_time != null ? String(g.price_time) : "";
+                if (pe == null || pt === "") return null;
+                return {
+                  price_eur_mwh: pe,
+                  price_time: pt,
+                  fetched_at:
+                    g.fetched_at != null ? String(g.fetched_at) : null,
+                } satisfies GasRow;
+              })
+              .filter((v): v is GasRow => v != null),
+          );
         }
 
         if (wxRes.error) {
@@ -698,12 +726,19 @@ export default function MarketsPage() {
   }, [todayRows]);
 
   const sparkMerit7d = useMemo(() => {
-    if (ttfEur == null || marketPrices7d.length === 0) return null;
+    if (marketPrices7d.length === 0 || gasRows7d.length === 0) return null;
+    const gasByDay: Record<string, number> = {};
+    for (const g of gasRows7d) {
+      const day = g.price_time.slice(0, 10);
+      gasByDay[day] = g.price_eur_mwh;
+    }
     const rows = dedupeMidBySettlement(marketPrices7d);
     let inMerit = 0;
     let outMerit = 0;
     for (const r of rows) {
-      const sp = sparkSpreadGbpMwh(r.price_gbp_mwh, ttfEur);
+      const ttf = gasByDay[r.price_date];
+      if (!Number.isFinite(ttf)) continue;
+      const sp = sparkSpreadGbpMwh(r.price_gbp_mwh, ttf);
       if (sp > 0) inMerit += 1;
       else outMerit += 1;
     }
@@ -711,7 +746,7 @@ export default function MarketsPage() {
     const pctInMerit =
       total > 0 ? Math.round((inMerit / total) * 1000) / 10 : null;
     return { inMerit, outMerit, total, pctInMerit };
-  }, [marketPrices7d, ttfEur]);
+  }, [marketPrices7d, gasRows7d]);
 
   const bucketRows = todayRows;
 
@@ -721,10 +756,25 @@ export default function MarketsPage() {
   const overnightAvg = avgPriceForSpRange(bucketRows, [1, 2, 3, 4, 5, 6, 7, 8]);
 
   const sparkHistoryData = useMemo(() => {
-    if (ttfEur == null) return [];
+    if (gasRows7d.length === 0) return [];
+    const gasByDay: Record<string, number> = {};
+    for (const g of gasRows7d) {
+      const day = g.price_time.slice(0, 10);
+      gasByDay[day] = g.price_eur_mwh;
+    }
     const series = [...midRows].reverse();
     return series.map((r) => {
-      const sp = sparkSpreadGbpMwh(r.price_gbp_mwh, ttfEur);
+      const ttfForDay = gasByDay[r.price_date];
+      if (!Number.isFinite(ttfForDay)) {
+        return {
+          sp: r.settlement_period,
+          minutes: spToMinutesFromMidnight(r.settlement_period),
+          spark: null,
+          sparkPos: null,
+          sparkNeg: null,
+        };
+      }
+      const sp = sparkSpreadGbpMwh(r.price_gbp_mwh, ttfForDay);
       return {
         sp: r.settlement_period,
         minutes: spToMinutesFromMidnight(r.settlement_period),
@@ -733,7 +783,7 @@ export default function MarketsPage() {
         sparkNeg: sp < 0 ? sp : null,
       };
     });
-  }, [midRows, ttfEur]);
+  }, [midRows, gasRows7d]);
 
   const storageByLoc = useMemo(() => {
     const o: Record<string, StorageRow> = {};

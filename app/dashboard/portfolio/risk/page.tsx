@@ -20,6 +20,7 @@ const sectionLabel =
 const BRAND_GREEN = "#1D6B4E";
 const TERRACOTTA = "#8B3A3A";
 const AMBER = "#D97706";
+const HISTORICAL_GBP_PER_EUR = 0.86;
 
 type PositionRow = {
   id: string;
@@ -123,7 +124,6 @@ const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
   gasPricesByDay: Record<string, number>,
-  gbpEurRate: number,
 ): DailyPnL[] => {
   const dates = Object.keys(powerPricesByDay).sort();
   const result: DailyPnL[] = [];
@@ -142,12 +142,14 @@ const calculateDailyPnL = (
         const currPrice = powerPricesByDay[currDate] ?? 0;
         dayPnL += (currPrice - prevPrice) * size * direction;
       } else if (pos.market === "TTF") {
-        const prevPrice = (gasPricesByDay[prevDate] ?? 0) * gbpEurRate;
-        const currPrice = (gasPricesByDay[currDate] ?? 0) * gbpEurRate;
+        const prevPrice = (gasPricesByDay[prevDate] ?? 0) * HISTORICAL_GBP_PER_EUR;
+        const currPrice = (gasPricesByDay[currDate] ?? 0) * HISTORICAL_GBP_PER_EUR;
         dayPnL += (currPrice - prevPrice) * size * direction;
       } else if (pos.market === "NBP") {
-        const prevNbp = ((gasPricesByDay[prevDate] ?? 0) * gbpEurRate) / 2.931 * 100;
-        const currNbp = ((gasPricesByDay[currDate] ?? 0) * gbpEurRate) / 2.931 * 100;
+        const prevNbp =
+          ((gasPricesByDay[prevDate] ?? 0) * HISTORICAL_GBP_PER_EUR) / 2.931 * 10;
+        const currNbp =
+          ((gasPricesByDay[currDate] ?? 0) * HISTORICAL_GBP_PER_EUR) / 2.931 * 10;
         dayPnL += ((currNbp - prevNbp) * size) / 100 * direction;
       }
     }
@@ -306,8 +308,8 @@ export default function RiskPage() {
   }, [gasPrices]);
 
   const dailyPnLSeries = useMemo(
-    () => calculateDailyPnL(positions, powerPricesByDay, gasPricesByDay, gbpEurRate),
-    [positions, powerPricesByDay, gasPricesByDay, gbpEurRate],
+    () => calculateDailyPnL(positions, powerPricesByDay, gasPricesByDay),
+    [positions, powerPricesByDay, gasPricesByDay],
   );
 
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
@@ -331,11 +333,11 @@ export default function RiskPage() {
 
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
-      const series = calculateDailyPnL([p], powerPricesByDay, gasPricesByDay, gbpEurRate);
+      const series = calculateDailyPnL([p], powerPricesByDay, gasPricesByDay);
       const worst = series.length > 0 ? series.reduce((min, d) => (d.pnl < min.pnl ? d : min), series[0]) : null;
       return { position: p, worst };
     });
-  }, [positions, powerPricesByDay, gasPricesByDay, gbpEurRate]);
+  }, [positions, powerPricesByDay, gasPricesByDay]);
 
   const sumIndividualVaRs = perPositionRisk.reduce(
     (sum, r) => sum + Math.abs(r.worst?.pnl ?? 0),
@@ -502,6 +504,9 @@ export default function RiskPage() {
             </div>
           </motion.div>
           <p className="text-xs text-ink-light text-right">EUR/GBP: {gbpEurRate.toFixed(4)} · via ECB</p>
+          <p className="text-xs text-ink-light text-right">
+            Historical VaR uses fixed EUR/GBP {HISTORICAL_GBP_PER_EUR.toFixed(2)} to avoid lookahead contamination.
+          </p>
 
           <section>
             <p className={sectionLabel}>Distribution</p>

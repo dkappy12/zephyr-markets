@@ -44,6 +44,7 @@ function optimiserQuality(input: {
   historicalScenarioCount: number;
   candidatePackageCount: number;
   fallbackUsed: boolean;
+  nbpProxyUsed: boolean;
 }): { quality: "high" | "medium" | "low"; warnings: string[] } {
   const warnings: string[] = [];
   if (input.fallbackUsed) {
@@ -51,6 +52,9 @@ function optimiserQuality(input: {
   }
   if (input.historicalScenarioCount < 20) {
     warnings.push("Historical scenario depth is below 20 days.");
+  }
+  if (input.nbpProxyUsed) {
+    warnings.push("NBP history unavailable for some dates; TTF-derived proxy applied.");
   }
   if (input.candidatePackageCount < 30) {
     warnings.push("Hedge search space is narrow; recommendations may be unstable.");
@@ -119,7 +123,7 @@ export async function GET(req: Request) {
       supabase
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
-        .eq("hub", "TTF")
+        .in("hub", ["TTF", "NBP"])
         .gte("price_time", `${sinceDate}T00:00:00`)
         .order("price_time", { ascending: true }),
     ]);
@@ -148,16 +152,24 @@ export async function GET(req: Request) {
 
     const ttfAgg: Record<string, { sum: number; count: number }> = {};
     const nbpAgg: Record<string, { sum: number; count: number }> = {};
+    let nbpProxyUsed = false;
     for (const row of gasRes.data ?? []) {
       const day = parseDateOnly(row.price_time);
       const ttf = parseNum(row.price_eur_mwh);
+      const hub = String(row.hub ?? "").toUpperCase();
       if (!day || ttf == null) continue;
-      addDailySample(ttfAgg, day, ttf);
-      addDailySample(nbpAgg, day, ttfEurMwhToNbpPth(ttf, gbpPerEur));
+      if (hub === "TTF") addDailySample(ttfAgg, day, ttf);
+      if (hub === "NBP") addDailySample(nbpAgg, day, ttf);
     }
     const powerByDay = finaliseDailyAverage(powerAgg);
     const ttfByDay = finaliseDailyAverage(ttfAgg);
     const nbpByDay = finaliseDailyAverage(nbpAgg);
+    for (const [day, ttf] of Object.entries(ttfByDay)) {
+      if (nbpByDay[day] == null) {
+        nbpByDay[day] = ttfEurMwhToNbpPth(ttf, gbpPerEur);
+        nbpProxyUsed = true;
+      }
+    }
 
     const scenarios = [
       ...buildHistoricalScenarios({
@@ -176,11 +188,13 @@ export async function GET(req: Request) {
       confidence,
       maxTrades,
       includeStress,
+      nbpProxyUsed,
     });
     const quality = optimiserQuality({
       historicalScenarioCount: result.diagnostics.historicalScenarioCount,
       candidatePackageCount: result.diagnostics.candidatePackageCount,
       fallbackUsed: result.diagnostics.fallbackUsed,
+      nbpProxyUsed: result.diagnostics.nbpProxyUsed,
     });
 
     return NextResponse.json({

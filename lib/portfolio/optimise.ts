@@ -64,6 +64,7 @@ export type OptimiseResult = {
     stressScenarioCount: number;
     fallbackUsed: boolean;
     candidatePackageCount: number;
+    nbpProxyUsed: boolean;
   };
 };
 
@@ -339,6 +340,7 @@ export function optimisePortfolio(input: {
   confidence: number;
   maxTrades: number;
   includeStress: boolean;
+  nbpProxyUsed?: boolean;
 }): OptimiseResult {
   const {
     positions,
@@ -348,6 +350,7 @@ export function optimisePortfolio(input: {
     confidence,
     maxTrades,
     includeStress,
+    nbpProxyUsed = false,
   } = input;
 
   const historicalScenarios = scenarios.filter((s) => s.source === "historical");
@@ -449,6 +452,7 @@ export function optimisePortfolio(input: {
       stressScenarioCount: stressOnlyScenarios.length,
       fallbackUsed,
       candidatePackageCount: combos.length,
+      nbpProxyUsed,
     },
   };
 }

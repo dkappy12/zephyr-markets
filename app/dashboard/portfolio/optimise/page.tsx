@@ -50,6 +50,7 @@ type ApiResponse = {
     stressScenarioCount: number;
     fallbackUsed: boolean;
     candidatePackageCount: number;
+    nbpProxyUsed: boolean;
   };
 };
 
