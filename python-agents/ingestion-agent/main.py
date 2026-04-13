@@ -1205,7 +1205,13 @@ async def fetch_ttf_price() -> None:
             "fetched_at": fetched_at,
         }
         for dt, price, _ in backfill_rows
+        if price is not None and price > 0.1
     ]
+    logger.debug(
+        "ttf_cycle: filtered payload to %d rows with price > 0.1 (from %d backfill rows)",
+        len(payload),
+        len(backfill_rows),
+    )
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
         await upsert_gas_prices_http(http, payload)
