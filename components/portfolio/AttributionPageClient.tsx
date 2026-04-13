@@ -371,7 +371,7 @@ export function AttributionPageClient() {
         .from("physical_premium")
         .select("wind_gw")
         .order("calculated_at", { ascending: false })
-        .limit(168),
+        .limit(2016),
       supabase
         .from("market_prices")
         .select("price_gbp_mwh")
@@ -603,7 +603,10 @@ export function AttributionPageClient() {
     windAttCal -
     gasAttCal -
     remitAttCal -
-    carbonAttCal;
+    carbonAttCal -
+    shapeAttCal -
+    demandAttCal -
+    interconnectorAttCal;
   const explainedPnl = totalPnl - residual;
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;

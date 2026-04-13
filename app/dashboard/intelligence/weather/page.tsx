@@ -388,31 +388,6 @@ export default function WeatherPage() {
     load().finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (wf168.length === 0) return;
-    console.log(
-      "solar_radiation sample:",
-      wf168.slice(0, 24).map((d) => ({
-        time: d.forecast_time,
-        radiation: d.solar_radiation,
-      })),
-    );
-    const pos = wf168
-      .map((r) => r.solar_radiation)
-      .filter((x): x is number => x != null && x > 0);
-    if (pos.length === 0) {
-      console.log(
-        "Solar radiation: all values zero or missing — check ingestion and future daytime hours",
-      );
-      return;
-    }
-    const maxR = Math.max(...pos);
-    console.log("Solar conversion: W/m² × 0.0167 → GW", {
-      maxR,
-      samplePeakGw: (maxR * SOLAR_RAD_TO_GW).toFixed(2),
-    });
-  }, [wf168]);
-
   const { hourly, solarRadiationUnavailable } = useMemo(() => {
     const pos = wf168
       .map((r) => r.solar_radiation)
