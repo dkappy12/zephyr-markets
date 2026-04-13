@@ -52,6 +52,40 @@ function parseWatchList(watchList: string | null): string[] {
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
 
+const bookTouchpointsLabelClass =
+  "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light";
+
+function formatDirectionLabel(direction: string): string {
+  const d = direction.trim().toLowerCase();
+  if (d === "long") return "Long";
+  if (d === "short") return "Short";
+  if (!d) return "";
+  return direction.charAt(0).toUpperCase() + direction.slice(1);
+}
+
+function formatSizeForTouchpointSummary(size: number, unit: string): string {
+  const u = unit.trim().toLowerCase();
+  const abs = Number.isFinite(size) ? Math.abs(size) : 0;
+  if (u === "therm" && abs >= 1000) {
+    return abs.toLocaleString("en-GB");
+  }
+  return String(abs);
+}
+
+/** One line for the footer: "Long 50 MW … · Short 25,000 therm …" */
+function personalisationSummaryLine(positions: OpenPosition[]): string {
+  return positions
+    .map((p) => {
+      const dir = formatDirectionLabel(p.direction);
+      const sz = formatSizeForTouchpointSummary(p.size, p.unit);
+      const unit = p.unit.trim();
+      const inst = p.instrument.trim();
+      return `${dir} ${sz} ${unit} ${inst}`.replace(/\s+/g, " ").trim();
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
  * Bare domains (e.g. indexbox.com/foo) must be https — otherwise the browser
  * treats them as paths on the current origin.
@@ -211,6 +245,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 }
 
 export default function BriefPage() {
+  // Example output: "Today's extreme softening conditions create direct headwinds for the long 50 MW GB Power Q3 2026 Baseload position entered at £89.50 — with the market trading £35/MWh above the physically-implied price, mean reversion risk is elevated. The short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 positions are well-positioned given renewable dominance suppressing gas demand; the TTF at €50/MWh with temperature-suppressed heating load supports the short gas bias."
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState<BriefRow | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
@@ -440,29 +475,41 @@ export default function BriefPage() {
         </section>
 
         <section>
-          <h2 className={sectionLabelClass}>Book touchpoints</h2>
-          <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
-            {bookTouchpointLoading ? (
-              <p className="text-sm italic leading-relaxed text-ink-light">
-                Personalising to your book...
-              </p>
-            ) : bookTouchpointText ? (
-              <p className="font-serif text-lg leading-relaxed text-ink">
+          <p className={bookTouchpointsLabelClass}>BOOK TOUCHPOINTS</p>
+          <h2 className="mt-2 font-serif text-xl text-ink">
+            How today&apos;s brief affects your book
+          </h2>
+          {bookTouchpointLoading ? (
+            <div className="mt-3 space-y-2">
+              <div className="h-4 w-full rounded bg-ivory-dark animate-pulse" />
+              <div className="h-4 w-3/4 rounded bg-ivory-dark animate-pulse" />
+              <div className="h-4 w-1/2 rounded bg-ivory-dark animate-pulse" />
+            </div>
+          ) : bookTouchpointText ? (
+            <>
+              <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
                 {bookTouchpointText}
               </p>
-            ) : positions.length === 0 ? (
-              <p className="text-sm italic leading-relaxed text-ink-light">
-                Import positions in the Book tab to see how today&apos;s physical
-                signals affect your specific exposures.
-              </p>
-            ) : (
-              <p className="text-sm italic leading-relaxed text-ink-light">
-                A personalised read for your open positions is unavailable right
-                now. Check the Book tab for your live lines — the sections above
-                still reflect today&apos;s physical run.
-              </p>
-            )}
-          </div>
+              <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3">
+                <p className="text-[11px] text-ink-light">
+                  Personalised to: {personalisationSummaryLine(positions)}
+                </p>
+              </div>
+            </>
+          ) : positions.length === 0 ? (
+            <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+              Import your positions in the Book tab to see a personalised read of
+              how today&apos;s physical drivers affect your specific exposures. The
+              model maps each signal — wind, gas, REMIT, carbon — to your open
+              positions and tells you what it means for your P&amp;L.
+            </p>
+          ) : (
+            <p className="mt-3 text-sm italic leading-relaxed text-ink-light">
+              A personalised read for your open positions is unavailable right
+              now. Check the Book tab for your live lines — the sections above
+              still reflect today&apos;s physical run.
+            </p>
+          )}
         </section>
 
         <div className="border-t-[0.5px] border-ivory-border pt-8">
