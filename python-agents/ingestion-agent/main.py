@@ -1537,28 +1537,6 @@ def _wind_price_suppression_gbp_mwh(wind_gw: float) -> float:
     return suppression
 
 
-def _remit_adder_per_gw(available_margin_gw: float) -> float:
-    """
-    Price adder per GW of REMIT capacity lost, based on GB LoLP x VoLL framework.
-    VoLL = £6,000/MWh (Ofgem). De-rated margin for winter 2025/26 = 6.1 GW.
-    Research basis: GB Reserve Scarcity Price activation, January 2025 event (£5,750/MWh
-    at 1.7 GW shortfall), Ward et al. (2019) merit order steepening.
-    """
-    if available_margin_gw > 10:
-        return 1.5    # Comfortable: pure merit order effect
-    if available_margin_gw > 8:
-        return 3.0    # Adequate: modest tightening premium
-    if available_margin_gw > 6:
-        return 6.0    # Watch: balancing mechanism premium emerging
-    if available_margin_gw > 4:
-        return 12.0   # Tight: EMN territory, significant BM premium
-    if available_margin_gw > 2:
-        return 30.0   # Very tight: Reserve Scarcity Price activation range
-    if available_margin_gw > 0:
-        return 100.0  # Critical: approaching VoLL, January 2025 territory
-    return 200.0      # Deficit: extreme scarcity
-
-
 async def _fetch_weather_wind_closest_now(
     client: httpx.AsyncClient,
 ) -> tuple[float | None, str | None]:
@@ -1803,38 +1781,32 @@ async def calculate_physical_premium() -> None:
 
         implied_price_gbp_mwh: float | None = None
         premium_regime: str | None = None
-        # Only unplanned outages drive the scarcity adder — planned outages are
-        # already absorbed into day-ahead scheduling and forward prices.
-        # Planned outages get a small fixed coefficient (£1.5/MWh per GW).
         unplanned_gw = remit_unplanned_mw / 1000.0
-        planned_gw = remit_planned_mw / 1000.0
         remit_gw = remit_total_mw / 1000.0
-
-        # Available margin uses total REMIT to reflect true system capacity
-        available_margin_gw = THERMAL_CAPACITY_GW - residual_demand_gw - remit_gw
-
-        # Scarcity adder applies only to unplanned capacity
-        adder_per_gw = _remit_adder_per_gw(available_margin_gw)
-        unplanned_adder = unplanned_gw * adder_per_gw
-        planned_adder = planned_gw * 1.5
-        remit_price_adder = unplanned_adder + planned_adder
+        # Unplanned REMIT shifts effective residual demand upward.
+        # Planned REMIT is already reflected in day-ahead scheduling and market prices.
+        # Research basis: Hagfors & Bunn (2016), Ghelasi & Ziel (2025) — REMIT treated
+        # as a supply-side shift moving the system up the merit order curve, not a
+        # separate scarcity adder.
+        effective_rd = min(residual_demand_gw + unplanned_gw, 42.0)
+        # Cap at 42 GW — above this the market mechanism breaks down and spot prices
+        # are dominated by emergency measures outside the model's scope.
 
         rd = residual_demand_gw
-        rd_premium_mwh = _residual_demand_premium_gbp_mwh(rd)
+        rd_premium_mwh = _residual_demand_premium_gbp_mwh(effective_rd)
         wind_suppression_mwh = _wind_price_suppression_gbp_mwh(wg)
         if rd < 15.0:
             premium_regime = "renewable"
             renewable_surplus_gw = 15.0 - rd
             implied = -2.0 * renewable_surplus_gw + 10.0
-            implied = implied + remit_price_adder
             logger.debug(
-                "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
-                "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                "premium_cycle model: rd=%.1fGW unplanned_remit=%.1fGW effective_rd=%.1fGW "
+                "wind_suppression=£%.2f/MWh rd_premium=£%.2f/MWh",
                 rd,
-                wind_suppression_mwh,
-                rd_premium_mwh,
-                remit_price_adder,
-                available_margin_gw,
+                unplanned_gw,
+                effective_rd,
+                _wind_price_suppression_gbp_mwh(wg),
+                _residual_demand_premium_gbp_mwh(effective_rd),
             )
             implied_price_gbp_mwh = max(implied, -60.0)
         elif rd < 22.0:
@@ -1851,15 +1823,14 @@ async def calculate_physical_premium() -> None:
                     renewable_price * (1.0 - transition_factor)
                     + gas_price * transition_factor
                 )
-                implied = implied + remit_price_adder
                 logger.debug(
-                    "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
-                    "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                    "premium_cycle model: rd=%.1fGW unplanned_remit=%.1fGW effective_rd=%.1fGW "
+                    "wind_suppression=£%.2f/MWh rd_premium=£%.2f/MWh",
                     rd,
-                    wind_suppression_mwh,
-                    rd_premium_mwh,
-                    remit_price_adder,
-                    available_margin_gw,
+                    unplanned_gw,
+                    effective_rd,
+                    _wind_price_suppression_gbp_mwh(wg),
+                    _residual_demand_premium_gbp_mwh(effective_rd),
                 )
                 implied_price_gbp_mwh = max(implied, -60.0)
         else:
@@ -1870,15 +1841,14 @@ async def calculate_physical_premium() -> None:
                     + rd_premium_mwh
                     - wind_suppression_mwh
                 )
-                implied = implied + remit_price_adder
                 logger.debug(
-                    "premium_cycle model: rd=%.1fGW wind_suppression=£%.2f/MWh "
-                    "rd_premium=£%.2f/MWh remit_adder=£%.2f/MWh available_margin=%.1fGW",
+                    "premium_cycle model: rd=%.1fGW unplanned_remit=%.1fGW effective_rd=%.1fGW "
+                    "wind_suppression=£%.2f/MWh rd_premium=£%.2f/MWh",
                     rd,
-                    wind_suppression_mwh,
-                    rd_premium_mwh,
-                    remit_price_adder,
-                    available_margin_gw,
+                    unplanned_gw,
+                    effective_rd,
+                    _wind_price_suppression_gbp_mwh(wg),
+                    _residual_demand_premium_gbp_mwh(effective_rd),
                 )
                 implied_price_gbp_mwh = max(implied, -60.0)
 
