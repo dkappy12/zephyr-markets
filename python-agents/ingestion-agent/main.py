@@ -129,7 +129,12 @@ THERMAL_CAPACITY_GW = 45.0
 WIND_MS_TO_GW = 17.0 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
-PREMIUM_MODEL_VERSION = "v1.0.0"
+# v1.0.0 — initial hand-tuned coefficients
+# v1.1.0 — 2026-04-13: piecewise RD premium recalibrated from observed market data,
+#           demand baseline corrected for spring/summer conditions,
+#           REMIT restructured as demand-side shift (Hagfors & Bunn 2016),
+#           wind suppression made piecewise (ECIU 2024/2025)
+PREMIUM_MODEL_VERSION = "v1.1.0"
 
 
 def demand_baseline_gw_utc(hour: int) -> float:
