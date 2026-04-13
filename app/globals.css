@@ -57,3 +57,17 @@ body {
 .animate-ticker-marquee {
   animation: ticker-marquee 48s linear infinite;
 }
+
+@keyframes live-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-live-dot-pulse {
+  animation: live-dot-pulse 2s ease-in-out infinite;
+}

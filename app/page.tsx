@@ -2,7 +2,7 @@
 
 import { createBrowserClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
-import { formatInTimeZone } from "date-fns-tz";
+import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -20,7 +20,10 @@ const fadeUp = {
   }),
 };
 
-const tags = ["GB Power · N2EX", "European Gas · TTF/NBP", "REMIT · Live outages"] as const;
+const briefSectionLabel =
+  "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light";
+const bookTouchpointsLabel =
+  "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light";
 
 const PLAN_COMPARISON_ROWS: {
   feature: string;
@@ -100,17 +103,13 @@ const PLAN_COMPARISON_ROWS: {
 
 export default function Home() {
   const [tickerItems, setTickerItems] = useState<string[] | null>(null);
-  const [brief, setBrief] = useState<{
-    text: string;
-    generatedAt: string | null;
-  } | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    async function loadLandingData() {
-      const [physRes, powerRes, gasRes, signalRes, briefRes] = await Promise.all([
+    async function loadTicker() {
+      const [physRes, powerRes, gasRes, signalRes] = await Promise.all([
         supabase
           .from("physical_premium")
           .select("normalised_score,direction")
@@ -135,34 +134,7 @@ export default function Home() {
           .from("signals")
           .select("*", { count: "exact", head: true })
           .gte("created_at", since),
-        supabase
-          .from("brief_entries")
-          .select("executive_summary,overnight_summary,generated_at,created_at")
-          .order("generated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
       ]);
-
-      if (briefRes.data && !briefRes.error) {
-        const executive = briefRes.data.executive_summary;
-        const overnight = briefRes.data.overnight_summary;
-        setBrief({
-          text:
-            (typeof executive === "string" && executive.trim() !== ""
-              ? executive
-              : typeof overnight === "string"
-                ? overnight
-                : "") ?? "",
-          generatedAt:
-            typeof briefRes.data.generated_at === "string"
-              ? briefRes.data.generated_at
-              : typeof briefRes.data.created_at === "string"
-                ? briefRes.data.created_at
-                : null,
-        });
-      } else {
-        setBrief(null);
-      }
 
       if (physRes.error || powerRes.error || gasRes.error || signalRes.error) {
         setTickerItems(null);
@@ -187,87 +159,108 @@ export default function Home() {
       ]);
     }
 
-    void loadLandingData();
+    void loadTicker();
   }, []);
-
-  let briefTimeLabel: string | null = null;
-  if (brief?.generatedAt) {
-    try {
-      briefTimeLabel = formatInTimeZone(
-        new Date(brief.generatedAt),
-        "UTC",
-        "EEEE d MMMM · HH:mm 'UTC'",
-      );
-    } catch {
-      briefTimeLabel = null;
-    }
-  }
 
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
       <section className="relative overflow-hidden border-b-[0.5px] border-ivory-border">
-        <div className="pointer-events-none absolute inset-0 z-0 min-h-[420px]">
-          <TopoBackground className="h-full w-full min-h-[420px]" lineOpacity={0.25} />
+        <div className="pointer-events-none absolute inset-0 z-0 min-h-[560px]">
+          <TopoBackground className="h-full w-full min-h-[560px]" lineOpacity={0.25} />
         </div>
-        <div className="relative z-10 mx-auto max-w-[1100px] px-4 pb-16 pt-[120px] sm:px-6 sm:pb-24 sm:pt-[128px] lg:px-8">
+        <div className="pointer-events-none absolute bottom-0 right-0 z-[1] opacity-[0.14] sm:opacity-[0.18]">
+          <TriangulationMesh width={280} height={360} opacity={0.22} strokeWidth={0.9} />
+        </div>
+        <div className="relative z-10 mx-auto max-w-[1100px] px-4 pb-16 pt-[100px] sm:px-6 sm:pb-24 sm:pt-[112px] lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
             <motion.h1
               custom={0}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="font-serif text-4xl font-medium leading-[1.08] tracking-tight text-ink sm:text-5xl lg:text-[3.25rem]"
+              className="font-serif text-[2.125rem] font-medium leading-[1.1] tracking-tight text-ink sm:text-5xl lg:text-[3.15rem]"
             >
-              Know the physical picture before markets open.
+              The physical world, translated into financial intelligence.
             </motion.h1>
             <motion.p
               custom={1}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-ink-mid sm:text-lg"
+              className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-ink-mid sm:text-lg"
             >
-              Zephyr is a real-time intelligence platform for GB power and
-              European gas traders. Physical premium score, REMIT signal feed,
-              and an AI-generated morning brief - updated every 5 minutes.
+              Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief —
+              sized to your book.
             </motion.p>
-            <motion.div
-              custom={2}
-              variants={fadeUp}
-              initial="hidden"
-              animate="show"
-              className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4"
-            >
-              <Link
-                href="/signup"
-                className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] bg-ink px-6 text-sm font-semibold tracking-normal text-ivory transition-colors duration-200 hover:bg-[#1f1d1a]"
-              >
-                Start free
-              </Link>
-              <Link
-                href="/dashboard/brief"
-                className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] border border-ink bg-transparent px-6 text-sm font-semibold tracking-normal text-ink transition-colors duration-200 hover:bg-ivory-dark/40"
-              >
-                View today&apos;s brief
-              </Link>
-            </motion.div>
-            <motion.div
-              custom={3}
-              variants={fadeUp}
-              initial="hidden"
-              animate="show"
-              className="mt-12 flex flex-wrap items-center justify-center gap-2"
-            >
-              {tags.map((t) => (
-                <span
-                  key={t}
-                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-3 py-1.5 font-sans text-[9px] font-medium uppercase tracking-[0.12em] text-ink"
-                >
-                  {t}
-                </span>
-              ))}
-            </motion.div>
           </div>
+
+          <motion.div
+            custom={2}
+            variants={fadeUp}
+            initial="hidden"
+            animate="show"
+            className="mx-auto mt-12 max-w-lg"
+          >
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ink p-5 text-ivory shadow-[0_24px_48px_-24px_rgba(44,42,38,0.45)] sm:p-6">
+              <div className="flex items-start justify-between gap-3 border-b border-ivory/15 pb-4">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-bull animate-live-dot-pulse"
+                    aria-hidden
+                  />
+                  <span className="font-sans text-[9px] font-semibold uppercase tracking-[0.2em] text-ivory/80">
+                    Physical premium score
+                  </span>
+                </div>
+                <span className="font-mono text-[10px] tabular-nums tracking-wide text-ivory/70">
+                  06:42 GMT
+                </span>
+              </div>
+              <div className="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <span className="font-serif text-5xl font-medium leading-none tracking-tight text-ivory sm:text-[3.25rem]">
+                  +4.8
+                </span>
+                <span className="font-sans text-xs font-semibold uppercase tracking-[0.18em] text-gold">
+                  Firming
+                </span>
+              </div>
+              <div className="mt-6 space-y-2 font-mono text-[11px] leading-relaxed tabular-nums text-ivory/85 sm:text-xs">
+                <p>
+                  Implied £118.40 <span className="text-ivory/40">·</span> N2EX £101.12
+                </p>
+                <p>
+                  SRMC £89.50 <span className="text-ivory/40">·</span> Wind 8.2 GW
+                </p>
+              </div>
+              <div className="mt-5 border-t border-ivory/15 pt-4 font-mono text-[10px] leading-relaxed text-ivory/70 sm:text-[11px]">
+                <p>3,240 MW unplanned REMIT active</p>
+                <p className="mt-1.5 text-ivory/55">
+                  Regime: transitional → gas-dominated
+                </p>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            custom={3}
+            variants={fadeUp}
+            initial="hidden"
+            animate="show"
+            className="mx-auto mt-10 flex max-w-lg flex-col items-stretch justify-center gap-3 sm:flex-row sm:justify-center sm:gap-4"
+          >
+            <Link
+              href="/signup"
+              className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] bg-ink px-6 text-sm font-semibold tracking-normal text-ivory ring-1 ring-ivory/10 transition-colors duration-200 hover:bg-[#1f1d1a]"
+            >
+              Start free
+            </Link>
+            <Link
+              href="/dashboard/brief"
+              className="inline-flex h-11 min-w-[180px] items-center justify-center rounded-[4px] border border-ink bg-ivory px-6 text-sm font-semibold tracking-normal text-ink transition-colors duration-200 hover:bg-ivory-dark/40"
+            >
+              View today&apos;s brief
+            </Link>
+          </motion.div>
         </div>
       </section>
 
@@ -283,54 +276,112 @@ export default function Home() {
         </div>
       ) : null}
 
-      <section className="border-b-[0.5px] border-ivory-border py-16 sm:py-20">
-        <div className="mx-auto max-w-[900px] px-4 sm:px-6 lg:px-8">
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            This morning&apos;s brief
-          </p>
-          {brief?.text ? (
-            <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
-              <blockquote className="border-l-2 border-[#1D6B4E] pl-4 font-serif text-lg leading-relaxed text-ink">
-                {brief.text}
-              </blockquote>
-              <p className="mt-4 text-xs text-ink-light">
-                {briefTimeLabel ?? "—"}
-              </p>
-              <Link
-                href="/dashboard/brief"
-                className="mt-3 inline-block text-sm font-medium text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
-              >
-                Read full brief →
-              </Link>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
-              <p className="italic text-ink-mid">
-                The morning brief publishes daily at 06:00 UTC.
-              </p>
-            </div>
-          )}
+      <section className="border-b-[0.5px] border-ivory-border py-16 sm:py-24">
+        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{ duration: 0.45 }}
+          >
+            <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
+              Every REMIT notice. Scored. In plain English.
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
+              Unplanned baseload, planned maintenance, interconnector derates — the
+              same feed you get in-product, with MW impact and a desk-ready read.
+            </p>
+          </motion.div>
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            <LandingSignalCard
+              meta="UNPLANNED · HIGH · 645 MW"
+              title="T_DRAXX-4 · Drax Power Station Unit 4"
+              detail="Unavailable from 13 Apr 06:00 — return unknown"
+              implication="645 MW of baseload removed without notice. Tightens residual demand by ~1.5 GW when wind drops below 8 GW. Watch GB Power front-month."
+              severity="high"
+              assetLabel="Other"
+            />
+            <LandingSignalCard
+              meta="PLANNED · MEDIUM · 920 MW"
+              title="T_MRWD-1 · Mereworth Gas Turbine"
+              detail="Maintenance outage 14–22 Apr"
+              implication="Scheduled peaker maintenance. Market has priced this — no immediate action unless unplanned extension."
+              severity="medium"
+              assetLabel="CCGT"
+            />
+            <LandingSignalCard
+              meta="INTERCONNECTOR · HIGH · 1,000 MW"
+              title="IFA1 · France–GB Interconnector"
+              detail="Reduced capacity from 2,000 MW to 1,000 MW"
+              implication="Half of IFA1 flow removed. With French nuclear at 72% availability, this reduces import optionality during peak demand periods."
+              severity="high"
+              accent="interconnector"
+              assetLabel="Interconnector"
+            />
+          </div>
         </div>
       </section>
 
-      <section className="border-b-[0.5px] border-ivory-border py-24 sm:py-32">
+      <section className="border-b-[0.5px] border-ivory-border bg-card/80 py-16 sm:py-24">
+        <div className="mx-auto max-w-[720px] px-4 sm:px-6 lg:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{ duration: 0.45 }}
+            className="text-center"
+          >
+            <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
+              The session ahead. In your inbox by 06:00.
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
+              Same structure as the live brief: drivers first, book second.
+            </p>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{ duration: 0.45, delay: 0.05 }}
+            className="mt-10 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8"
+          >
+            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
+              Morning brief · 06:00 GMT
+            </p>
+            <div className="mt-8 space-y-8">
+              <section>
+                <h3 className={briefSectionLabel}>Overnight summary</h3>
+                <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
+                  Physical premium model shows moderate firming with a normalised
+                  score of +4.8, as market prices at £101.12/MWh sit £17.28/MWh
+                  below the physically-implied £118.40/MWh. Wind generation at 8.2
+                  GW with solar adding 1.1 GW drives residual demand to 22.4 GW.
+                  Key overnight REMIT signal: Drax Unit 4&apos;s unplanned 645 MW
+                  outage continuing through multiple periods.
+                </p>
+              </section>
+              <section>
+                <p className={bookTouchpointsLabel}>BOOK TOUCHPOINTS</p>
+                <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
+                  The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
+                  well-supported — today&apos;s physical conditions suggest the
+                  market is underpricing tightness risk by £17/MWh. The short
+                  25,000 therm NBP Winter 2026 is correctly positioned given
+                  temperature-suppressed demand; TTF at €50/MWh with weak heating
+                  load supports the bias.
+                </p>
+              </section>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      <section className="border-b-[0.5px] border-ivory-border py-14 sm:py-20">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-10 md:grid-cols-3 md:gap-0 md:divide-x-[0.5px] md:divide-ivory-border">
-            <OutcomeColumn
-              title="Know what moved overnight"
-              body="The morning brief synthesises REMIT outages, gas moves, and wind forecasts into a 200-word trader read. Published at 06:00 UTC before GB markets open."
-              className="md:pr-8"
-            />
-            <OutcomeColumn
-              title="See which outages matter to your book"
-              body="The signal feed parses every REMIT notice, classifies it by asset type and severity, and tells you the market implication in plain English."
-              className="md:px-8"
-            />
-            <OutcomeColumn
-              title="Understand where the market is vs fundamentals"
-              body="The physical premium score compares the N2EX day-ahead price against a CCGT-anchored SRMC model updated every 5 minutes. Know when the market is mispriced before you trade."
-              className="md:pl-8"
-            />
+          <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
+            <ProductStat value="5 min" label="Premium score refresh" />
+            <ProductStat value="06:00 GMT" label="Morning brief, every day" />
+            <ProductStat value="48 SP" label="Settlement periods tracked daily" />
           </div>
         </div>
       </section>
@@ -338,12 +389,10 @@ export default function Home() {
       <section id="pricing" className="py-16 sm:py-20">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-xl text-center">
-            <h2 className="font-serif text-3xl text-ink sm:text-4xl">
-              Pricing
-            </h2>
+            <h2 className="font-serif text-3xl text-ink sm:text-4xl">Pricing</h2>
             <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-              Start on delayed data. Upgrade when you need real time and the
-              full market set.
+              Start on delayed data. Upgrade when you need real time and the full
+              market set.
             </p>
           </div>
           <div className="mt-12 grid gap-6 md:grid-cols-3">
@@ -363,7 +412,7 @@ export default function Home() {
               cta="Get Pro"
               href="/signup?plan=pro"
               emphasis
-              footnote="Stripe integration coming soon — sign up now to reserve your place."
+              footnote="Reserve your place."
             />
             <PricingCard
               name="Team"
@@ -373,7 +422,7 @@ export default function Home() {
               cta="Get Team"
               href="/signup?plan=team"
               emphasis={false}
-              footnote="Stripe integration coming soon — sign up now to reserve your place."
+              footnote="Reserve your place."
             />
           </div>
           <p className="mt-10 text-center text-sm text-ink-light">
@@ -400,8 +449,8 @@ export default function Home() {
             Everything in the plan
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-ink-mid">
-            Compare tiers at a glance. Upgrade when you need real time, depth, or
-            a full desk on one book.
+            Compare tiers at a glance. Upgrade when you need real time, depth, or a
+            full desk on one book.
           </p>
           <div className="mt-10 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
             <table className="w-full min-w-[640px] border-collapse text-left">
@@ -465,19 +514,69 @@ export default function Home() {
   );
 }
 
-function OutcomeColumn({
+function LandingSignalCard({
+  meta,
   title,
-  body,
-  className = "",
+  detail,
+  implication,
+  severity,
+  accent,
+  assetLabel,
 }: {
+  meta: string;
   title: string;
-  body: string;
-  className?: string;
+  detail: string;
+  implication: string;
+  severity: "high" | "medium";
+  accent?: "interconnector";
+  assetLabel: string;
 }) {
+  const severityClass =
+    severity === "high"
+      ? "border-transparent bg-[#8B3A3A] text-white"
+      : "border-transparent bg-[#92400E] text-white";
+  const accentClass =
+    accent === "interconnector"
+      ? "border-cyan-700/30 bg-cyan-50/80 text-cyan-950"
+      : assetLabel === "CCGT"
+        ? "border-amber-700/35 bg-amber-50/80 text-amber-900"
+        : "border-ivory-border bg-ivory text-ink-mid";
+
   return (
-    <div className={className}>
-      <h3 className="font-serif text-xl text-ink">{title}</h3>
-      <p className="mt-5 text-sm leading-relaxed text-ink-mid">{body}</p>
+    <article className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4">
+      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+        {meta}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${accentClass}`}
+        >
+          {assetLabel}
+        </span>
+        <span
+          className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${severityClass}`}
+        >
+          {severity === "high" ? "HIGH" : "MEDIUM"}
+        </span>
+      </div>
+      <h3 className="mt-3 font-sans text-base font-semibold leading-snug text-ink">
+        {title}
+      </h3>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">{detail}</p>
+      <p className="mt-4 border-t border-ivory-border pt-3 font-serif text-[15px] italic leading-relaxed text-ink">
+        {implication}
+      </p>
+    </article>
+  );
+}
+
+function ProductStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="text-center sm:text-left">
+      <p className="font-serif text-4xl tracking-tight text-ink sm:text-[2.75rem]">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-snug text-ink-mid">{label}</p>
     </div>
   );
 }
