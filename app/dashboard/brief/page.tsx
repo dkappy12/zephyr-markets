@@ -86,6 +86,44 @@ function personalisationSummaryLine(positions: OpenPosition[]): string {
     .join(" · ");
 }
 
+/** One personalised paragraph per user per morning brief (`generated_at`); avoids refetch on every navigation. */
+const BOOK_TOUCHPOINTS_CACHE_PREFIX = "zephyr:briefBookTouchpoints:v1:";
+
+function loadCachedBookTouchpoints(
+  userId: string,
+  generatedAt: string,
+): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(
+      `${BOOK_TOUCHPOINTS_CACHE_PREFIX}${userId}:${generatedAt}`,
+    );
+    if (!raw) return null;
+    const o = JSON.parse(raw) as { text?: unknown };
+    return typeof o.text === "string" && o.text.trim() !== ""
+      ? o.text.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedBookTouchpoints(
+  userId: string,
+  generatedAt: string,
+  text: string,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      `${BOOK_TOUCHPOINTS_CACHE_PREFIX}${userId}:${generatedAt}`,
+      JSON.stringify({ text }),
+    );
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 /**
  * Bare domains (e.g. indexbox.com/foo) must be https — otherwise the browser
  * treats them as paths on the current origin.
@@ -245,7 +283,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 }
 
 export default function BriefPage() {
-  // Example output: "Today's extreme softening conditions create direct headwinds for the long 50 MW GB Power Q3 2026 Baseload position entered at £89.50 — with the market trading £35/MWh above the physically-implied price, mean reversion risk is elevated. The short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 positions are well-positioned given renewable dominance suppressing gas demand; the TTF at €50/MWh with temperature-suppressed heating load supports the short gas bias."
+  // Example output (third-person observation): "Today's extreme softening conditions create direct headwinds for the long 50 MW GB Power Q3 2026 Baseload position entered at £89.50 — with the market trading £35/MWh above the physically-implied price, mean reversion risk is elevated. The short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 positions are well-positioned given renewable dominance suppressing gas demand; the TTF at €50/MWh with temperature-suppressed heating load supports the short gas bias."
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState<BriefRow | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
@@ -302,75 +340,92 @@ export default function BriefPage() {
             : Number(p.trade_price),
       }));
       setPositions(open);
+      if (open.length === 0) {
+        setBookTouchpointText(null);
+      }
 
-      if (!briefRes.error && briefRes.data && open.length > 0) {
-        setBookTouchpointLoading(true);
+      if (!briefRes.error && briefRes.data && open.length > 0 && user) {
         const b = briefRes.data as BriefRow;
-        try {
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
-          const headers: Record<string, string> = {
-            "content-type": "application/json",
-          };
-          if (session?.access_token) {
-            headers.Authorization = `Bearer ${session.access_token}`;
-          }
-          const pp = ppRes.data as
-            | {
-                normalised_score?: number | null;
-                direction?: string | null;
-                implied_price_gbp_mwh?: number | null;
-                residual_demand_gw?: number | null;
-                srmc_gbp_mwh?: number | null;
-                remit_mw_lost?: number | null;
-                market_price_gbp_mwh?: number | null;
-                premium_value?: number | null;
-                regime?: string | null;
-              }
-            | null
-            | undefined;
-          const scoreFromPp =
-            pp?.normalised_score != null && Number.isFinite(Number(pp.normalised_score))
-              ? Number(pp.normalised_score)
-              : null;
-          const scoreFromBrief =
-            b.physical_premium_score != null &&
-            Number.isFinite(Number(b.physical_premium_score))
-              ? Number(b.physical_premium_score)
-              : null;
-          const normalisedScore = scoreFromPp ?? scoreFromBrief ?? 0;
-          const premiumDirection =
-            (typeof pp?.direction === "string" && pp.direction.trim() !== ""
-              ? pp.direction
-              : null) ?? "STABLE";
-          const resp = await fetch("/api/brief/personalise", {
-            method: "POST",
-            headers,
-            credentials: "same-origin",
-            body: JSON.stringify({
-              overnight_summary: b.overnight_summary ?? b.executive_summary ?? "",
-              one_risk: b.one_risk ?? "",
-              normalised_score: normalisedScore,
-              direction: premiumDirection,
-              regime: pp?.regime ?? null,
-              residual_demand: pp?.residual_demand_gw ?? null,
-              implied_price: pp?.implied_price_gbp_mwh ?? null,
-              market_price: pp?.market_price_gbp_mwh ?? null,
-              gap: pp?.premium_value ?? null,
-              srmc: pp?.srmc_gbp_mwh ?? null,
-              remit_mw: pp?.remit_mw_lost ?? null,
-              positions: open,
-            }),
-          });
-          const body = (await resp.json()) as { text?: string };
-          if (resp.ok && typeof body.text === "string" && body.text.trim() !== "") {
-            setBookTouchpointText(body.text.trim());
-          }
-        } catch {
-          // Silent fallback as requested.
-        } finally {
+        const generatedAt = b.generated_at?.trim() ?? "";
+        const cached =
+          generatedAt !== ""
+            ? loadCachedBookTouchpoints(user.id, generatedAt)
+            : null;
+        if (cached) {
+          setBookTouchpointText(cached);
           setBookTouchpointLoading(false);
+        } else {
+          setBookTouchpointLoading(true);
+          try {
+            const {
+              data: { session },
+            } = await supabase.auth.getSession();
+            const headers: Record<string, string> = {
+              "content-type": "application/json",
+            };
+            if (session?.access_token) {
+              headers.Authorization = `Bearer ${session.access_token}`;
+            }
+            const pp = ppRes.data as
+              | {
+                  normalised_score?: number | null;
+                  direction?: string | null;
+                  implied_price_gbp_mwh?: number | null;
+                  residual_demand_gw?: number | null;
+                  srmc_gbp_mwh?: number | null;
+                  remit_mw_lost?: number | null;
+                  market_price_gbp_mwh?: number | null;
+                  premium_value?: number | null;
+                  regime?: string | null;
+                }
+              | null
+              | undefined;
+            const scoreFromPp =
+              pp?.normalised_score != null && Number.isFinite(Number(pp.normalised_score))
+                ? Number(pp.normalised_score)
+                : null;
+            const scoreFromBrief =
+              b.physical_premium_score != null &&
+              Number.isFinite(Number(b.physical_premium_score))
+                ? Number(b.physical_premium_score)
+                : null;
+            const normalisedScore = scoreFromPp ?? scoreFromBrief ?? 0;
+            const premiumDirection =
+              (typeof pp?.direction === "string" && pp.direction.trim() !== ""
+                ? pp.direction
+                : null) ?? "STABLE";
+            const resp = await fetch("/api/brief/personalise", {
+              method: "POST",
+              headers,
+              credentials: "same-origin",
+              body: JSON.stringify({
+                overnight_summary: b.overnight_summary ?? b.executive_summary ?? "",
+                one_risk: b.one_risk ?? "",
+                normalised_score: normalisedScore,
+                direction: premiumDirection,
+                regime: pp?.regime ?? null,
+                residual_demand: pp?.residual_demand_gw ?? null,
+                implied_price: pp?.implied_price_gbp_mwh ?? null,
+                market_price: pp?.market_price_gbp_mwh ?? null,
+                gap: pp?.premium_value ?? null,
+                srmc: pp?.srmc_gbp_mwh ?? null,
+                remit_mw: pp?.remit_mw_lost ?? null,
+                positions: open,
+              }),
+            });
+            const body = (await resp.json()) as { text?: string };
+            if (resp.ok && typeof body.text === "string" && body.text.trim() !== "") {
+              const t = body.text.trim();
+              setBookTouchpointText(t);
+              if (generatedAt !== "") {
+                saveCachedBookTouchpoints(user.id, generatedAt, t);
+              }
+            }
+          } catch {
+            // Silent fallback as requested.
+          } finally {
+            setBookTouchpointLoading(false);
+          }
         }
       } else {
         setBookTouchpointLoading(false);
