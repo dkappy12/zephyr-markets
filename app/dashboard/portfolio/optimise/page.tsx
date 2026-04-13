@@ -130,6 +130,29 @@ export default function OptimisePage() {
     ];
   }, [data]);
 
+  const gateChecks = useMemo(() => {
+    if (!data) return [];
+    return [
+      {
+        label: "Historical scenarios ≥ 20",
+        pass: data.diagnostics.historicalScenarioCount >= 20,
+        detail: `${data.diagnostics.historicalScenarioCount} available`,
+      },
+      {
+        label: "Candidate packages ≥ 30",
+        pass: data.diagnostics.candidatePackageCount >= 30,
+        detail: `${data.diagnostics.candidatePackageCount} generated`,
+      },
+      {
+        label: "Independent NBP history (no proxy)",
+        pass: !data.diagnostics.nbpProxyUsed,
+        detail: data.diagnostics.nbpProxyUsed
+          ? "Proxy in use"
+          : "Independent history available",
+      },
+    ];
+  }, [data]);
+
   return (
     <div className="space-y-8">
       <div>
@@ -222,6 +245,13 @@ export default function OptimisePage() {
                   ))}
                 </div>
               )}
+              <div className="mt-3 space-y-1">
+                {gateChecks.map((c) => (
+                  <p key={c.label} className="text-xs text-ink-mid">
+                    {c.pass ? "PASS" : "FAIL"} · {c.label} ({c.detail})
+                  </p>
+                ))}
+              </div>
             </section>
           )}
 
