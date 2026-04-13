@@ -3,6 +3,16 @@
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
+import {
+  CartesianGrid,
+  LabelList,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type ApiResponse = {
   generatedAt: string;
@@ -40,6 +50,12 @@ type ApiResponse = {
     };
     constraintsApplied: string[];
     confidence: "High" | "Medium" | "Low";
+    scenarioBreakdown: Array<{
+      scenarioLabel: string;
+      pnlBefore: number;
+      pnlAfter: number;
+      improvement: number;
+    }>;
   }>;
   alternatives: Array<{
     rank: number;
@@ -82,6 +98,7 @@ export default function OptimisePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
+  const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +178,19 @@ export default function OptimisePage() {
           : "Independent history available",
       },
     ];
+  }, [data]);
+
+  const frontierData = useMemo(() => {
+    if (!data) return null;
+    return {
+      current: [{ label: "Current", x: data.before.cvarLoss, y: 0 }],
+      recommended: [{ label: "Recommended", x: data.after.cvarLoss, y: data.recommendations.length }],
+      alternatives: data.alternatives.map((alt) => ({
+        label: `Alt #${alt.rank}`,
+        x: alt.after.cvarLoss,
+        y: alt.trades.length,
+      })),
+    };
   }, [data]);
 
   return (
@@ -302,6 +332,51 @@ export default function OptimisePage() {
             )}
           </section>
 
+          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Efficient frontier
+            </p>
+            {!frontierData || frontierData.alternatives.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-mid">
+                No alternatives available yet to draw an efficient frontier.
+              </p>
+            ) : (
+              <div className="mt-2 h-[200px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 10, right: 12, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(44,42,38,0.08)" />
+                    <XAxis
+                      type="number"
+                      dataKey="x"
+                      tick={{ fontSize: 10, fill: "#6b6560" }}
+                      tickFormatter={(v) => `£${Math.round(Number(v)).toLocaleString("en-GB")}`}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="y"
+                      allowDecimals={false}
+                      tick={{ fontSize: 10, fill: "#6b6560" }}
+                    />
+                    <Tooltip
+                      formatter={(v, n) =>
+                        n === "x"
+                          ? [`£${Math.round(Number(v)).toLocaleString("en-GB")}`, "CVaR loss"]
+                          : [Math.round(Number(v)), "Trades"]
+                      }
+                    />
+                    <Scatter data={frontierData.alternatives} fill="#6b6560" />
+                    <Scatter data={frontierData.current} fill="#8B3A3A" shape="circle">
+                      <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
+                    </Scatter>
+                    <Scatter data={frontierData.recommended} fill="#1D6B4E" shape="circle">
+                      <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
+                    </Scatter>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </section>
+
           <section className="grid gap-3 md:grid-cols-3">
             {cards.map((c) => (
               <article
@@ -351,6 +426,42 @@ export default function OptimisePage() {
                     <p className="mt-1 text-xs text-ink-mid">
                       Constraints: {r.constraintsApplied.join(" · ")}
                     </p>
+                    <button
+                      type="button"
+                      className="mt-2 text-xs text-ink-mid"
+                      onClick={() =>
+                        setOpenScenarios((prev) => ({
+                          ...prev,
+                          [`${r.instrument}-${i}`]: !prev[`${r.instrument}-${i}`],
+                        }))
+                      }
+                    >
+                      {openScenarios[`${r.instrument}-${i}`] ? "Hide scenarios ▴" : "Show scenarios ▾"}
+                    </button>
+                    {openScenarios[`${r.instrument}-${i}`] ? (
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full text-[11px] text-ink-mid">
+                          <thead>
+                            <tr>
+                              <th className="py-1 text-left font-semibold">Scenario</th>
+                              <th className="py-1 text-right font-semibold">Loss before</th>
+                              <th className="py-1 text-right font-semibold">Loss after</th>
+                              <th className="py-1 text-right font-semibold">Improvement</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.scenarioBreakdown.map((s) => (
+                              <tr key={s.scenarioLabel}>
+                                <td className="py-1">{s.scenarioLabel}</td>
+                                <td className="py-1 text-right">{formatGbp(-s.pnlBefore)}</td>
+                                <td className="py-1 text-right">{formatGbp(-s.pnlAfter)}</td>
+                                <td className="py-1 text-right">{formatGbp(s.improvement)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

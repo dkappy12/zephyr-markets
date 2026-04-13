@@ -38,6 +38,12 @@ export type Recommendation = {
   };
   constraintsApplied: string[];
   confidence: "High" | "Medium" | "Low";
+  scenarioBreakdown: Array<{
+    scenarioLabel: string;
+    pnlBefore: number;
+    pnlAfter: number;
+    improvement: number;
+  }>;
 };
 
 export type OptimiseResult = {
@@ -167,6 +173,14 @@ function pnlForPosition(position: PositionRow, scenario: Scenario, gbpPerEur: nu
   if (m === "TTF") return scenario.ttfMoveEurMwh * fx * size * dm;
   if (m === "NBP") return (scenario.nbpMovePth * size * dm) / 100;
   return 0;
+}
+
+function portfolioPnlForScenario(
+  positions: PositionRow[],
+  scenario: Scenario,
+  gbpPerEur: number,
+): number {
+  return positions.reduce((sum, p) => sum + pnlForPosition(p, scenario, gbpPerEur), 0);
 }
 
 function asSyntheticPosition(trade: HedgeTrade): PositionRow {
@@ -437,13 +451,30 @@ export function optimisePortfolio(input: {
   };
 
   const recommendations: Recommendation[] = selected.trades.map((trade) => {
+    const withTrade = [...positions, asSyntheticPosition(trade)];
     const singleAfter = computeRiskMetrics(
-      [...positions, asSyntheticPosition(trade)],
+      withTrade,
       empiricalScenarios,
       stressOnlyScenarios,
       gbpPerEur,
       confidence,
     );
+    const scenarioUniverse = [...empiricalScenarios, ...stressOnlyScenarios];
+    const scenarioBreakdown = scenarioUniverse
+      .map((s) => {
+        const pnlBefore = portfolioPnlForScenario(positions, s, gbpPerEur);
+        const pnlAfter = portfolioPnlForScenario(withTrade, s, gbpPerEur);
+        return {
+          scenarioLabel: s.label,
+          pnlBefore,
+          pnlAfter,
+          improvement: pnlAfter - pnlBefore,
+          absLossBefore: Math.abs(-pnlBefore),
+        };
+      })
+      .sort((a, b) => b.absLossBefore - a.absLossBefore)
+      .slice(0, 5)
+      .map(({ absLossBefore: _absLossBefore, ...row }) => row);
     const singleImprovement = (before.cvarLoss - singleAfter.cvarLoss) / Math.max(before.cvarLoss, 1);
     return {
       instrument: trade.market,
@@ -461,6 +492,7 @@ export function optimisePortfolio(input: {
         `max ${maxTrades} trades`,
       ],
       confidence: confidenceLabel(empiricalScenarios.length, singleImprovement),
+      scenarioBreakdown,
     };
   });
 

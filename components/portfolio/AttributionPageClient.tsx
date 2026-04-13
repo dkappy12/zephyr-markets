@@ -2,7 +2,6 @@
 
 import {
   bookAlignmentCopy,
-  computePremiumAttributionGbp,
   isGbPowerMarket,
   netGbPowerSignedMw,
   parsePhysicalDirection,
@@ -11,9 +10,14 @@ import {
   premiumShapeGbpPosition,
   premiumWindGbpPosition,
   primaryDriverKey,
+  remitPriceImpactGbpPerMwh,
   resolveTotalPriceMoveGbpMwh,
+  sumGasAttribution,
+  sumRemitAttribution,
+  sumWindAttribution,
   totalTodayPnlGbp,
   type PhysicalPremiumInput,
+  windPriceImpactGbpPerMwh,
 } from "@/lib/portfolio/attribution";
 import {
   attributionConfidenceFromMetrics,
@@ -37,7 +41,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -453,19 +460,31 @@ export function AttributionPageClient() {
     [marketIntradayGbpMwh, physicalInput],
   );
 
-  const premiumAttr = useMemo(
-    () =>
-      computePremiumAttributionGbp(
-        totalPriceMoveGbpMwh,
-        physicalInput,
-        positions,
-      ),
-    [totalPriceMoveGbpMwh, physicalInput, positions],
-  );
+  const deltaWindGw = parseNum(physLatest?.wind_gw) ?? 0;
+  const deltaRemitMw = parseNum(physLatest?.remit_mw_lost) ?? 0;
+  const ttfStart = livePrices?.ttfOpenEurMwh ?? null;
+  const ttfCurrent = livePrices?.ttfEurMwh ?? null;
+  const windMoveGbpMwh = windPriceImpactGbpPerMwh(deltaWindGw);
+  const gasMoveGbpMwh =
+    ttfStart != null && ttfCurrent != null
+      ? (ttfCurrent - ttfStart) * GBP_PER_EUR
+      : 0;
+  const remitMoveGbpMwh = remitPriceImpactGbpPerMwh(deltaRemitMw);
+  const priceResidualMoveGbpMwh =
+    totalPriceMoveGbpMwh - windMoveGbpMwh - gasMoveGbpMwh - remitMoveGbpMwh;
 
-  const windAtt = premiumAttr.windGbp;
-  const gasAtt = premiumAttr.gasGbp;
-  const remitAtt = premiumAttr.remitGbp;
+  const windAtt = useMemo(
+    () => sumWindAttribution(positions, deltaWindGw),
+    [positions, deltaWindGw],
+  );
+  const gasAtt = useMemo(
+    () => sumGasAttribution(positions, ttfStart, ttfCurrent),
+    [positions, ttfStart, ttfCurrent],
+  );
+  const remitAtt = useMemo(
+    () => sumRemitAttribution(positions, deltaRemitMw),
+    [positions, deltaRemitMw],
+  );
   const gbNet = netGbPowerSignedMw(positions);
   const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
   const demandSignals = useMemo(
@@ -490,10 +509,10 @@ export function AttributionPageClient() {
     () =>
       positions.reduce(
         (sum, p) =>
-          sum + premiumShapeGbpPosition(p, premiumAttr.priceResidualMoveGbpMwh),
+          sum + premiumShapeGbpPosition(p, priceResidualMoveGbpMwh),
         0,
       ),
-    [positions, premiumAttr.priceResidualMoveGbpMwh],
+    [positions, priceResidualMoveGbpMwh],
   );
   const demandAtt = useMemo(() => {
     if (netGbMw === 0) return 0;
@@ -555,10 +574,7 @@ export function AttributionPageClient() {
     totalPnl -
     windAttCal -
     gasAttCal -
-    remitAttCal -
-    shapeAttCal -
-    demandAttCal -
-    interconnectorAttCal;
+    remitAttCal;
   const explainedPnl = totalPnl - residual;
   const explainedRatio =
     Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
@@ -757,7 +773,16 @@ export function AttributionPageClient() {
       primary_driver: primary,
       total_price_move_gbp_mwh: totalPriceMoveGbpMwh,
       market_intraday_gbp_mwh: marketIntradayGbpMwh,
-      premium_model: premiumAttr,
+      premium_model: {
+        delta_wind_gw: deltaWindGw,
+        delta_remit_mw: deltaRemitMw,
+        ttf_start_eur_mwh: ttfStart,
+        ttf_current_eur_mwh: ttfCurrent,
+        wind_move_gbp_mwh: windMoveGbpMwh,
+        gas_move_gbp_mwh: gasMoveGbpMwh,
+        remit_move_gbp_mwh: remitMoveGbpMwh,
+        price_residual_move_gbp_mwh: priceResidualMoveGbpMwh,
+      },
       physical: physLatest,
     };
 
@@ -818,6 +843,49 @@ export function AttributionPageClient() {
     demandSignals.length,
     interconnectorSignals.length,
     netGbMw,
+  ]);
+
+  const waterfallRows = useMemo(() => {
+    const factors = [
+      { name: "Wind", value: windAttCal },
+      { name: "Gas", value: gasAttCal },
+      { name: "REMIT", value: remitAttCal },
+      { name: "Shape", value: shapeAttCal },
+      { name: "Demand", value: demandAttCal },
+      { name: "Interconnector", value: interconnectorAttCal },
+      { name: "Residual", value: residual },
+    ];
+    let cumulative = 0;
+    const rows = factors.map((f) => {
+      const row = {
+        name: f.name,
+        base: cumulative,
+        pos: f.value >= 0 ? f.value : 0,
+        neg: f.value < 0 ? f.value : 0,
+        total: 0,
+        color: f.value >= 0 ? BRAND_GREEN : TERRACOTTA,
+      };
+      cumulative += f.value;
+      return row;
+    });
+    rows.push({
+      name: "Total",
+      base: 0,
+      pos: 0,
+      neg: 0,
+      total: totalPnl,
+      color: "#2c2a26",
+    });
+    return rows;
+  }, [
+    windAttCal,
+    gasAttCal,
+    remitAttCal,
+    shapeAttCal,
+    demandAttCal,
+    interconnectorAttCal,
+    residual,
+    totalPnl,
   ]);
 
   const diagnostics = useMemo(() => {
@@ -954,6 +1022,44 @@ export function AttributionPageClient() {
               What moved your book today
             </h2>
 
+            <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-2 py-3">
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={waterfallRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(44,42,38,0.08)"
+                    vertical={false}
+                  />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#6b6560" }} />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#6b6560" }}
+                    tickFormatter={(v) =>
+                      `£${Math.round(Number(v)).toLocaleString("en-GB")}`
+                    }
+                  />
+                  <Tooltip
+                    formatter={(v) =>
+                      typeof v === "number"
+                        ? formatSignedGbp(v)
+                        : String(v ?? "—")
+                    }
+                  />
+                  <Bar dataKey="base" stackId="bridge" fill="transparent" isAnimationActive={false} />
+                  <Bar dataKey="pos" stackId="bridge" isAnimationActive={false}>
+                    {waterfallRows.map((row) => (
+                      <Cell key={`${row.name}-pos`} fill={row.color} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="neg" stackId="bridge" isAnimationActive={false}>
+                    {waterfallRows.map((row) => (
+                      <Cell key={`${row.name}-neg`} fill={row.color} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="total" fill="#2c2a26" isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
             <div className="mt-4 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
               <table className="w-full min-w-[720px] border-collapse text-left text-[13px]">
                 <thead>
@@ -970,22 +1076,22 @@ export function AttributionPageClient() {
                       {
                         name: "Wind generation",
                         impact: windAttCal,
-                        dir: `${windStackPct.toFixed(0)}% stack · ${premiumAttr.windMoveGbpMwh.toFixed(2)} £/MWh`,
+                        dir: `${windStackPct.toFixed(0)}% stack · ${windMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Gas prices (TTF)",
                         impact: gasAttCal,
-                        dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${premiumAttr.gasMoveGbpMwh.toFixed(2)} £/MWh`,
+                        dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "REMIT outages",
                         impact: remitAttCal,
-                        dir: `${remitStressPct.toFixed(0)}% system stress · ${premiumAttr.remitMoveGbpMwh.toFixed(2)} £/MWh`,
+                        dir: `${remitStressPct.toFixed(0)}% system stress · ${remitMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
                         name: "Shape / basis",
                         impact: shapeAttCal,
-                        dir: `${premiumAttr.priceResidualMoveGbpMwh.toFixed(2)} £/MWh residual market move`,
+                        dir: `${priceResidualMoveGbpMwh.toFixed(2)} £/MWh residual market move`,
                       },
                       {
                         name: "Demand surprise",
@@ -1078,15 +1184,15 @@ export function AttributionPageClient() {
                 {positions.map((p) => {
                   const w = premiumWindGbpPosition(
                     p,
-                    premiumAttr.windMoveGbpMwh,
+                    windMoveGbpMwh,
                   );
                   const g = premiumGasGbpPosition(
                     p,
-                    premiumAttr.gasMoveGbpMwh,
+                    gasMoveGbpMwh,
                   );
                   const r = premiumRemitGbpPosition(
                     p,
-                    premiumAttr.remitMoveGbpMwh,
+                    remitMoveGbpMwh,
                   );
                   const sub = w + g + r;
                   const dir =
