@@ -506,21 +506,7 @@ export function AttributionPageClient() {
     () => sumRemitAttribution(positions, deltaRemitMw),
     [positions, deltaRemitMw],
   );
-  const carbonMoveDirection = gasMoveGbpMwh === 0 ? 0 : Math.sign(gasMoveGbpMwh);
-  const carbonPriceMoveGbpMwh = CARBON_REF_GBP_PER_MWH * carbonMoveDirection;
-  const carbonAtt = useMemo(
-    () =>
-      positions.reduce((sum, p) => {
-        if (!isGbPowerMarket(p)) return sum;
-        if ((p.unit ?? "").toLowerCase() !== "mw") return sum;
-        const dm = (p.direction ?? "").toLowerCase() === "short" ? -1 : 1;
-        const size = Number(p.size ?? 0);
-        if (!Number.isFinite(size)) return sum;
-        return sum + size * dm * carbonPriceMoveGbpMwh;
-      }, 0),
-    [positions, carbonPriceMoveGbpMwh],
-  );
-  const gasAtt = gasAttRaw - carbonAtt;
+  const gasAtt = gasAttRaw;
   const gbNet = netGbPowerSignedMw(positions);
   const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
   const demandSignals = useMemo(
@@ -598,9 +584,14 @@ export function AttributionPageClient() {
   }, [pnlHistory]);
 
   const windAttCal = windAtt * calibration.multipliers.wind;
-  const gasAttCal = gasAtt * calibration.multipliers.gas;
+  const gasAttCalTotal = gasAtt * calibration.multipliers.gas;
+  const srmcTotalGbpMwh = parseNum(physLatest?.srmc_gbp_mwh) ?? 0;
+  const carbonShareRaw =
+    srmcTotalGbpMwh > 0 ? CARBON_REF_GBP_PER_MWH / srmcTotalGbpMwh : 0;
+  const carbonShare = Math.max(0, Math.min(1, carbonShareRaw));
+  const carbonAttCal = gasAttCalTotal * carbonShare;
+  const gasAttCal = gasAttCalTotal * (1 - carbonShare);
   const remitAttCal = remitAtt * calibration.multipliers.remit;
-  const carbonAttCal = carbonAtt;
   const shapeAttCal = shapeAtt * calibration.multipliers.shape;
   const demandAttCal = demandAtt * calibration.multipliers.demand;
   const interconnectorAttCal =
@@ -783,6 +774,7 @@ export function AttributionPageClient() {
       total_pnl: totalPnl,
       wind_attribution_gbp: windAttCal,
       gas_attribution_gbp: gasAttCal,
+      carbon_attribution_gbp: carbonAttCal,
       remit_attribution_gbp: remitAttCal,
       shape_attribution_gbp: shapeAttCal,
       demand_attribution_gbp: demandAttCal,
@@ -800,6 +792,7 @@ export function AttributionPageClient() {
         calibration_lambda: calibration.lambda,
         calibration_fallback: calibration.fallbackUsed,
         calibration_multipliers: calibration.multipliers,
+        carbon_share: carbonShare,
         baseline_wind_gw: baselineWindGw,
         current_wind_gw: currentWindGw,
       },
@@ -893,8 +886,8 @@ export function AttributionPageClient() {
     const factors = [
       { name: "Wind", value: windAttCal },
       { name: "Gas", value: gasAttCal },
-      { name: "REMIT", value: remitAttCal },
       { name: "Carbon", value: carbonAttCal },
+      { name: "REMIT", value: remitAttCal },
       { name: "Shape", value: shapeAttCal },
       { name: "Demand", value: demandAttCal },
       { name: "Interconnector", value: interconnectorAttCal },
@@ -1130,14 +1123,16 @@ export function AttributionPageClient() {
                         dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
+                        name: "Carbon (UKA)",
+                        impact: carbonAttCal,
+                        dir: `UKA ref £${CARBON_UKA_GBP_PER_TCO2}/t · EF ${CARBON_EF_TCO2_PER_MWH.toFixed(3)} t/MWh · ${(
+                          carbonShare * 100
+                        ).toFixed(0)}% of gas stack`,
+                      },
+                      {
                         name: "REMIT outages",
                         impact: remitAttCal,
                         dir: `${remitStressPct.toFixed(0)}% system stress · ${remitMoveGbpMwh.toFixed(2)} £/MWh`,
-                      },
-                      {
-                        name: "Carbon (UKA)",
-                        impact: carbonAttCal,
-                        dir: `UKA ref £${CARBON_UKA_GBP_PER_TCO2}/t · EF ${CARBON_EF_TCO2_PER_MWH.toFixed(3)} t/MWh`,
                       },
                       {
                         name: "Shape / basis",
@@ -1234,18 +1229,14 @@ export function AttributionPageClient() {
               <div className="mt-4 space-y-4 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/40 px-4 py-4">
                 {positions.map((p) => {
                   const w = windAttributionForPosition(deltaWindGw, p);
-                  const g = gasAttributionForPosition(
+                  const gTotal = gasAttributionForPosition(
                     ttfStart ?? 0,
                     ttfCurrent ?? 0,
                     p,
                   );
+                  const c = gTotal * carbonShare;
+                  const g = gTotal * (1 - carbonShare);
                   const r = remitAttributionForPosition(deltaRemitMw, p);
-                  const c =
-                    isGbPowerMarket(p) && (p.unit ?? "").toLowerCase() === "mw"
-                      ? ((p.direction ?? "").toLowerCase() === "short" ? -1 : 1) *
-                        (Number.isFinite(Number(p.size ?? 0)) ? Number(p.size ?? 0) : 0) *
-                        carbonPriceMoveGbpMwh
-                      : 0;
                   const sub = w + g + r + c;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";

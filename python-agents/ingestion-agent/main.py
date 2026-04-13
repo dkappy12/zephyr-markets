@@ -122,7 +122,7 @@ SOLAR_POLL_MINUTES = 5
 GBP_EUR_RATE = 0.855
 ETA_CCGT = 0.50
 EF_TCO2_PER_MWH_EL = 0.37
-UKA_PRICE_GBP_PER_T = 55.0
+UKA_PRICE_GBP_PER_T = float(os.environ.get("UKA_PRICE_GBP_T", "55.0"))
 CPS_GBP_PER_T = 18.0
 VOM_GBP_PER_MWH = 2.0
 THERMAL_CAPACITY_GW = 45.0
@@ -3194,6 +3194,10 @@ def main() -> None:
     logger.info(
         "GIE_API_KEY %s",
         "is set" if GIE_API_KEY else "is missing (AGSI requests may fail)",
+    )
+    logger.info(
+        "Physical premium carbon input | UKA_PRICE_GBP_T=%.2f (from env UKA_PRICE_GBP_T, default 55.0)",
+        UKA_PRICE_GBP_PER_T,
     )
 
     logger.info(
