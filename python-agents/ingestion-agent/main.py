@@ -1803,10 +1803,21 @@ async def calculate_physical_premium() -> None:
 
         implied_price_gbp_mwh: float | None = None
         premium_regime: str | None = None
+        # Only unplanned outages drive the scarcity adder — planned outages are
+        # already absorbed into day-ahead scheduling and forward prices.
+        # Planned outages get a small fixed coefficient (£1.5/MWh per GW).
+        unplanned_gw = remit_unplanned_mw / 1000.0
+        planned_gw = remit_planned_mw / 1000.0
         remit_gw = remit_total_mw / 1000.0
+
+        # Available margin uses total REMIT to reflect true system capacity
         available_margin_gw = THERMAL_CAPACITY_GW - residual_demand_gw - remit_gw
+
+        # Scarcity adder applies only to unplanned capacity
         adder_per_gw = _remit_adder_per_gw(available_margin_gw)
-        remit_price_adder = remit_gw * adder_per_gw
+        unplanned_adder = unplanned_gw * adder_per_gw
+        planned_adder = planned_gw * 1.5
+        remit_price_adder = unplanned_adder + planned_adder
 
         rd = residual_demand_gw
         rd_premium_mwh = _residual_demand_premium_gbp_mwh(rd)
