@@ -1633,6 +1633,159 @@ async def insert_premium_prediction_http(
     resp.raise_for_status()
 
 
+async def fetch_unfilled_predictions_http(
+    client: httpx.AsyncClient, target_date: str
+) -> list[dict]:
+    """Fetch all is_filled=false predictions for a given date (YYYY-MM-DD)."""
+    headers = _supabase_auth_headers()
+    url = (
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/premium_predictions"
+        f"?target_date=eq.{target_date}&is_filled=eq.false&select=*"
+    )
+    resp = await client.get(url, headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def fetch_actual_price_for_sp_http(
+    client: httpx.AsyncClient, target_date: str, settlement_period: int
+) -> float | None:
+    """
+    Fetch the actual N2EX intraday price for a given date and settlement period
+    from the market_prices table.
+    SP maps to startTime: SP1 = 00:00, SP2 = 00:30, etc.
+    market_prices stores price_time as the start of the half-hour in UTC.
+    """
+    headers = _supabase_auth_headers()
+    # Convert SP to start time: SP1 = 00:00, SP2 = 00:30, ...
+    sp_minutes = (settlement_period - 1) * 30
+    sp_hour = sp_minutes // 60
+    sp_min = sp_minutes % 60
+    price_time = f"{target_date}T{sp_hour:02d}:{sp_min:02d}:00+00:00"
+    url = (
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/market_prices"
+        f"?price_time=eq.{price_time}&market=eq.N2EX&select=price_gbp_mwh"
+    )
+    resp = await client.get(url, headers=headers)
+    resp.raise_for_status()
+    rows = resp.json()
+    if rows:
+        return float(rows[0]["price_gbp_mwh"])
+    return None
+
+
+async def fill_prediction_accuracy_http(
+    client: httpx.AsyncClient,
+    prediction_id: str,
+    actual_price: float,
+    predicted_price: float,
+) -> None:
+    """Fill in actual price and error metrics for a prediction row."""
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    error = predicted_price - actual_price
+    payload = {
+        "actual_price_gbp_mwh": actual_price,
+        "error_gbp_mwh": error,
+        "absolute_error_gbp_mwh": abs(error),
+        "signed_error_gbp_mwh": error,
+        "is_filled": True,
+    }
+    url = (
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/premium_predictions"
+        f"?id=eq.{prediction_id}"
+    )
+    resp = await client.patch(url, headers=headers, json=payload)
+    resp.raise_for_status()
+
+
+async def run_accuracy_fill_job(target_date_str: str | None = None) -> None:
+    """
+    Nightly job: fill actual prices and error metrics for previous day's predictions.
+    Runs at 02:00 UTC. By this time all settlement periods for the previous day
+    are finalised in the market_prices table.
+
+    target_date_str: override date for testing (YYYY-MM-DD).
+    If None, uses yesterday's date.
+    """
+    from datetime import date, timedelta
+
+    if target_date_str is None:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        target_date_str = yesterday.isoformat()
+
+    logger.info("accuracy_fill: starting for date=%s", target_date_str)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Fetch all unfilled predictions for the target date
+        try:
+            predictions = await fetch_unfilled_predictions_http(client, target_date_str)
+        except Exception as e:
+            logger.error("accuracy_fill: failed to fetch predictions: %s", e)
+            return
+
+        if not predictions:
+            logger.info("accuracy_fill: no unfilled predictions for %s", target_date_str)
+            return
+
+        logger.info(
+            "accuracy_fill: found %d unfilled predictions for %s",
+            len(predictions), target_date_str
+        )
+
+        filled = 0
+        skipped = 0
+        errors = 0
+
+        for pred in predictions:
+            prediction_id = pred["id"]
+            predicted_price = pred["predicted_price_gbp_mwh"]
+            settlement_period = pred["target_settlement_period"]
+
+            if predicted_price is None:
+                skipped += 1
+                continue
+
+            try:
+                actual_price = await fetch_actual_price_for_sp_http(
+                    client, target_date_str, settlement_period
+                )
+
+                if actual_price is None:
+                    logger.debug(
+                        "accuracy_fill: no actual price for sp=%d date=%s — skipping",
+                        settlement_period, target_date_str
+                    )
+                    skipped += 1
+                    continue
+
+                await fill_prediction_accuracy_http(
+                    client, prediction_id, actual_price, float(predicted_price)
+                )
+                filled += 1
+
+                logger.debug(
+                    "accuracy_fill: sp=%d predicted=£%.2f actual=£%.2f error=£%.2f",
+                    settlement_period, float(predicted_price), actual_price,
+                    float(predicted_price) - actual_price,
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "accuracy_fill: failed for prediction_id=%s sp=%d: %s",
+                    prediction_id, settlement_period, e
+                )
+                errors += 1
+
+        logger.info(
+            "accuracy_fill: complete for %s — filled=%d skipped=%d errors=%d",
+            target_date_str, filled, skipped, errors
+        )
+
+
 async def fetch_gbp_eur_rate(http: httpx.AsyncClient) -> float:
     try:
         resp = await http.get(
@@ -2002,6 +2155,12 @@ def scheduled_physical_premium() -> None:
         asyncio.run(calculate_physical_premium())
     except Exception as e:
         logger.error("Physical premium cycle aborted: %s", e, exc_info=True)
+
+
+def scheduled_accuracy_fill() -> None:
+    """Nightly accuracy fill — runs at 02:00 UTC."""
+    logger.info("accuracy_fill: nightly job triggered")
+    asyncio.run(run_accuracy_fill_job())
 
 
 # -----------------------------------------------------------------------------
@@ -3375,7 +3534,7 @@ def main() -> None:
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
         "| TTF NGP every %s min | NBP NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
-        "| morning brief daily 06:00 (host TZ; use UTC)",
+        "| morning brief daily 06:00 (host TZ; use UTC) | accuracy fill daily 02:00 UTC",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -3409,6 +3568,7 @@ def main() -> None:
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
+    schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
 
     while True:
         schedule.run_pending()
