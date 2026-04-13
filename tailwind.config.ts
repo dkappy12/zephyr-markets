@@ -9,6 +9,7 @@ export default {
         "ivory-border": "#D9D2C4",
         card: "#FDFBF7",
         ink: "#2C2A26",
+        "ink-dark": "#2C2A26",
         "ink-mid": "#6B6760",
         "ink-light": "#9E9890",
         bull: "#1D6B4E",

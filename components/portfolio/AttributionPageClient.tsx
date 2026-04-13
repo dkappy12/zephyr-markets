@@ -22,6 +22,10 @@ import {
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  assetNameFromTitle,
+  mwDeratedForRow,
+} from "@/lib/signal-feed";
 import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
 import { motion } from "framer-motion";
@@ -31,6 +35,8 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceDot,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -71,11 +77,14 @@ function parseDeratedMwFromDescription(description: string | null): number | nul
   return Number.isFinite(n) ? n : null;
 }
 
+/** £/MWh price lift per MW offline × user's net GB power MW; rounded to nearest £10. */
 function unplannedSignalImpactGbp(
-  parsedMw: number,
-  netPowerDeltaMw: number,
+  mwOffline: number,
+  netPowerMw: number,
 ): number {
-  return parsedMw * 0.5 * (netPowerDeltaMw / 1000);
+  const priceImpactGbpPerMwh = mwOffline * 0.05;
+  const bookImpact = priceImpactGbpPerMwh * netPowerMw;
+  return Math.round(bookImpact / 10) * 10;
 }
 
 function regimeStyle(regimeRaw: string | null): {
@@ -453,17 +462,55 @@ export function AttributionPageClient() {
   const barPct = (v: number) =>
     absSum > 0 ? Math.round((Math.abs(v) / absSum) * 100) : 0;
 
-  const chartData = pnlHistory
-    .map((r) => ({
-      d: r.date,
-      pnl: Number(r.total_pnl ?? 0),
-    }))
-    .filter((x) => Number.isFinite(x.pnl));
+  const chartData = useMemo(
+    () =>
+      pnlHistory
+        .map((r) => ({
+          d: r.date,
+          pnl: Number(r.total_pnl ?? 0),
+        }))
+        .filter((x) => Number.isFinite(x.pnl)),
+    [pnlHistory],
+  );
+
+  const chartYDomain = useMemo((): [number, number] => {
+    if (chartData.length === 0) return [0, 1];
+    const vals = chartData.map((x) => x.pnl);
+    const minPnl = Math.min(...vals);
+    const maxPnl = Math.max(...vals);
+    return [Math.min(0, minPnl * 1.1), Math.max(0, maxPnl * 1.1)];
+  }, [chartData]);
+
+  const chartTodayPoint = useMemo(() => {
+    const t = utcToday();
+    return chartData.find((c) => String(c.d) === t) ?? null;
+  }, [chartData]);
 
   const unplannedSignals = useMemo(() => {
     if (!hasGbPower) return [];
-    return [...signals]
-      .filter((s) => /unplanned/i.test(s.description ?? ""))
+    const unplanned = signals.filter((s) =>
+      /unplanned/i.test(s.description ?? ""),
+    );
+    const byAsset = new Map<string, SignalRow[]>();
+    for (const row of unplanned) {
+      const asset = assetNameFromTitle(row.title);
+      const list = byAsset.get(asset) ?? [];
+      list.push(row);
+      byAsset.set(asset, list);
+    }
+    const picked: SignalRow[] = [];
+    for (const [, list] of byAsset) {
+      const best = [...list].sort((a, b) => {
+        const mwA = mwDeratedForRow(a) ?? 0;
+        const mwB = mwDeratedForRow(b) ?? 0;
+        if (mwB !== mwA) return mwB - mwA;
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      })[0];
+      picked.push(best);
+    }
+    return picked
       .sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -560,16 +607,17 @@ export function AttributionPageClient() {
   return (
     <div className="space-y-10">
       <div>
-        <motion.h1
+        <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="font-serif text-3xl text-ink"
         >
-          Attribution
-        </motion.h1>
-        <p className="mt-2 max-w-2xl text-sm text-ink-mid">
-          How today&apos;s physical drivers are moving your book.
-        </p>
+          <h1 className="text-4xl font-serif text-ink-dark mb-1">
+            Attribution
+          </h1>
+          <p className="text-sm text-ink-light">
+            How today&apos;s physical drivers are moving your book.
+          </p>
+        </motion.div>
       </div>
 
       {loading ? (
@@ -803,13 +851,13 @@ export function AttributionPageClient() {
             ) : (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {unplannedSignals.map((s) => {
-                  const parsedMw = parseDeratedMwFromDescription(
-                    s.description,
-                  );
+                  const mwOffline =
+                    mwDeratedForRow(s) ??
+                    parseDeratedMwFromDescription(s.description);
                   const netMw = gbNet.isMixed ? 0 : gbNet.signedMw;
                   const est =
-                    parsedMw != null
-                      ? unplannedSignalImpactGbp(parsedMw, netMw)
+                    mwOffline != null && mwOffline > 0
+                      ? unplannedSignalImpactGbp(mwOffline, netMw)
                       : 0;
                   const estFmt = formatGbpColored(est);
                   const gbPos = positions.find((p) => isGbPowerMarket(p));
@@ -825,9 +873,9 @@ export function AttributionPageClient() {
                       <p className="text-[11px] font-semibold text-ink">
                         {s.title}
                       </p>
-                      {parsedMw != null ? (
+                      {mwOffline != null && mwOffline > 0 ? (
                         <p className="mt-1 text-[11px] text-ink-mid">
-                          {parsedMw.toLocaleString("en-GB", {
+                          {mwOffline.toLocaleString("en-GB", {
                             maximumFractionDigits: 1,
                           })}{" "}
                           MW offline (unplanned)
@@ -914,6 +962,11 @@ export function AttributionPageClient() {
                       stroke="rgba(44,42,38,0.08)"
                       vertical={false}
                     />
+                    <ReferenceLine
+                      y={0}
+                      stroke="rgba(44,42,38,0.4)"
+                      strokeDasharray="4 4"
+                    />
                     <XAxis
                       dataKey="d"
                       tick={{ fontSize: 10, fill: "#6b6560" }}
@@ -926,6 +979,7 @@ export function AttributionPageClient() {
                       }}
                     />
                     <YAxis
+                      domain={chartYDomain}
                       tick={{ fontSize: 10, fill: "#6b6560" }}
                       tickFormatter={(v) => `£${v}`}
                     />
@@ -950,6 +1004,23 @@ export function AttributionPageClient() {
                       fill="url(#pnlGrad)"
                       isAnimationActive={false}
                     />
+                    {chartTodayPoint ? (
+                      <ReferenceDot
+                        x={chartTodayPoint.d}
+                        y={chartTodayPoint.pnl}
+                        r={5}
+                        fill={BRAND_GREEN}
+                        stroke="#fdfbf7"
+                        strokeWidth={2}
+                        label={{
+                          value: formatSignedGbp(chartTodayPoint.pnl),
+                          position: "top",
+                          fill: "#2c2a26",
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      />
+                    ) : null}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
