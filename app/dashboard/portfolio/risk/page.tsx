@@ -428,8 +428,8 @@ export default function RiskPage() {
   }, [positions]);
 
   const concentrationFlag = marketExposure.find((m) => m.pct > 60);
-  const today = new Date();
   const tenorBuckets = useMemo(() => {
+    const today = new Date();
     let near = 0;
     let medium = 0;
     let long = 0;
@@ -451,7 +451,7 @@ export default function RiskPage() {
       long: (long / total) * 100,
       none: (none / total) * 100,
     };
-  }, [positions, today]);
+  }, [positions]);
 
   const mwPositions = positions.filter(
     (p) => (p.unit ?? "").toLowerCase() === "mw",

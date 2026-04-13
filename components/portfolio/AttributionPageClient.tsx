@@ -880,6 +880,7 @@ export function AttributionPageClient() {
     gasMoveGbpMwh,
     remitMoveGbpMwh,
     priceResidualMoveGbpMwh,
+    carbonShare,
   ]);
 
   const waterfallRows = useMemo(() => {

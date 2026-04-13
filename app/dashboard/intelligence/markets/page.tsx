@@ -500,7 +500,6 @@ export default function MarketsPage() {
         }
 
         if (gasRes.error || !gasRes.data) {
-          // eslint-disable-next-line no-console
           console.warn("[Markets TTF] gas query unavailable", {
             error: gasRes.error?.message ?? null,
             hubFilter: "TTF",
@@ -512,7 +511,6 @@ export default function MarketsPage() {
           const pe = parseNum(g.price_eur_mwh);
           if (pe != null) {
             if (pe <= 0) {
-              // eslint-disable-next-line no-console
               console.warn("[Markets TTF] non-positive price from gas_prices", {
                 price_eur_mwh: pe,
                 price_time: g.price_time ?? null,
@@ -526,7 +524,6 @@ export default function MarketsPage() {
                 g.fetched_at != null ? String(g.fetched_at) : null,
             });
           } else {
-            // eslint-disable-next-line no-console
             console.warn("[Markets TTF] missing/invalid price_eur_mwh", {
               raw: g.price_eur_mwh ?? null,
               hubFilter: "TTF",

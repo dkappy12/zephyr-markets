@@ -474,7 +474,12 @@ export function optimisePortfolio(input: {
       })
       .sort((a, b) => b.absLossBefore - a.absLossBefore)
       .slice(0, 5)
-      .map(({ absLossBefore: _absLossBefore, ...row }) => row);
+      .map((row) => ({
+        scenarioLabel: row.scenarioLabel,
+        pnlBefore: row.pnlBefore,
+        pnlAfter: row.pnlAfter,
+        improvement: row.improvement,
+      }));
     const singleImprovement = (before.cvarLoss - singleAfter.cvarLoss) / Math.max(before.cvarLoss, 1);
     return {
       instrument: trade.market,

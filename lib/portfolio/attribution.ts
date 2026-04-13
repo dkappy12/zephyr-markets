@@ -2,7 +2,6 @@ import {
   eurMwhPnlToGbp,
   GBP_PER_EUR,
   linearPnl,
-  MWH_TO_THERM,
   netDeltaMw,
   nbpPnlGbp,
   PositionRow,

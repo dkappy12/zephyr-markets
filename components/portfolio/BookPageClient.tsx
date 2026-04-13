@@ -20,7 +20,7 @@ import {
   PositionRow,
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
-import { Check, Mail, Pencil, Trash2, Wind } from "lucide-react";
+import { Check, Pencil, Trash2, Wind } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 

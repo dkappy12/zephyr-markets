@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
@@ -69,7 +69,7 @@ export default function OverviewPage() {
   const [premiumLoading, setPremiumLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [updatedAgoLabel, setUpdatedAgoLabel] = useState("—");
+  const [relativeNowMs, setRelativeNowMs] = useState(() => new Date().getTime());
   const [premiumRow, setPremiumRow] = useState<{
     normalised_score: number;
     direction: string;
@@ -227,26 +227,23 @@ export default function OverviewPage() {
   }, []);
 
   useEffect(() => {
-    function formatRelative(d: Date): string {
-      const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-      if (sec < 60) return "Updated just now";
-      const min = Math.floor(sec / 60);
-      if (min < 60) return `Updated ${min} min ago`;
-      const hr = Math.floor(min / 60);
-      return `Updated ${hr}h ago`;
-    }
-    if (updatedAt == null) {
-      setUpdatedAgoLabel("—");
-    } else {
-      setUpdatedAgoLabel(formatRelative(updatedAt));
-    }
     relTimeRef.current = setInterval(() => {
-      if (updatedAt != null) setUpdatedAgoLabel(formatRelative(updatedAt));
+      setRelativeNowMs(new Date().getTime());
     }, 30000);
     return () => {
       if (relTimeRef.current) clearInterval(relTimeRef.current);
     };
-  }, [updatedAt]);
+  }, []);
+
+  const updatedAgoLabel = useMemo(() => {
+    if (updatedAt == null) return "—";
+    const sec = Math.max(0, Math.floor((relativeNowMs - updatedAt.getTime()) / 1000));
+    if (sec < 60) return "Updated just now";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `Updated ${min} min ago`;
+    const hr = Math.floor(min / 60);
+    return `Updated ${hr}h ago`;
+  }, [updatedAt, relativeNowMs]);
 
   const euTooltip = (
     <ul className="space-y-1">
