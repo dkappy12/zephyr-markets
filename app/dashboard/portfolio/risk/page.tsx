@@ -343,11 +343,6 @@ export default function RiskPage() {
   );
   const diversificationBenefit = sumIndividualVaRs - Math.abs(var95);
   const totalRiskBase = Math.max(Math.abs(var95), 1);
-  const anyPositionRiskOver100 =
-    !noHistory &&
-    perPositionRisk.some(
-      ({ worst }) => (Math.abs(worst?.pnl ?? 0) / totalRiskBase) * 100 > 100,
-    );
 
   const scenarioResults = useMemo(
     () => STRESS_SCENARIOS.map((s) => ({ scenario: s, ...calculateScenarioImpact(s, positions, gbpEurRate) })),
@@ -432,6 +427,11 @@ export default function RiskPage() {
 
   const hasPositions = positions.length > 0;
   const noHistory = dailyPnLSeries.length === 0;
+  const anyPositionRiskOver100 =
+    !noHistory &&
+    perPositionRisk.some(
+      ({ worst }) => (Math.abs(worst?.pnl ?? 0) / totalRiskBase) * 100 > 100,
+    );
   const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
   const coverageColor = dailyPnLSeries.length < 10 ? TERRACOTTA : dailyPnLSeries.length < 20 ? AMBER : BRAND_GREEN;
 
