@@ -452,6 +452,26 @@ export function AttributionPageClient() {
   const windAtt = premiumAttr.windGbp;
   const gasAtt = premiumAttr.gasGbp;
   const remitAtt = premiumAttr.remitGbp;
+  const gbNet = netGbPowerSignedMw(positions);
+  const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
+  const demandSignals = useMemo(
+    () =>
+      signals.filter((s) =>
+        /demand|load|consumption|margin notice|capacity market notice/i.test(
+          `${s.title ?? ""} ${s.description ?? ""}`,
+        ),
+      ),
+    [signals],
+  );
+  const interconnectorSignals = useMemo(
+    () =>
+      signals.filter((s) =>
+        /interconnector|ifa|nemo|britned|eleclink|moyle|east.?west|ewic|nsl|viking/i.test(
+          `${s.title ?? ""} ${s.description ?? ""}`,
+        ),
+      ),
+    [signals],
+  );
   const shapeAtt = useMemo(
     () =>
       positions.reduce(
@@ -527,29 +547,6 @@ export function AttributionPageClient() {
   }, [physLatest]);
 
   const normScore = parseNum(physLatest?.normalised_score);
-
-  const gbNet = netGbPowerSignedMw(positions);
-  const netGbMw = gbNet.isMixed ? 0 : gbNet.signedMw;
-
-  const demandSignals = useMemo(
-    () =>
-      signals.filter((s) =>
-        /demand|load|consumption|margin notice|capacity market notice/i.test(
-          `${s.title ?? ""} ${s.description ?? ""}`,
-        ),
-      ),
-    [signals],
-  );
-
-  const interconnectorSignals = useMemo(
-    () =>
-      signals.filter((s) =>
-        /interconnector|ifa|nemo|britned|eleclink|moyle|east.?west|ewic|nsl|viking/i.test(
-          `${s.title ?? ""} ${s.description ?? ""}`,
-        ),
-      ),
-    [signals],
-  );
 
   const alignmentScore = useMemo(() => {
     if (gbNet.isMixed || normScore == null) return 0;
