@@ -429,15 +429,11 @@ export default function BriefPage() {
                 Import positions in the Book tab to see how today&apos;s physical
                 signals affect your specific exposures.
               </p>
-            ) : row?.book_touchpoints?.trim() ? (
-              <p className="font-serif text-lg leading-relaxed text-ink">
-                {row.book_touchpoints.trim()}
-              </p>
             ) : (
               <p className="text-sm italic leading-relaxed text-ink-light">
-                Book-native P&amp;L attribution coming soon. Import your positions
-                to see how today&apos;s physical signals impact your specific
-                exposures.
+                A personalised read for your open positions is unavailable right
+                now. Check the Book tab for your live lines — the sections above
+                still reflect today&apos;s physical run.
               </p>
             )}
           </div>
