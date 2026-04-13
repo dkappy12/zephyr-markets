@@ -30,6 +30,15 @@ type BriefRow = {
   articles: BriefArticle[] | null;
 };
 
+type OpenPosition = {
+  instrument: string;
+  market: string;
+  direction: string;
+  size: number;
+  unit: string;
+  trade_price: number | null;
+};
+
 function parseWatchList(watchList: string | null): string[] {
   if (!watchList?.trim()) return [];
   return watchList
@@ -202,22 +211,79 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 export default function BriefPage() {
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState<BriefRow | null>(null);
+  const [positions, setPositions] = useState<OpenPosition[]>([]);
+  const [bookTouchpointText, setBookTouchpointText] = useState<string | null>(null);
+  const [bookTouchpointLoading, setBookTouchpointLoading] = useState(false);
 
   useEffect(() => {
     const supabase = createBrowserClient();
 
     async function load() {
-      const { data, error } = await supabase
-        .from("brief_entries")
-        .select("*")
-        .order("generated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      if (!error && data) {
-        setRow(data as BriefRow);
+      const [briefRes, posRes] = await Promise.all([
+        supabase
+          .from("brief_entries")
+          .select("*")
+          .order("generated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        user
+          ? supabase
+              .from("positions")
+              .select("instrument,market,direction,size,unit,trade_price")
+              .eq("user_id", user.id)
+              .eq("is_closed", false)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      if (!briefRes.error && briefRes.data) {
+        setRow(briefRes.data as BriefRow);
       } else {
         setRow(null);
+      }
+
+      const open = ((posRes.data ?? []) as Array<Record<string, unknown>>).map((p) => ({
+        instrument: String(p.instrument ?? ""),
+        market: String(p.market ?? ""),
+        direction: String(p.direction ?? ""),
+        size: Number(p.size ?? 0),
+        unit: String(p.unit ?? ""),
+        trade_price:
+          p.trade_price == null || !Number.isFinite(Number(p.trade_price))
+            ? null
+            : Number(p.trade_price),
+      }));
+      setPositions(open);
+
+      if (!briefRes.error && briefRes.data && open.length > 0) {
+        setBookTouchpointLoading(true);
+        const b = briefRes.data as BriefRow & { normalised_score?: number; direction?: string };
+        try {
+          const resp = await fetch("/api/brief/personalise", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              overnight_summary: b.overnight_summary ?? b.executive_summary ?? "",
+              one_risk: b.one_risk ?? "",
+              normalised_score: (b as unknown as { normalised_score?: number }).normalised_score ?? 0,
+              direction: (b as unknown as { direction?: string }).direction ?? "STABLE",
+              positions: open,
+            }),
+          });
+          const body = (await resp.json()) as { text?: string };
+          if (resp.ok && typeof body.text === "string" && body.text.trim() !== "") {
+            setBookTouchpointText(body.text.trim());
+          }
+        } catch {
+          // Silent fallback as requested.
+        } finally {
+          setBookTouchpointLoading(false);
+        }
+      } else {
+        setBookTouchpointLoading(false);
       }
       setLoading(false);
     }
@@ -340,11 +406,26 @@ export default function BriefPage() {
         <section>
           <h2 className={sectionLabelClass}>Book touchpoints</h2>
           <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
-            <p className="text-sm italic leading-relaxed text-ink-light">
-              Book-native P&L attribution coming soon. Import your positions to
-              see how today&apos;s physical signals impact your specific
-              exposures.
-            </p>
+            {bookTouchpointLoading ? (
+              <p className="text-sm italic leading-relaxed text-ink-light">
+                Personalising to your book...
+              </p>
+            ) : bookTouchpointText ? (
+              <p className="font-serif text-lg leading-relaxed text-ink">
+                {bookTouchpointText}
+              </p>
+            ) : positions.length === 0 ? (
+              <p className="text-sm italic leading-relaxed text-ink-light">
+                Import positions in the Book tab to see how today&apos;s physical
+                signals affect your specific exposures.
+              </p>
+            ) : (
+              <p className="text-sm italic leading-relaxed text-ink-light">
+                Book-native P&amp;L attribution coming soon. Import your positions
+                to see how today&apos;s physical signals impact your specific
+                exposures.
+              </p>
+            )}
           </div>
         </section>
 
