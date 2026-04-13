@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
@@ -56,6 +56,8 @@ function parsePhysicalPremiumScore(v: unknown): number {
 }
 
 export default function OverviewPage() {
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const relTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
   const [deFullPct, setDeFullPct] = useState<number | null>(null);
@@ -65,6 +67,9 @@ export default function OverviewPage() {
   const [windGw, setWindGw] = useState<number | null>(null);
   const [solarGw, setSolarGw] = useState<number | null>(null);
   const [premiumLoading, setPremiumLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [updatedAgoLabel, setUpdatedAgoLabel] = useState("—");
   const [premiumRow, setPremiumRow] = useState<{
     normalised_score: number;
     direction: string;
@@ -76,6 +81,7 @@ export default function OverviewPage() {
     const nowIso = new Date().toISOString();
 
     async function load() {
+      setLoading(true);
       const [
         sigRes,
         countRes,
@@ -191,15 +197,8 @@ export default function OverviewPage() {
         setSolarGw(null);
       }
 
-      console.log(
-        "[physical_premium] raw data:",
-        premiumRes.data,
-        "error:",
-        premiumRes.error,
-      );
       const nsRaw = premiumRes.data?.normalised_score;
       const score = parsePhysicalPremiumScore(nsRaw);
-      console.log("[physical_premium] parsed normalised_score:", score);
 
       if (!premiumRes.error && premiumRes.data) {
         const dirRaw = premiumRes.data.direction;
@@ -214,10 +213,40 @@ export default function OverviewPage() {
         setPremiumRow(null);
       }
       setPremiumLoading(false);
+      setUpdatedAt(new Date());
+      setLoading(false);
     }
 
-    load();
+    void load();
+    pollRef.current = setInterval(() => {
+      void load();
+    }, 180000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
+
+  useEffect(() => {
+    function formatRelative(d: Date): string {
+      const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+      if (sec < 60) return "Updated just now";
+      const min = Math.floor(sec / 60);
+      if (min < 60) return `Updated ${min} min ago`;
+      const hr = Math.floor(min / 60);
+      return `Updated ${hr}h ago`;
+    }
+    if (updatedAt == null) {
+      setUpdatedAgoLabel("—");
+    } else {
+      setUpdatedAgoLabel(formatRelative(updatedAt));
+    }
+    relTimeRef.current = setInterval(() => {
+      if (updatedAt != null) setUpdatedAgoLabel(formatRelative(updatedAt));
+    }, 30000);
+    return () => {
+      if (relTimeRef.current) clearInterval(relTimeRef.current);
+    };
+  }, [updatedAt]);
 
   const euTooltip = (
     <ul className="space-y-1">
@@ -352,6 +381,10 @@ export default function OverviewPage() {
             <p className="text-xs text-ink-mid">
               Latest physical drivers with desk relevance.
             </p>
+            <p className="mt-1 text-[10px] text-ink-light">{updatedAgoLabel}</p>
+            {loading && preview.length > 0 ? (
+              <p className="text-[10px] text-ink-light">Refreshing...</p>
+            ) : null}
           </div>
         </div>
         <div className="grid gap-3">

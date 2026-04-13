@@ -4,7 +4,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   Bar,
@@ -296,7 +296,9 @@ function formatStorageInjectionTwhDay(twhPerDay: number): string {
 }
 
 export default function MarketsPage() {
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [midRows, setMidRows] = useState<MidRow[]>([]);
   const [todayRows, setTodayRows] = useState<MidRow[]>([]);
   const [todayDateStr, setTodayDateStr] = useState<string>(utcTodayStr());
@@ -327,6 +329,7 @@ export default function MarketsPage() {
     const wxRangeEnd = `${utcDatePlusDays(2)}T00:00:00.000Z`;
 
     async function load() {
+      setLoading(true);
       setLoadError(null);
       try {
         const volProbe = await supabase
@@ -625,11 +628,18 @@ export default function MarketsPage() {
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "Load failed");
       } finally {
+        setUpdatedAt(new Date());
         setLoading(false);
       }
     }
 
-    load();
+    void load();
+    pollRef.current = setInterval(() => {
+      void load();
+    }, 120000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -638,8 +648,6 @@ export default function MarketsPage() {
       .then((r) => r.json())
       .then((j: Record<string, unknown>) => {
         if (cancelled) return;
-        // eslint-disable-next-line no-console
-        console.log("[BMRS interconnector-flows raw]", j);
         if (j.ok === true && Array.isArray(j.rows)) {
           setIcFlowsError(null);
           setIcFlows({
@@ -714,15 +722,6 @@ export default function MarketsPage() {
           wind_implied_gw: windImpliedGw,
         };
       });
-    // eslint-disable-next-line no-console
-    console.log(
-      "yesterday data sample:",
-      chartData.slice(0, 3).map((d) => ({
-        sp: d.sp,
-        today: d.today_price,
-        yesterday: d.yesterday_price,
-      })),
-    );
     return chartData;
   }, [todayRows, yesterdayRows, weatherRows, todayDateStr]);
 
@@ -928,6 +927,30 @@ export default function MarketsPage() {
           " UTC"
         : null;
 
+  const gbUpdated = useMemo(() => {
+    const latestFetched = [...todayRows, ...midRows].find(
+      (r) => r.fetched_at != null,
+    )?.fetched_at;
+    if (latestFetched) {
+      return (
+        formatInTimeZone(parseISO(latestFetched), "UTC", "dd MMM yyyy HH:mm") +
+        " UTC"
+      );
+    }
+    return null;
+  }, [todayRows, midRows]);
+
+  const sparkUpdated = useMemo(() => {
+    if (gbUpdated && gasUpdated) return `Power ${gbUpdated} · Gas ${gasUpdated}`;
+    return gbUpdated ?? gasUpdated ?? null;
+  }, [gbUpdated, gasUpdated]);
+
+  const storageUpdated = useMemo(() => {
+    const latest = storageLatest[0]?.report_date;
+    if (!latest) return null;
+    return `${latest} UTC`;
+  }, [storageLatest]);
+
   const residualGw = physicalPremium?.residual_demand_gw;
 
   const darkSpark = useMemo(() => {
@@ -1009,6 +1032,16 @@ export default function MarketsPage() {
           </p>
           <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
             {loading ? "…" : remitBarDisplay ?? "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+            Last updated
+          </p>
+          <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+            {updatedAt != null
+              ? `${formatInTimeZone(updatedAt, "UTC", "HH:mm")} UTC`
+              : "—"}
           </p>
         </div>
       </motion.div>
@@ -1218,6 +1251,9 @@ export default function MarketsPage() {
             {srmcRef != null
               ? `Grey dash: SRMC £${srmcRef.toFixed(2)}/MWh · Wind: ECMWF 100 m (m/s) × 2.125 → implied GW`
               : "No SRMC reference (no TTF or stored SRMC)"}
+          </p>
+          <p className="mt-1 text-[10px] text-ink-light">
+            {gbUpdated != null ? `Updated ${gbUpdated}` : "Data unavailable"}
           </p>
           <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3 text-[11px] text-ink-mid">
             <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-light">
@@ -1458,6 +1494,9 @@ export default function MarketsPage() {
           <p className="mt-1 text-[9px] text-ink-light">
             Last 48 SPs · spark vs latest TTF-implied SRMC
           </p>
+          <p className="mt-1 text-[10px] text-ink-light">
+            {sparkUpdated != null ? `Updated ${sparkUpdated}` : "Data unavailable"}
+          </p>
         </motion.div>
 
         {/* EU Storage */}
@@ -1495,6 +1534,9 @@ export default function MarketsPage() {
             {storageAvg != null
               ? `At ${storageAvg.toFixed(1)}% fill, winter draw risk elevated. Supports TTF above €40/MWh floor.`
               : "Storage vs gas: connect storage fill for colour."}
+          </p>
+          <p className="mt-1 text-[10px] text-ink-light">
+            {storageUpdated != null ? `Updated ${storageUpdated}` : "Data unavailable"}
           </p>
           <div className="mt-4 h-[100px] w-full">
             {storageChartData.some((d) => d.full_pct > 0) ? (
