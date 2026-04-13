@@ -45,6 +45,12 @@ type PowerPriceRow = {
 type GasPriceRow = {
   price_eur_mwh: number | null;
   price_time: string;
+  hub: string | null;
+};
+
+type FxRateRow = {
+  rate_date: string;
+  rate: number | null;
 };
 
 type DailyPnL = { date: string; pnl: number };
@@ -123,7 +129,9 @@ function formatDay(d: string): string {
 const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
-  gasPricesByDay: Record<string, number>,
+  ttfPricesByDay: Record<string, number>,
+  nbpPricesByDay: Record<string, number>,
+  fxByDay: Record<string, number>,
 ): DailyPnL[] => {
   const dates = Object.keys(powerPricesByDay).sort();
   const result: DailyPnL[] = [];
@@ -142,14 +150,14 @@ const calculateDailyPnL = (
         const currPrice = powerPricesByDay[currDate] ?? 0;
         dayPnL += (currPrice - prevPrice) * size * direction;
       } else if (pos.market === "TTF") {
-        const prevPrice = (gasPricesByDay[prevDate] ?? 0) * HISTORICAL_GBP_PER_EUR;
-        const currPrice = (gasPricesByDay[currDate] ?? 0) * HISTORICAL_GBP_PER_EUR;
+        const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
+        const currFx = fxByDay[currDate] ?? HISTORICAL_GBP_PER_EUR;
+        const prevPrice = (ttfPricesByDay[prevDate] ?? 0) * prevFx;
+        const currPrice = (ttfPricesByDay[currDate] ?? 0) * currFx;
         dayPnL += (currPrice - prevPrice) * size * direction;
       } else if (pos.market === "NBP") {
-        const prevNbp =
-          ((gasPricesByDay[prevDate] ?? 0) * HISTORICAL_GBP_PER_EUR) / 2.931 * 10;
-        const currNbp =
-          ((gasPricesByDay[currDate] ?? 0) * HISTORICAL_GBP_PER_EUR) / 2.931 * 10;
+        const prevNbp = nbpPricesByDay[prevDate] ?? 0;
+        const currNbp = nbpPricesByDay[currDate] ?? 0;
         dayPnL += ((currNbp - prevNbp) * size) / 100 * direction;
       }
     }
@@ -202,6 +210,7 @@ export default function RiskPage() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [powerPrices, setPowerPrices] = useState<PowerPriceRow[]>([]);
   const [gasPrices, setGasPrices] = useState<GasPriceRow[]>([]);
+  const [fxRates, setFxRates] = useState<FxRateRow[]>([]);
   const [gbpEurRate, setGbpEurRate] = useState(0.86);
 
   useEffect(() => {
@@ -229,6 +238,7 @@ export default function RiskPage() {
         { data: positionsData },
         { data: powerData },
         { data: gasData },
+        { data: fxData },
         { data: pnlHistory },
         { data: latestPremium },
       ] = await Promise.all([
@@ -249,6 +259,12 @@ export default function RiskPage() {
             .select("price_eur_mwh, price_time, hub, source, fetched_at")
             .order("price_time", { ascending: true }),
           supabase
+            .from("fx_rates")
+            .select("rate_date, rate")
+            .eq("base", "EUR")
+            .eq("quote", "GBP")
+            .order("rate_date", { ascending: true }),
+          supabase
             .from("portfolio_pnl")
             .select(
               "date, total_pnl, wind_attribution_gbp, gas_attribution_gbp, remit_attribution_gbp",
@@ -268,6 +284,7 @@ export default function RiskPage() {
       setPositions((positionsData ?? []) as PositionRow[]);
       setPowerPrices((powerData ?? []) as PowerPriceRow[]);
       setGasPrices((gasData ?? []) as GasPriceRow[]);
+      setFxRates((fxData ?? []) as FxRateRow[]);
       setLoading(false);
     }
     void load();
@@ -290,9 +307,10 @@ export default function RiskPage() {
     return out;
   }, [powerPrices]);
 
-  const gasPricesByDay = useMemo(() => {
+  const ttfPricesByDay = useMemo(() => {
     const buckets = new Map<string, { sum: number; count: number }>();
     for (const row of gasPrices) {
+      if ((row.hub ?? "").toUpperCase() !== "TTF") continue;
       const d = asDateOnly(row.price_time);
       const p = asNum(row.price_eur_mwh);
       const cur = buckets.get(d) ?? { sum: 0, count: 0 };
@@ -307,9 +325,37 @@ export default function RiskPage() {
     return out;
   }, [gasPrices]);
 
+  const nbpPricesByDay = useMemo(() => {
+    const buckets = new Map<string, { sum: number; count: number }>();
+    for (const row of gasPrices) {
+      if ((row.hub ?? "").toUpperCase() !== "NBP") continue;
+      const d = asDateOnly(row.price_time);
+      const p = asNum(row.price_eur_mwh);
+      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
+      cur.sum += p;
+      cur.count += 1;
+      buckets.set(d, cur);
+    }
+    const out: Record<string, number> = {};
+    for (const [k, v] of buckets) {
+      out[k] = v.count > 0 ? v.sum / v.count : 0;
+    }
+    return out;
+  }, [gasPrices]);
+
+  const fxByDay = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const row of fxRates) {
+      if (!row.rate_date) continue;
+      const rate = asNum(row.rate);
+      if (rate > 0) out[row.rate_date.slice(0, 10)] = rate;
+    }
+    return out;
+  }, [fxRates]);
+
   const dailyPnLSeries = useMemo(
-    () => calculateDailyPnL(positions, powerPricesByDay, gasPricesByDay),
-    [positions, powerPricesByDay, gasPricesByDay],
+    () => calculateDailyPnL(positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay),
+    [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay],
   );
 
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
@@ -333,11 +379,11 @@ export default function RiskPage() {
 
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
-      const series = calculateDailyPnL([p], powerPricesByDay, gasPricesByDay);
+      const series = calculateDailyPnL([p], powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay);
       const worst = series.length > 0 ? series.reduce((min, d) => (d.pnl < min.pnl ? d : min), series[0]) : null;
       return { position: p, worst };
     });
-  }, [positions, powerPricesByDay, gasPricesByDay]);
+  }, [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay]);
 
   const sumIndividualVaRs = perPositionRisk.reduce(
     (sum, r) => sum + Math.abs(r.worst?.pnl ?? 0),
@@ -505,7 +551,7 @@ export default function RiskPage() {
           </motion.div>
           <p className="text-xs text-ink-light text-right">EUR/GBP: {gbpEurRate.toFixed(4)} · via ECB</p>
           <p className="text-xs text-ink-light text-right">
-            Historical VaR uses fixed EUR/GBP {HISTORICAL_GBP_PER_EUR.toFixed(2)} to avoid lookahead contamination.
+            Historical VaR uses date-aligned EUR/GBP from stored `fx_rates` (fallback {HISTORICAL_GBP_PER_EUR.toFixed(2)}).
           </p>
 
           <section>

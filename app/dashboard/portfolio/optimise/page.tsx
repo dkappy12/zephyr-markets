@@ -147,7 +147,7 @@ export default function OptimisePage() {
         label: "Independent NBP history (no proxy)",
         pass: !data.diagnostics.nbpProxyUsed,
         detail: data.diagnostics.nbpProxyUsed
-          ? "Proxy in use"
+          ? "Missing dates detected"
           : "Independent history available",
       },
     ];

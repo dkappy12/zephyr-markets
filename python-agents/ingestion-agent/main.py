@@ -11,6 +11,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
   `market_prices` (upsert by price_date + settlement_period + market).
 - TTF gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
+- FX rates: Frankfurter EUR/GBP daily fix → Supabase `fx_rates` (upsert on rate_date + base + quote).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 - Physical premium: CCGT SRMC model → Supabase `physical_premium` (append-only history).
 - Morning brief: Claude → Supabase `brief_entries` (append-only).
@@ -22,6 +23,7 @@ Required Supabase:
   - storage_levels: see storage_levels.sql
   - market_prices: see market_prices.sql
   - gas_prices: see gas_prices.sql
+  - fx_rates: see fx_rates.sql
   - solar_outturn: see solar_outturn.sql
   - physical_premium: see physical_premium.sql
   - brief_entries: see brief_entries.sql
@@ -264,6 +266,11 @@ def _gas_prices_rest_url() -> str:
 def _solar_outturn_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/solar_outturn"
+
+
+def _fx_rates_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/fx_rates"
 
 
 def _physical_premium_rest_url() -> str:
@@ -1097,6 +1104,25 @@ async def upsert_gas_prices_http(
     resp.raise_for_status()
 
 
+async def upsert_fx_rates_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _fx_rates_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "rate_date,base,quote"},
+    )
+    resp.raise_for_status()
+
+
 async def fetch_ttf_price() -> None:
     """Fetch EEX TTF NGP CSV; upsert today's UTC gas day if present, else latest Gasday."""
     _require_supabase_env()
@@ -1449,6 +1475,20 @@ async def fetch_gbp_eur_rate(http: httpx.AsyncClient) -> float:
         return 0.86
 
 
+async def upsert_daily_fx_rate(http: httpx.AsyncClient, rate: float) -> None:
+    rate_date = datetime.now(timezone.utc).date().isoformat()
+    row = {
+        "rate_date": rate_date,
+        "base": "EUR",
+        "quote": "GBP",
+        "rate": rate,
+        "source": "Frankfurter ECB",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await upsert_fx_rates_http(http, [row])
+    logger.info("fx_rate: upserted EUR/GBP %.4f for %s", rate, rate_date)
+
+
 async def calculate_physical_premium() -> None:
     """CCGT-anchored SRMC implied price vs market; append to physical_premium."""
     _require_supabase_env()
@@ -1457,6 +1497,7 @@ async def calculate_physical_premium() -> None:
 
     async with httpx.AsyncClient(follow_redirects=True) as http:
         gbp_eur_rate = await fetch_gbp_eur_rate(http)
+        await upsert_daily_fx_rate(http, gbp_eur_rate)
         wind_ms: float | None = None
         try:
             wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)

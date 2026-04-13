@@ -9,6 +9,7 @@ export type Scenario = {
   gbPowerMove: number;
   ttfMoveEurMwh: number;
   nbpMovePth: number;
+  gbpPerEur?: number;
 };
 
 export type HedgeTrade = {
@@ -157,7 +158,8 @@ function pnlForPosition(position: PositionRow, scenario: Scenario, gbpPerEur: nu
   if (!Number.isFinite(size) || size === 0) return 0;
   const dm = directionMult(position.direction);
   if (m === "GB_POWER") return scenario.gbPowerMove * size * dm;
-  if (m === "TTF") return scenario.ttfMoveEurMwh * gbpPerEur * size * dm;
+  const fx = Number.isFinite(scenario.gbpPerEur) ? (scenario.gbpPerEur as number) : gbpPerEur;
+  if (m === "TTF") return scenario.ttfMoveEurMwh * fx * size * dm;
   if (m === "NBP") return (scenario.nbpMovePth * size * dm) / 100;
   return 0;
 }
@@ -465,6 +467,7 @@ export function buildHistoricalScenarios(input: {
   powerByDay: Record<string, number>;
   ttfByDayEur: Record<string, number>;
   nbpByDayPth: Record<string, number>;
+  fxByDay?: Record<string, number>;
 }): Scenario[] {
   const dates = Object.keys(input.powerByDay)
     .filter((d) => d in input.ttfByDayEur && d in input.nbpByDayPth)
@@ -489,6 +492,7 @@ export function buildHistoricalScenarios(input: {
         (input.nbpByDayPth[curr] ?? 0) - (input.nbpByDayPth[prev] ?? 0),
         HISTORICAL_MOVE_CAPS.nbpMovePth,
       ),
+      gbpPerEur: input.fxByDay?.[curr],
     });
   }
   return rows;

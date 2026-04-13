@@ -1,4 +1,4 @@
-import { optimisePortfolio, buildHistoricalScenarios, stressScenarios, ttfEurMwhToNbpPth, type OptimiseObjective } from "@/lib/portfolio/optimise";
+import { optimisePortfolio, buildHistoricalScenarios, stressScenarios, type OptimiseObjective } from "@/lib/portfolio/optimise";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -14,6 +14,11 @@ function parseNum(v: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function isMissingFxTableError(message: string | undefined): boolean {
+  const m = (message ?? "").toLowerCase();
+  return m.includes("fx_rates") && (m.includes("does not exist") || m.includes("schema cache"));
 }
 
 function addDailySample(
@@ -54,7 +59,7 @@ function optimiserQuality(input: {
     warnings.push("Historical scenario depth is below 20 days.");
   }
   if (input.nbpProxyUsed) {
-    warnings.push("NBP history unavailable for some dates; TTF-derived proxy applied.");
+    warnings.push("NBP history missing for some dates; scenario coverage is reduced.");
   }
   if (input.candidatePackageCount < 30) {
     warnings.push("Hedge search space is narrow; recommendations may be unstable.");
@@ -108,7 +113,7 @@ export async function GET(req: Request) {
     since.setDate(since.getDate() - 120);
     const sinceDate = since.toISOString().slice(0, 10);
 
-    const [positionsRes, powerRes, gasRes] = await Promise.all([
+    const [positionsRes, powerRes, gasRes, fxRes] = await Promise.all([
       supabase
         .from("positions")
         .select("*")
@@ -126,15 +131,28 @@ export async function GET(req: Request) {
         .in("hub", ["TTF", "NBP"])
         .gte("price_time", `${sinceDate}T00:00:00`)
         .order("price_time", { ascending: true }),
+      supabase
+        .from("fx_rates")
+        .select("rate_date, rate")
+        .eq("base", "EUR")
+        .eq("quote", "GBP")
+        .gte("rate_date", sinceDate)
+        .order("rate_date", { ascending: true }),
     ]);
 
-    if (positionsRes.error || powerRes.error || gasRes.error) {
+    if (
+      positionsRes.error ||
+      powerRes.error ||
+      gasRes.error ||
+      (fxRes.error && !isMissingFxTableError(fxRes.error.message))
+    ) {
       return NextResponse.json(
         {
           error:
             positionsRes.error?.message ??
             powerRes.error?.message ??
             gasRes.error?.message ??
+            fxRes.error?.message ??
             "Failed loading optimise data",
         },
         { status: 500 },
@@ -164,11 +182,15 @@ export async function GET(req: Request) {
     const powerByDay = finaliseDailyAverage(powerAgg);
     const ttfByDay = finaliseDailyAverage(ttfAgg);
     const nbpByDay = finaliseDailyAverage(nbpAgg);
-    for (const [day, ttf] of Object.entries(ttfByDay)) {
-      if (nbpByDay[day] == null) {
-        nbpByDay[day] = ttfEurMwhToNbpPth(ttf, gbpPerEur);
-        nbpProxyUsed = true;
-      }
+    for (const day of Object.keys(ttfByDay)) {
+      if (nbpByDay[day] == null) nbpProxyUsed = true;
+    }
+    const fxByDay: Record<string, number> = {};
+    for (const row of (fxRes.error ? [] : fxRes.data) ?? []) {
+      const day = parseDateOnly(String(row.rate_date ?? ""));
+      const rate = parseNum(row.rate);
+      if (!day || rate == null) continue;
+      fxByDay[day] = rate;
     }
 
     const scenarios = [
@@ -176,6 +198,7 @@ export async function GET(req: Request) {
         powerByDay,
         ttfByDayEur: ttfByDay,
         nbpByDayPth: nbpByDay,
+        fxByDay,
       }),
       ...stressScenarios(),
     ];
