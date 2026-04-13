@@ -276,7 +276,9 @@ export default function BriefPage() {
           : Promise.resolve({ data: [], error: null }),
         supabase
           .from("physical_premium")
-          .select("normalised_score, direction")
+          .select(
+            "normalised_score, direction, implied_price_gbp_mwh, residual_demand_gw, srmc_gbp_mwh, remit_mw_lost, market_price_gbp_mwh, premium_value, regime",
+          )
           .order("calculated_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
@@ -315,7 +317,17 @@ export default function BriefPage() {
             headers.Authorization = `Bearer ${session.access_token}`;
           }
           const pp = ppRes.data as
-            | { normalised_score?: number | null; direction?: string | null }
+            | {
+                normalised_score?: number | null;
+                direction?: string | null;
+                implied_price_gbp_mwh?: number | null;
+                residual_demand_gw?: number | null;
+                srmc_gbp_mwh?: number | null;
+                remit_mw_lost?: number | null;
+                market_price_gbp_mwh?: number | null;
+                premium_value?: number | null;
+                regime?: string | null;
+              }
             | null
             | undefined;
           const scoreFromPp =
@@ -341,6 +353,13 @@ export default function BriefPage() {
               one_risk: b.one_risk ?? "",
               normalised_score: normalisedScore,
               direction: premiumDirection,
+              regime: pp?.regime ?? null,
+              residual_demand: pp?.residual_demand_gw ?? null,
+              implied_price: pp?.implied_price_gbp_mwh ?? null,
+              market_price: pp?.market_price_gbp_mwh ?? null,
+              gap: pp?.premium_value ?? null,
+              srmc: pp?.srmc_gbp_mwh ?? null,
+              remit_mw: pp?.remit_mw_lost ?? null,
               positions: open,
             }),
           });

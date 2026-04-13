@@ -6,6 +6,13 @@ type PersonaliseReq = {
   one_risk?: string;
   normalised_score?: number;
   direction?: string;
+  regime?: string | null;
+  residual_demand?: number | null;
+  implied_price?: number | null;
+  market_price?: number | null;
+  gap?: number | null;
+  srmc?: number | null;
+  remit_mw?: number | null;
   positions?: Array<{
     instrument?: string;
     market?: string;
@@ -25,6 +32,24 @@ function asNum(v: unknown): number | null {
   return null;
 }
 
+function fmtGbp(n: unknown): string {
+  const v = asNum(n);
+  if (v == null) return "—";
+  return v.toFixed(2);
+}
+
+function fmtGw(n: unknown): string {
+  const v = asNum(n);
+  if (v == null) return "—";
+  return v.toFixed(1);
+}
+
+function fmtScore(n: unknown): string {
+  const v = asNum(n);
+  if (v == null) return "—";
+  return v.toFixed(1);
+}
+
 function extractAnthropicText(rawText: string): string {
   const parsed = JSON.parse(rawText) as {
     content?: Array<{ type?: string; text?: string }>;
@@ -36,19 +61,18 @@ function extractAnthropicText(rawText: string): string {
     .trim();
 }
 
-type FocusPosition = {
-  dir: string;
-  size: number;
-  unit: string;
-  label: string;
-  market: string;
-  tp: number | null;
-};
-
-function labelsPresentInText(text: string, labels: string[]): boolean {
-  if (labels.length === 0) return false;
+/** Match if full label appears, or enough distinctive tokens (models paraphrase names). */
+function positionReferencedInText(text: string, label: string): boolean {
   const lower = text.toLowerCase();
-  return labels.every((l) => l.length > 0 && lower.includes(l.toLowerCase()));
+  const l = label.trim().toLowerCase();
+  if (!l) return false;
+  if (lower.includes(l)) return true;
+  const words = l.split(/\s+/).filter((w) => w.length > 2);
+  if (words.length <= 1) {
+    return words.length === 1 && lower.includes(words[0]!);
+  }
+  const hits = words.filter((w) => lower.includes(w));
+  return hits.length >= Math.min(words.length, Math.ceil(words.length * 0.6));
 }
 
 export async function POST(req: Request) {
@@ -80,10 +104,20 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as PersonaliseReq;
-    const overnight = String(body.overnight_summary ?? "").slice(0, 200);
-    const oneRisk = String(body.one_risk ?? "").slice(0, 150);
-    const score = asNum(body.normalised_score) ?? 0;
+    const normalised_score = fmtScore(body.normalised_score);
     const direction = String(body.direction ?? "STABLE");
+    const regime = String(body.regime ?? "—").trim() || "—";
+    const residual_demand = fmtGw(body.residual_demand);
+    const market_price = fmtGbp(body.market_price);
+    const implied_price = fmtGbp(body.implied_price);
+    const gap = fmtGbp(body.gap);
+    const srmc = fmtGbp(body.srmc);
+    const remitMwRaw = asNum(body.remit_mw);
+    const remit_mw =
+      remitMwRaw != null && Number.isFinite(remitMwRaw)
+        ? remitMwRaw.toFixed(1)
+        : "—";
+
     const positions = Array.isArray(body.positions) ? body.positions : [];
     const normalizedPositions = positions.map((p) => {
       const dir = String(p.direction ?? "long");
@@ -98,9 +132,9 @@ export async function POST(req: Request) {
       return { dir, size, unit, instrument, market, tp, label };
     });
 
-    const focusPositions = [...normalizedPositions]
-      .sort((a, b) => Math.abs(b.size) - Math.abs(a.size))
-      .slice(0, 4);
+    const focusPositions = [...normalizedPositions].sort(
+      (a, b) => Math.abs(b.size) - Math.abs(a.size),
+    );
 
     if (focusPositions.length === 0) {
       return NextResponse.json(
@@ -109,29 +143,39 @@ export async function POST(req: Request) {
       );
     }
 
-    const requiredTokens = focusPositions.map((_, idx) => `[P${idx + 1}]`);
     const requiredLabels = focusPositions.map((p) => p.label).filter(Boolean);
-    const positionLines = focusPositions
-      .map((p, idx) => {
-        const token = `[P${idx + 1}]`;
-        return `${token} ${p.dir} ${p.size} ${p.unit} ${p.label} (${p.market}), entry ${p.tp == null ? "unknown" : p.tp}`;
+
+    const position_lines = focusPositions
+      .map((p) => {
+        const side = p.dir.toLowerCase() === "short" ? "SHORT" : "LONG";
+        const inst = p.instrument || p.label;
+        const entry =
+          p.tp == null || !Number.isFinite(p.tp) ? "market" : String(p.tp);
+        return `${side} ${p.size} ${p.unit} ${inst} (${p.market}) — entered at ${entry}`;
       })
       .join("\n");
 
-    const userPrompt = `Today's physical conditions:
-- Physical premium score: ${score} (${direction})
-- Overnight summary: ${overnight}
-- One risk: ${oneRisk}
+    const userPrompt = `Physical conditions as of this morning:
+- Regime: ${regime} | Residual demand: ${residual_demand} GW | Physical premium score: ${normalised_score} (${direction})
+- Market price: £${market_price}/MWh | Physically-implied price: £${implied_price}/MWh | Gap: £${gap}/MWh
+- SRMC anchor: £${srmc}/MWh | REMIT capacity impact: ${remit_mw} MW active outages
 
-The trader's open positions (actual book):
-${positionLines}
+My open positions:
+${position_lines}
 
-Write one natural analyst paragraph (2-4 sentences) about these positions only.
-Requirements:
-1) Mention each token at least once: ${requiredTokens.join(", ")}
-2) For each token, explain why today's physical setup is favorable or unfavorable for that line.
-3) Explicitly connect to current drivers (physical premium score/direction, weather-residual context, and one_risk).
-4) Sound like a human GB energy markets analyst. No bullet points. No templates. No placeholders.`;
+Write one paragraph explaining what this morning's physical picture means for my specific positions. 
+Rules:
+- Reference each position by its exact instrument name
+- State whether each position is helped or hurt by current conditions and by how much in £/MWh terms where possible
+- Identify the single biggest risk to the book today
+- End with one specific thing to watch
+- No hedging language. No 'may', 'could', 'might'. State things directly.
+
+Example of the style and quality required:
+"The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 faces £35/MWh of mean reversion risk with the market at £125 against a physically-implied £90 — renewable dominance at 18 GW wind is structurally suppressing the price anchor the position needs. Both short gas legs are correctly positioned: the short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 benefit from temperature-suppressed demand keeping TTF capped around €50/MWh. The key risk today is a wind ramp-down below 15 GW switching the regime and pulling power back toward SRMC — watch the 14:00-18:00 UTC window where forecast uncertainty is highest."`;
+
+    const systemPrompt =
+      "You are a senior energy trader writing a personal morning note. You write exactly one paragraph of 3-4 sentences. Every sentence contains a specific number — price, volume, or percentage. You never use phrases like 'it is worth noting', 'it is important', 'positions are', or any filler. You write as if you are the trader, not as if you are describing the trader.";
 
     async function runAnthropic(
       apiKey: string,
@@ -146,9 +190,8 @@ Requirements:
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 300,
-          system:
-            "You are Zephyr's market intelligence engine. You write concise, direct analysis for professional energy traders. One paragraph maximum. No padding. Active voice. Specific numbers only.",
+          max_tokens: 600,
+          system: systemPrompt,
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -164,14 +207,9 @@ Requirements:
 
     function validatePersonalisedText(text: string): boolean {
       if (!text || /^invalid\.?$/i.test(text.trim())) return false;
-      const lower = text.toLowerCase();
-      const hasAllTokens = requiredTokens.every((t) =>
-        lower.includes(t.toLowerCase()),
+      return requiredLabels.every((label) =>
+        positionReferencedInText(text, label),
       );
-      const hasAllLabels = requiredLabels.every((l) =>
-        lower.includes(l.toLowerCase()),
-      );
-      return hasAllTokens && hasAllLabels;
     }
 
     let text = "";
@@ -180,13 +218,13 @@ Requirements:
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
           key,
-          `${userPrompt}\n\nRewrite in a more natural analyst voice. Include every required token and clearly tie each position to today's physical drivers.`,
+          `${userPrompt}\n\nRewrite in a natural analyst voice. You must still clearly reference every named instrument from the book above.`,
         );
       }
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
           key,
-          `${userPrompt}\n\nFinal pass: this must be position-specific. Mention every required token and avoid generic language.`,
+          `${userPrompt}\n\nFinal pass: name each instrument from the list explicitly (use the exact instrument titles if possible) and link each to today's drivers.`,
         );
       }
     } catch (error) {
@@ -204,19 +242,9 @@ Requirements:
     }
 
     const cleaned = text.replace(/\[P\d+\]\s*/g, "").trim();
-    if (!cleaned || !labelsPresentInText(cleaned, requiredLabels)) {
+    if (!cleaned || !validatePersonalisedText(cleaned)) {
       return NextResponse.json(
         { error: "Personalised output omitted one or more open positions" },
-        { status: 500 },
-      );
-    }
-
-    const genericLongShort =
-      /\b(long|short)\s+gb\s+power\s+positions?\b/i.test(cleaned) ||
-      /\bshort\s+gas\s+positions?\b/i.test(cleaned);
-    if (genericLongShort) {
-      return NextResponse.json(
-        { error: "Personalised output was generic, not book-specific" },
         { status: 500 },
       );
     }
@@ -229,4 +257,3 @@ Requirements:
     );
   }
 }
-
