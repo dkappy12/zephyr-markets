@@ -16,11 +16,15 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Zephyr Markets",
     description:
-      "Portfolio intelligence for power and gas: REMIT, weather, storage, and your book in one place.",
+      "Real-time physical intelligence for GB power and European gas traders. Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief sized to your book.",
     url: "https://zephyr.markets",
     siteName: "Zephyr Markets",
     locale: "en_GB",
     type: "website",
+  },
+  twitter: {
+    description:
+      "Real-time physical intelligence for GB power and European gas traders. Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief sized to your book.",
   },
 };
 

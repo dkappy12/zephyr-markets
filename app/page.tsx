@@ -372,8 +372,8 @@ export default function Home() {
               Every REMIT notice, scored in plain English.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
-              Unplanned baseload, planned maintenance, interconnector derates - the
-              same feed you get in-product, with MW impact and a desk-ready read.
+              The same feed you get in-product. Every notice scored, sized, and
+              explained in plain English.
             </p>
           </motion.div>
           <div className="mt-10 grid gap-5 lg:grid-cols-3">
@@ -485,7 +485,8 @@ export default function Home() {
               The session ahead. In your inbox by 06:00.
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
-              Same structure as the live brief: drivers first, book second.
+              Published at 06:00 GMT every trading day, personalised to your open
+              positions.
             </p>
           </motion.div>
           <motion.div
