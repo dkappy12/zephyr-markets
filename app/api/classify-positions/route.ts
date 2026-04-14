@@ -50,6 +50,34 @@ trade_price must be extracted EXACTLY from the CSV row — it is the price at wh
 CRITICAL — currency:
 For TTF and other EUR-denominated markets, set currency to "EUR" and trade_price as the numeric value in EUR/MWh (or appropriate EUR unit) exactly as in the CSV. Do not convert EUR trade prices to GBP at extraction time.`;
 
+async function callAnthropic(
+  apiKey: string,
+  userMessage: string,
+): Promise<string> {
+  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 16384,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage }],
+    }),
+  });
+
+  const rawText = await anthropicRes.text();
+  if (!anthropicRes.ok) {
+    throw new Error(
+      `Anthropic API error (${anthropicRes.status}): ${rawText.slice(0, 300)}`,
+    );
+  }
+  return rawText;
+}
+
 export async function POST(req: Request) {
   try {
     const csrf = assertSameOrigin(req);
@@ -127,28 +155,14 @@ export async function POST(req: Request) {
     const redactedSlice = slice.map(redactRow);
     const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows (sensitive fields redacted): ${JSON.stringify(redactedSlice)}`;
 
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 16384,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
-
-    const rawText = await anthropicRes.text();
-    if (!anthropicRes.ok) {
+    let rawText: string;
+    try {
+      rawText = await callAnthropic(key, userMessage);
+    } catch (err: unknown) {
       return NextResponse.json(
         {
-          error: "Anthropic API error",
-          status: anthropicRes.status,
-          detail: rawText.slice(0, 2000),
+          error:
+            err instanceof Error ? err.message : "Anthropic API request failed",
         },
         { status: 502 },
       );
@@ -183,10 +197,41 @@ export async function POST(req: Request) {
     try {
       classified = JSON.parse(jsonStr);
     } catch {
-      return NextResponse.json(
-        { error: "Classification JSON parse failed", raw: jsonStr.slice(0, 2000) },
-        { status: 502 },
-      );
+      // Retry with a strict JSON-repair pass to avoid UI failures on otherwise good classifications.
+      const repairPrompt = `Convert the following content into valid strict JSON only.
+Return ONLY a JSON array and nothing else.
+Preserve array length and object field values exactly where possible.
+
+CONTENT:
+${jsonStr}`;
+      try {
+        const repairRaw = await callAnthropic(key, repairPrompt);
+        const repairParsed = JSON.parse(repairRaw) as {
+          content?: Array<{ type?: string; text?: string }>;
+        };
+        const repairedText =
+          repairParsed.content?.find((c) => c.type === "text")?.text?.trim() ??
+          "";
+        const repairedArray = extractJsonArray(repairedText);
+        if (!repairedArray) {
+          return NextResponse.json(
+            {
+              error: "Classification JSON parse failed",
+              raw: jsonStr.slice(0, 2000),
+            },
+            { status: 502 },
+          );
+        }
+        classified = JSON.parse(repairedArray);
+      } catch {
+        return NextResponse.json(
+          {
+            error: "Classification JSON parse failed",
+            raw: jsonStr.slice(0, 2000),
+          },
+          { status: 502 },
+        );
+      }
     }
 
     if (!Array.isArray(classified)) {
