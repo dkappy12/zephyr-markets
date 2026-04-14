@@ -355,16 +355,6 @@ export default function Home() {
               </div>
             </div>
           </motion.div>
-
-          <motion.p
-            custom={3}
-            variants={fadeUp}
-            initial="hidden"
-            animate="show"
-            className="mt-6 text-center text-sm text-ink-mid"
-          >
-            Free to start. No credit card required.
-          </motion.p>
         </div>
       </section>
 
@@ -448,25 +438,31 @@ export default function Home() {
               </div>
             </div>
           </div>
-          <div className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
-                WIND ATTRIBUTION
+          <div className="mt-6 max-w-3xl mx-auto grid grid-cols-2 gap-px rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-border overflow-hidden">
+            <div className="bg-card p-6">
+              <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                Wind attribution
               </p>
-              <p className="mt-3 font-serif text-base leading-relaxed text-ink-mid">
-                Wind generation at 8.2 GW sits 4.1 GW above the 7-day baseline. The
-                surplus suppressed GB day-ahead prices by an estimated £14.20/MWh,
-                directly benefiting the long power position.
+              <p className="mt-2 font-serif text-4xl text-ink">+£14,200</p>
+              <p className="mt-1 font-sans text-[10px] uppercase tracking-[0.1em] text-bull">
+                +£14.20/MWh price suppression benefit
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+                Wind at 8.2 GW sits 4.1 GW above the 7-day baseline, suppressing GB
+                day-ahead prices and directly benefiting the long power position.
               </p>
             </div>
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
-                REMIT ATTRIBUTION
+            <div className="bg-card p-6">
+              <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                REMIT attribution
               </p>
-              <p className="mt-3 font-serif text-base leading-relaxed text-ink-mid">
-                3,240 MW of unplanned outages active - 1,840 MW above the planned
-                baseline. Tighter-than-expected supply added an estimated £4.80/MWh
-                uplift to the long position.
+              <p className="mt-2 font-serif text-4xl text-ink">+£4,800</p>
+              <p className="mt-1 font-sans text-[10px] uppercase tracking-[0.1em] text-bull">
+                +£4.80/MWh unplanned outage uplift
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+                3,240 MW of unplanned outages active, 1,840 MW above the planned
+                baseline. Tighter-than-expected supply adds uplift to the long position.
               </p>
             </div>
           </div>
@@ -527,17 +523,6 @@ export default function Home() {
               </section>
             </div>
           </motion.div>
-          <div className="mt-10 text-center">
-            <p className="font-serif text-xl text-ink">
-              Your book. Your drivers. Every morning at 06:00.
-            </p>
-            <Link
-              href="/signup"
-              className="mt-4 inline-flex h-10 items-center rounded-[4px] bg-ink px-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-[#1f1d1a]"
-            >
-              Start free
-            </Link>
-          </div>
         </div>
       </section>
 
@@ -562,9 +547,6 @@ export default function Home() {
 
       <section id="pricing" className="py-16 sm:py-20">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
-          <p className="mb-8 text-center text-sm text-ink-mid">
-            Start free. Upgrade when the brief earns its keep.
-          </p>
           <div className="mx-auto max-w-xl text-center">
             <h2 className="font-serif text-3xl text-ink sm:text-4xl">Pricing</h2>
             <p className="mt-3 text-sm leading-relaxed text-ink-mid">
