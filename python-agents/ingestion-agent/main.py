@@ -3247,8 +3247,8 @@ PHYSICAL PREMIUM MODEL:
 
 GENERATION:
 - Wind (model): {_brief_fmt_num(wind_gw, 1)} GW | Solar: {_brief_fmt_num(solar_gw, 1)} GW | Residual demand: {_brief_fmt_num(residual, 1)} GW
-- 24h wind speed range at 100m: {_brief_fmt_num(w_min, 1)}–{_brief_fmt_num(w_max, 1)} m/s → implied wind generation range ≈ {_brief_fmt_num(wind_gw_low, 1)}–{_brief_fmt_num(wind_gw_high, 1)} GW (use scaling {WIND_MS_TO_GW:.4f} GW per m/s).
-- Nearest forecast hour to now: wind {_brief_fmt_num(closest_w_ms, 1)} m/s; temperature {_brief_fmt_num(current_temp_c, 1)} °C (current conditions).
+- 24h forecast wind speed range at 100m: {_brief_fmt_num(w_min, 1)}–{_brief_fmt_num(w_max, 1)} m/s (forecast range only — actual current wind outturn shown above as Wind (model) GW from Elexon FUELINST).
+- Nearest forecast temperature: {_brief_fmt_num(current_temp_c, 1)} °C.
 - 24h temperature span: {_brief_fmt_num(t_min_c, 1)}–{_brief_fmt_num(t_max_c, 1)} °C.
 - Wind profile (24h window, first vs second half): {wind_trend_note}
 
@@ -3269,7 +3269,7 @@ OVERNIGHT SUMMARY
 What the physical world has done since the previous close. Reference the physical premium score direction, wind and solar generation levels, any significant REMIT outages that came in overnight, and how the market price compares to the physically-implied price. Be specific with numbers. 2-3 sentences.
 
 WEATHER WATCH
-Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. The renewable-to-gas regime transition threshold is 15 GW of residual demand — use this figure if referencing regime switches in the watch list or weather watch. 2-3 sentences.
+Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. The renewable-to-gas regime transition threshold is 15 GW of residual demand — use this figure if referencing regime switches in the watch list or weather watch. Use the Wind (model) GW figure as the actual current wind outturn. The m/s forecast range is for directional context only — do not convert m/s to GW using any scaling factor. 2-3 sentences.
 
 ONE RISK THE MARKET MAY BE UNDERPRICING
 The single most important contrarian physical signal in the current data. Look for disconnects between the market price and the physical implied price, REMIT capacity that could clear and tighten the system, wind forecast drops that would switch regime from renewable to gas-dominated, or storage levels that signal supply tightness. Be specific and quantified. 2-3 sentences.
