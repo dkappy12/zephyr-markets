@@ -206,6 +206,7 @@ export async function DELETE(request: Request) {
       message: "Account deletion requested",
     });
 
+    // Keep this list aligned with docs/auth-schema-contract.md.
     // Only user-owned tables belong in account cleanup.
     // Prediction/model tables are global and must not be filtered by user id.
     const cleanupTargets: CleanupTarget[] = [

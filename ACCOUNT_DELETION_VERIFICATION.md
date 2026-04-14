@@ -1,5 +1,7 @@
 # Account Deletion Verification Checklist
 
+Reference ownership contract: [docs/auth-schema-contract.md](docs/auth-schema-contract.md)
+
 ## Preconditions
 - User account exists with rows in user-owned tables: `alerts`, `email_trade_imports`, `attribution_predictions`, `portfolio_pnl`, `positions`, `team_members`, `team_invitations`, `teams`, `profiles`.
 - Route env vars are set: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
@@ -43,3 +45,4 @@
   - `started`
   - `succeeded` or `failed`
 - Confirm failure events capture stage context (`cleanup` or `auth_delete`).
+- Confirm cleanup targets still match [docs/auth-schema-contract.md](docs/auth-schema-contract.md) after any schema changes.
