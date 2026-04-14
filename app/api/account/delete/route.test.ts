@@ -43,7 +43,7 @@ function makeAdminClientMock(options: AdminMockOptions = {}) {
   const adminClient = {
     from: vi.fn((table: string) => ({
       insert: vi.fn(async () => ({ error: null })),
-      select: vi.fn((_columns: string) => ({
+      select: vi.fn(() => ({
         eq: vi.fn(async (column: string, value: string) => {
           if (table === "teams" && column === "owner_id") {
             teamsSelectedByOwner.push(value);

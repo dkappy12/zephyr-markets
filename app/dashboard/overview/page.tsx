@@ -18,20 +18,6 @@ type CardWithId = SignalCardProps & { id: string };
 /** 17 GW approximate output at 8 m/s mean wind → linear scale to GW. */
 const MS_TO_GW = 17 / 8;
 
-const EU_STORAGE_LOCATIONS = ["DE", "FR", "IT", "NL", "AT"] as const;
-const EU_LABELS: Record<(typeof EU_STORAGE_LOCATIONS)[number], string> = {
-  DE: "Germany",
-  FR: "France",
-  IT: "Italy",
-  NL: "Netherlands",
-  AT: "Austria",
-};
-
-function formatPct(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "—";
-  return `${Math.round(v)}%`;
-}
-
 /** Always show sign, one decimal (e.g. +1.8, -0.3, +0.0). */
 function formatSignedNormalisedScore(n: number): string {
   const abs = Math.abs(n).toFixed(1);
@@ -61,12 +47,7 @@ export default function OverviewPage() {
   const relTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
-  const [deFullPct, setDeFullPct] = useState<number | null>(null);
-  const [euFillByLoc, setEuFillByLoc] = useState<
-    Partial<Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>>
-  >({});
   const [windGw, setWindGw] = useState<number | null>(null);
-  const [solarGw, setSolarGw] = useState<number | null>(null);
   const [premiumLoading, setPremiumLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -94,17 +75,8 @@ export default function OverviewPage() {
 
     async function load() {
       setLoading(true);
-      const [
-        sigRes,
-        countRes,
-        deStorageRes,
-        euStorageRes,
-        windRes,
-        solarRes,
-        premiumRes,
-        n2exRes,
-        ttfRes,
-      ] = await Promise.all([
+      const [sigRes, countRes, windRes, premiumRes, n2exRes, ttfRes] =
+        await Promise.all([
         supabase
           .from("signals")
           .select(
@@ -118,30 +90,11 @@ export default function OverviewPage() {
           .eq("type", "remit")
           .gte("created_at", since),
         supabase
-          .from("storage_levels")
-          .select("full_pct")
-          .eq("location", "DE")
-          .order("report_date", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("storage_levels")
-          .select("location, full_pct, report_date")
-          .in("location", [...EU_STORAGE_LOCATIONS])
-          .order("report_date", { ascending: false })
-          .limit(40),
-        supabase
           .from("weather_forecasts")
           .select("wind_speed_100m, forecast_time")
           .eq("location", "GB")
           .lte("forecast_time", nowIso)
           .order("forecast_time", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("solar_outturn")
-          .select("solar_mw, datetime_gmt")
-          .order("datetime_gmt", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
@@ -181,33 +134,6 @@ export default function OverviewPage() {
         setRemit24h(countRes.count ?? 0);
       }
 
-      if (!deStorageRes.error && deStorageRes.data) {
-        const p = deStorageRes.data.full_pct;
-        setDeFullPct(
-          typeof p === "number" ? p : p != null ? Number(p) : null,
-        );
-      } else {
-        setDeFullPct(null);
-      }
-
-      if (!euStorageRes.error && euStorageRes.data?.length) {
-        const latest: Partial<
-          Record<(typeof EU_STORAGE_LOCATIONS)[number], number | null>
-        > = {};
-        for (const row of euStorageRes.data) {
-          const loc = row.location as (typeof EU_STORAGE_LOCATIONS)[number];
-          if (!EU_STORAGE_LOCATIONS.includes(loc) || latest[loc] !== undefined) {
-            continue;
-          }
-          const p = row.full_pct;
-          latest[loc] =
-            typeof p === "number" ? p : p != null ? Number(p) : null;
-        }
-        setEuFillByLoc(latest);
-      } else {
-        setEuFillByLoc({});
-      }
-
       if (!windRes.error && windRes.data) {
         const w = windRes.data.wind_speed_100m;
         const ms =
@@ -215,15 +141,6 @@ export default function OverviewPage() {
         setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
       } else {
         setWindGw(null);
-      }
-
-      if (!solarRes.error && solarRes.data) {
-        const sm = solarRes.data.solar_mw;
-        const mw =
-          typeof sm === "number" ? sm : sm != null ? Number(sm) : Number.NaN;
-        setSolarGw(Number.isFinite(mw) ? mw / 1000 : null);
-      } else {
-        setSolarGw(null);
       }
 
       const nsRaw = premiumRes.data?.normalised_score;

@@ -33,17 +33,14 @@ async function run() {
     if (res.status === 429 && !first429) {
       first429 = { index: i + 1, retryAfter };
     }
-    // eslint-disable-next-line no-console
     console.log(
       `[${i + 1}/${burst}] status=${res.status} retry-after=${retryAfter ?? "-"}`,
     );
   }
-  // eslint-disable-next-line no-console
   console.log(first429 ? `First 429 at request ${first429.index}` : "No 429 observed");
 }
 
 run().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err);
   process.exit(1);
 });
