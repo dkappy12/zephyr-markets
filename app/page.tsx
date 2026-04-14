@@ -254,6 +254,8 @@ function LiveTicker() {
 }
 
 export default function Home() {
+  const [showComparison, setShowComparison] = useState(false);
+
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
       <nav className="sticky top-0 z-50 border-b-[0.5px] border-ivory-border bg-ivory/95 backdrop-blur-sm">
@@ -377,7 +379,7 @@ export default function Home() {
             transition={{ duration: 0.45 }}
           >
             <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
-              Every REMIT notice. Scored. In plain English.
+              Every REMIT notice, scored in plain English.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
               Unplanned baseload, planned maintenance, interconnector derates - the
@@ -411,6 +413,66 @@ export default function Home() {
               assetLabel="Interconnector"
             />
           </div>
+        </div>
+      </section>
+
+      <section className="border-b-[0.5px] border-ivory-border bg-ivory-dark py-24 sm:py-32">
+        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
+          <h2 className="text-center font-serif text-3xl text-ink sm:text-4xl">
+            Every move in your book, explained.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
+            Zephyr decomposes intraday P&amp;L into the physical drivers that caused
+            it. Wind, gas, REMIT, carbon - each attributed separately.
+          </p>
+          <div className="mx-auto mt-12 max-w-3xl rounded-[4px] bg-ink p-8 text-ivory">
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ivory/50">
+              Long 50 MW · GB Power Q3 2026 Baseload
+            </p>
+            <div className="mt-2 flex items-baseline gap-4">
+              <span className="font-serif text-3xl text-ivory">+£29,310</span>
+              <span className="font-mono text-[11px] text-ivory/50">Session P&amp;L</span>
+            </div>
+            <p className="mt-1 font-mono text-[10px] text-ivory/40">
+              Entry £89.50/MWh · Current £101.12/MWh
+            </p>
+            <div className="mb-6 mt-6 border-t border-ivory/10" />
+            <p className="mb-4 font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ivory/40">
+              Today&apos;s Attribution
+            </p>
+            <AttributionDriverRows />
+            <div className="border-t border-ivory/10 pt-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[11px] text-ivory/50">Session P&amp;L</span>
+                <span className="font-serif text-xl text-ivory">+£29,310</span>
+              </div>
+            </div>
+          </div>
+          <div className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+                WIND ATTRIBUTION
+              </p>
+              <p className="mt-3 font-serif text-base leading-relaxed text-ink-mid">
+                Wind generation at 8.2 GW sits 4.1 GW above the 7-day baseline. The
+                surplus suppressed GB day-ahead prices by an estimated £14.20/MWh,
+                directly benefiting the long power position.
+              </p>
+            </div>
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+                REMIT ATTRIBUTION
+              </p>
+              <p className="mt-3 font-serif text-base leading-relaxed text-ink-mid">
+                3,240 MW of unplanned outages active - 1,840 MW above the planned
+                baseline. Tighter-than-expected supply added an estimated £4.80/MWh
+                uplift to the long position.
+              </p>
+            </div>
+          </div>
+          <p className="mt-6 text-center text-sm text-ink-mid">
+            Attribution updates every 5 minutes as physical conditions change.
+          </p>
         </div>
       </section>
 
@@ -465,6 +527,17 @@ export default function Home() {
               </section>
             </div>
           </motion.div>
+          <div className="mt-10 text-center">
+            <p className="font-serif text-xl text-ink">
+              Your book. Your drivers. Every morning at 06:00.
+            </p>
+            <Link
+              href="/signup"
+              className="mt-4 inline-flex h-10 items-center rounded-[4px] bg-ink px-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+            >
+              Start free
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -489,6 +562,9 @@ export default function Home() {
 
       <section id="pricing" className="py-16 sm:py-20">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
+          <p className="mb-8 text-center text-sm text-ink-mid">
+            Start free. Upgrade when the brief earns its keep.
+          </p>
           <div className="mx-auto max-w-xl text-center">
             <h2 className="font-serif text-3xl text-ink sm:text-4xl">Pricing</h2>
             <p className="mt-3 text-sm leading-relaxed text-ink-mid">
@@ -553,56 +629,66 @@ export default function Home() {
             Compare tiers at a glance. Upgrade when you need real time, depth, or a
             full desk on one book.
           </p>
-          <div className="mt-10 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
-            <table className="w-full min-w-[640px] border-collapse text-left">
-              <thead>
-                <tr className="border-b-[0.5px] border-ivory-border">
-                  <th
-                    scope="col"
-                    className="sticky left-0 z-[1] bg-card px-4 py-4 text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid"
-                  >
-                    Feature
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
-                  >
-                    Free
-                  </th>
-                  <th
-                    scope="col"
-                    className="border-x border-gold/45 bg-ivory-dark/50 px-4 py-4 text-center font-serif text-lg font-medium text-ink"
-                  >
-                    Pro
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
-                  >
-                    Team
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {PLAN_COMPARISON_ROWS.map((row) => (
-                  <tr
-                    key={row.feature}
-                    className="border-b-[0.5px] border-ivory-border last:border-b-0"
-                  >
+          <button
+            type="button"
+            onClick={() => setShowComparison(!showComparison)}
+            className="mx-auto mt-8 flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+          >
+            {showComparison ? "Hide feature comparison" : "Compare all features"}
+            <span className="text-xs">{showComparison ? "↑" : "↓"}</span>
+          </button>
+          {showComparison ? (
+            <div className="mt-6 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
+              <table className="w-full min-w-[640px] border-collapse text-left">
+                <thead>
+                  <tr className="border-b-[0.5px] border-ivory-border">
                     <th
-                      scope="row"
-                      className="sticky left-0 z-[1] bg-card px-4 py-3 text-sm font-medium text-ink"
+                      scope="col"
+                      className="sticky left-0 z-[1] bg-card px-4 py-4 text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid"
                     >
-                      {row.feature}
+                      Feature
                     </th>
-                    <PlanComparisonCell value={row.free} />
-                    <PlanComparisonCell value={row.pro} highlight />
-                    <PlanComparisonCell value={row.team} />
+                    <th
+                      scope="col"
+                      className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                    >
+                      Free
+                    </th>
+                    <th
+                      scope="col"
+                      className="border-x border-gold/45 bg-ivory-dark/50 px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                    >
+                      Pro
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-4 py-4 text-center font-serif text-lg font-medium text-ink"
+                    >
+                      Team
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {PLAN_COMPARISON_ROWS.map((row) => (
+                    <tr
+                      key={row.feature}
+                      className="border-b-[0.5px] border-ivory-border last:border-b-0"
+                    >
+                      <th
+                        scope="row"
+                        className="sticky left-0 z-[1] bg-card px-4 py-3 text-sm font-medium text-ink"
+                      >
+                        {row.feature}
+                      </th>
+                      <PlanComparisonCell value={row.free} />
+                      <PlanComparisonCell value={row.pro} highlight />
+                      <PlanComparisonCell value={row.team} />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -612,6 +698,52 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function AttributionDriverRows() {
+  const rows: {
+    name: string;
+    amount: string;
+    pct: number;
+    positive: boolean;
+  }[] = [
+    { name: "Wind delta", amount: "+£14,200", pct: 100, positive: true },
+    { name: "Residual", amount: "+£3,450", pct: 24, positive: true },
+    { name: "Shape/demand", amount: "+£2,180", pct: 15, positive: true },
+    { name: "REMIT shift", amount: "+£4,800", pct: 34, positive: true },
+    { name: "Gas (TTF move)", amount: "-£3,600", pct: 25, positive: false },
+    { name: "Carbon", amount: "-£1,720", pct: 12, positive: false },
+  ];
+
+  return (
+    <>
+      {rows.map((row, i) => (
+        <div key={row.name}>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="font-mono text-[11px] text-ivory/80">{row.name}</span>
+            <span
+              className={`font-mono text-[11px] tabular-nums ${
+                row.positive ? "text-[#7ab88a]" : "text-[#c47a7a]"
+              }`}
+            >
+              {row.amount}
+            </span>
+          </div>
+          <div className="mb-3 mt-1 h-1 w-full overflow-hidden rounded-full bg-ivory/10">
+            <motion.div
+              className={`h-full rounded-full ${
+                row.positive ? "bg-[#4a7c59]" : "bg-[#8b3a3a]"
+              }`}
+              initial={{ width: "0%" }}
+              whileInView={{ width: `${row.pct}%` }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6, delay: i * 0.08 }}
+            />
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 
