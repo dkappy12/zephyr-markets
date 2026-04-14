@@ -201,7 +201,8 @@ export async function DELETE(request: Request) {
         return errorResponse(
           500,
           "DATA_CLEANUP_FAILED",
-          "Failed to delete account data.",
+          `Failed to delete account data (table: ${table}).`,
+          cleanupError.message,
         );
       }
     }
@@ -227,7 +228,8 @@ export async function DELETE(request: Request) {
       return errorResponse(
         500,
         "DATA_CLEANUP_FAILED",
-        "Failed to delete account data.",
+        "Failed to delete account data (table: profiles).",
+        profileDeleteError.message,
       );
     }
 
