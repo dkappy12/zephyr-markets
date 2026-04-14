@@ -138,27 +138,46 @@ PHYSICAL_PREMIUM_POLL_MINUTES = 5
 #           demand baseline corrected for spring/summer conditions,
 #           REMIT restructured as demand-side shift (Hagfors & Bunn 2016),
 #           wind suppression made piecewise (ECIU 2024/2025)
-PREMIUM_MODEL_VERSION = "v1.1.0"
+# v1.2.0 — 2026-04-14: score divisor changed from 10 to 5,
+#           seasonal demand baseline added (winter +18%, shoulder +8%),
+#           wind outturn from Elexon FUELINST (actual not forecast),
+#           renewable regime anchored to SRMC
+PREMIUM_MODEL_VERSION = "v1.2.0"
 
 
-def demand_baseline_gw_utc(hour: int) -> float:
+def demand_baseline_gw_utc(hour: int, month: int | None = None) -> float:
     """
-    GB electricity demand baseline by UTC hour (approximate spring/summer values).
-    These are typical April-September values. Winter demand is ~15-20% higher
-    but the Kalman filter will calibrate seasonal adjustments over time.
+    GB electricity demand baseline by UTC hour, with seasonal adjustment.
 
-    Source: NESO demand data, typical April GB outturn ~28-34 GW.
-    Peak demand in April is typically 30-32 GW (evening), not 38 GW (winter peak).
+    Winter (Nov-Feb): +15% above spring/summer baseline to reflect heating demand.
+    Spring/Summer (Mar-Oct): base values calibrated to April-September outturn.
+
+    Source: NESO demand data, typical GB outturn by season.
+    Peak demand: ~32 GW spring, ~37 GW winter evening peak.
     """
+    # Base spring/summer profile (Apr-Sep)
     if 0 <= hour < 6:
-        return 24.0   # overnight minimum: ~24 GW in spring
-    if 6 <= hour < 9:
-        return 28.0   # morning ramp
-    if 9 <= hour < 17:
-        return 30.0   # daytime plateau
-    if 17 <= hour < 21:
-        return 32.0   # evening peak (spring, not winter)
-    return 27.0       # late evening wind-down
+        base = 24.0
+    elif 6 <= hour < 9:
+        base = 28.0
+    elif 9 <= hour < 17:
+        base = 30.0
+    elif 17 <= hour < 21:
+        base = 32.0
+    else:
+        base = 27.0
+
+    # Seasonal multiplier
+    if month is None:
+        return base
+    # Winter uplift: November through February
+    if month in (11, 12, 1, 2):
+        return base * 1.18  # ~18% uplift for winter heating demand
+    # Autumn/Spring shoulder: March, October
+    if month in (3, 10):
+        return base * 1.08  # ~8% uplift for shoulder months
+    # Summer/Spring: Apr-Sep (base values)
+    return base
 
 CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
 # Further reading step 2 (JSON format only, no tools).
@@ -2154,7 +2173,7 @@ async def calculate_physical_premium() -> None:
 
         wg = wind_gw if wind_gw is not None else 0.0
         sg = solar_gw if solar_gw is not None else 0.0
-        baseline_demand_gw = demand_baseline_gw_utc(now_utc.hour)
+        baseline_demand_gw = demand_baseline_gw_utc(now_utc.hour, now_utc.month)
         residual_demand_gw = max(baseline_demand_gw - wg - sg, 0.0)
 
         total_carbon_cost = UKA_PRICE_GBP_PER_T + CPS_GBP_PER_T
@@ -2257,7 +2276,7 @@ async def calculate_physical_premium() -> None:
         direction = "STABLE"
         if implied_price_gbp_mwh is not None and market_price_gbp_mwh is not None:
             premium_value = implied_price_gbp_mwh - market_price_gbp_mwh
-            normalised_score = round(premium_value / 10.0, 1)
+            normalised_score = round(premium_value / 5.0, 1)
             normalised_score = max(-9.9, min(9.9, normalised_score))
             if normalised_score > 0.3:
                 direction = "FIRMING"
