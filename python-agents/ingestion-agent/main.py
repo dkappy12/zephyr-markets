@@ -2081,6 +2081,12 @@ async def calculate_physical_premium() -> None:
                 solar_mw = float(sm) if sm is not None else None
         except Exception as e:
             logger.warning("premium_cycle: solar fetch failed: %s", e)
+        if solar_mw is None:
+            logger.debug("premium_cycle: solar data unavailable (null) — using 0 GW")
+        elif solar_mw == 0:
+            logger.debug(
+                "premium_cycle: solar = 0 MW (nighttime or genuine zero outturn)"
+            )
 
         ttf_eur_mwh: float | None = None
         try:
@@ -2336,6 +2342,11 @@ async def calculate_physical_premium() -> None:
                     "srmc_gbp_mwh": srmc_gbp_mwh,
                     "regime": premium_regime,
                     "predicted_price_gbp_mwh": implied_price_gbp_mwh,
+                    # Note: market_price_gbp_mwh here is the latest available price
+                    # at prediction time, not necessarily the target SP price.
+                    # The accuracy fill job uses the actual SP price from market_prices
+                    # table for error calculation — that is the authoritative actual price.
+                    "market_price_gbp_mwh": market_price_gbp_mwh,
                     "actual_price_gbp_mwh": None,
                     "error_gbp_mwh": None,
                     "absolute_error_gbp_mwh": None,
