@@ -316,40 +316,40 @@ export default function Home() {
             animate="show"
             className="mx-auto mt-12 max-w-lg"
           >
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ink p-5 text-ivory shadow-[0_24px_48px_-24px_rgba(44,42,38,0.45)] sm:p-6">
-              <div className="flex items-start justify-between gap-3 border-b border-ivory/15 pb-4">
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5 text-ink shadow-sm sm:p-6">
+              <div className="flex items-start justify-between gap-3 border-b border-ink/10 pb-4">
                 <div className="flex items-center gap-2">
                   <span
                     className="h-2 w-2 shrink-0 rounded-full bg-bull animate-live-dot-pulse"
                     aria-hidden
                   />
-                  <span className="font-sans text-[9px] font-semibold uppercase tracking-[0.2em] text-ivory/80">
+                  <span className="font-sans text-[9px] font-semibold uppercase tracking-[0.2em] text-ink-mid">
                     Physical premium score
                   </span>
                 </div>
-                <span className="font-mono text-[10px] tabular-nums tracking-wide text-ivory/70">
+                <span className="font-mono text-[10px] tabular-nums tracking-wide text-ink-mid">
                   06:42 GMT
                 </span>
               </div>
               <div className="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                <span className="font-serif text-5xl font-medium leading-none tracking-tight text-ivory sm:text-[3.25rem]">
+                <span className="font-serif text-5xl font-medium leading-none tracking-tight text-ink sm:text-[3.25rem]">
                   +4.8
                 </span>
                 <span className="font-sans text-xs font-semibold uppercase tracking-[0.18em] text-gold">
                   Firming
                 </span>
               </div>
-              <div className="mt-6 space-y-2 font-mono text-[11px] leading-relaxed tabular-nums text-ivory/85 sm:text-xs">
+              <div className="mt-6 space-y-2 font-mono text-[11px] leading-relaxed tabular-nums text-ink-mid sm:text-xs">
                 <p>
-                  Implied £118.40 <span className="text-ivory/40">·</span> N2EX £101.12
+                  Implied £118.40 <span className="text-ink-light">·</span> N2EX £101.12
                 </p>
                 <p>
-                  SRMC £89.50 <span className="text-ivory/40">·</span> Wind 8.2 GW
+                  SRMC £89.50 <span className="text-ink-light">·</span> Wind 8.2 GW
                 </p>
               </div>
-              <div className="mt-5 border-t border-ivory/15 pt-4 font-mono text-[10px] leading-relaxed text-ivory/70 sm:text-[11px]">
+              <div className="mt-5 border-t border-ink/10 pt-4 font-mono text-[10px] leading-relaxed text-ink-mid sm:text-[11px]">
                 <p>3,240 MW unplanned REMIT active</p>
-                <p className="mt-1.5 text-ivory/55">
+                <p className="mt-1.5 text-ink-light">
                   Regime: transitional → gas-dominated
                 </p>
               </div>
@@ -415,26 +415,26 @@ export default function Home() {
             Zephyr decomposes intraday P&amp;L into the physical drivers that caused
             it. Wind, gas, REMIT, carbon - each attributed separately.
           </p>
-          <div className="mx-auto mt-12 max-w-3xl rounded-[4px] bg-ink p-8 text-ivory">
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ivory/50">
+          <div className="mx-auto mt-12 max-w-3xl rounded-[4px] bg-card p-8 text-ink">
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-light">
               Long 50 MW · GB Power Q3 2026 Baseload
             </p>
             <div className="mt-2 flex items-baseline gap-4">
-              <span className="font-serif text-3xl text-ivory">+£29,310</span>
-              <span className="font-mono text-[11px] text-ivory/50">Session P&amp;L</span>
+              <span className="font-serif text-3xl text-ink">+£29,310</span>
+              <span className="font-mono text-[11px] text-ink-light">Session P&amp;L</span>
             </div>
-            <p className="mt-1 font-mono text-[10px] text-ivory/40">
+            <p className="mt-1 font-mono text-[10px] text-ink-light">
               Entry £89.50/MWh · Current £101.12/MWh
             </p>
-            <div className="mb-6 mt-6 border-t border-ivory/10" />
-            <p className="mb-4 font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ivory/40">
+            <div className="mb-6 mt-6 border-t border-ink/10" />
+            <p className="mb-4 font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
               Today&apos;s Attribution
             </p>
             <AttributionDriverRows />
-            <div className="border-t border-ivory/10 pt-4">
+            <div className="border-t border-ink/10 pt-4">
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[11px] text-ivory/50">Session P&amp;L</span>
-                <span className="font-serif text-xl text-ivory">+£29,310</span>
+                <span className="font-mono text-[11px] text-ink-light">Session P&amp;L</span>
+                <span className="font-serif text-xl text-ink">+£29,310</span>
               </div>
             </div>
           </div>
@@ -738,19 +738,19 @@ function AttributionDriverRows() {
       {rows.map((row, i) => (
         <div key={row.name}>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[11px] text-ivory/80">{row.name}</span>
+            <span className="font-mono text-[11px] text-ink-mid">{row.name}</span>
             <span
               className={`font-mono text-[11px] tabular-nums ${
-                row.positive ? "text-[#7ab88a]" : "text-[#c47a7a]"
+                row.positive ? "text-bull" : "text-[#8B3A3A]"
               }`}
             >
               {row.amount}
             </span>
           </div>
-          <div className="mb-3 mt-1 h-1 w-full overflow-hidden rounded-full bg-ivory/10">
+          <div className="mb-3 mt-1 h-1 w-full overflow-hidden rounded-full bg-ink/10">
             <motion.div
               className={`h-full rounded-full ${
-                row.positive ? "bg-[#4a7c59]" : "bg-[#8b3a3a]"
+                row.positive ? "bg-bull/60" : "bg-[#c47a7a]/40"
               }`}
               initial={{ width: "0%" }}
               whileInView={{ width: `${row.pct}%` }}

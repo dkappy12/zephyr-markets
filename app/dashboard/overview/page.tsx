@@ -375,7 +375,7 @@ export default function OverviewPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.32, delay: 0.05 }}
-        className="relative overflow-visible rounded-[4px] border-[0.5px] border-gold/45 bg-ink px-6 py-6 text-ivory"
+        className="relative overflow-visible rounded-[4px] border-[0.5px] border-gold/45 bg-card px-6 py-6 text-ink"
       >
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[4px]">
           <TopoBackground className="h-full w-full" lineOpacity={0.12} />
@@ -389,7 +389,7 @@ export default function OverviewPage() {
                     Physical premium
                     <span className="group relative ml-1.5 inline-flex shrink-0 align-middle">
                       <span
-                        className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-ivory/45"
+                        className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-ink-light"
                         aria-label="Physical premium score explained"
                       >
                         ⓘ
@@ -416,7 +416,7 @@ export default function OverviewPage() {
                   </span>
                 </p>
                 <div className="mt-2 flex flex-wrap items-baseline gap-3">
-                  <p className="font-serif text-5xl leading-none tabular-nums text-ivory">
+                  <p className="font-serif text-5xl leading-none tabular-nums text-ink">
                     {premiumLoading
                       ? "…"
                       : premiumRow
@@ -433,7 +433,7 @@ export default function OverviewPage() {
                 </div>
               </div>
             </div>
-            <p className="font-mono text-xs text-ivory/70">
+            <p className="font-mono text-xs text-ink-mid">
               {impliedPrice != null && marketPrice != null && premiumGap != null ? (
                 <>
                   Implied £{impliedPrice.toFixed(2)} · N2EX £{marketPrice.toFixed(2)} · Gap
@@ -443,7 +443,7 @@ export default function OverviewPage() {
                 "Implied · N2EX · Gap —"
               )}
             </p>
-            <p className="font-mono text-[10px] text-ivory/50">
+            <p className="font-mono text-[10px] text-ink-light">
               SRMC{" "}
               {srmcGbp != null ? `£${srmcGbp.toFixed(2)}/MWh` : "—"} · Regime:{" "}
               {regime != null && regime.trim() !== ""
@@ -456,7 +456,7 @@ export default function OverviewPage() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
                 Wind
               </p>
-              <p className="mt-1 font-mono text-sm text-ivory">
+              <p className="mt-1 font-mono text-sm text-ink">
                 {windGw != null ? `${windGw.toFixed(1)} GW` : "—"}
               </p>
             </div>
@@ -464,7 +464,7 @@ export default function OverviewPage() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
                 Residual demand
               </p>
-              <p className="mt-1 font-mono text-sm text-ivory">
+              <p className="mt-1 font-mono text-sm text-ink">
                 {residualDemandGw != null ? `${residualDemandGw.toFixed(1)} GW` : "—"}
               </p>
             </div>
@@ -472,7 +472,7 @@ export default function OverviewPage() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
                 TTF
               </p>
-              <p className="mt-1 font-mono text-sm text-ivory">
+              <p className="mt-1 font-mono text-sm text-ink">
                 {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
               </p>
             </div>
@@ -493,7 +493,7 @@ export default function OverviewPage() {
             ) : null}
           </div>
           <Link
-            href="/dashboard/signals"
+            href="/dashboard/intelligence/signals"
             className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
           >
             View all signals →
