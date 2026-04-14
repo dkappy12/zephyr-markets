@@ -171,11 +171,11 @@ function ProfilePanel() {
       {loading ? (
         <p className="mt-4 text-sm text-ink-mid">Loading…</p>
       ) : (
-        <form className="mt-6 space-y-5" onSubmit={handleSave}>
+        <form className="mt-6 space-y-7" onSubmit={handleSave}>
           <div>
             <label
               htmlFor="fullName"
-              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+              className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
             >
               Full name
             </label>
@@ -190,7 +190,7 @@ function ProfilePanel() {
           <div>
             <label
               htmlFor="email"
-              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+              className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
             >
               Email
             </label>
@@ -205,7 +205,7 @@ function ProfilePanel() {
           <div>
             <label
               htmlFor="role"
-              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+              className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
             >
               Role
             </label>
