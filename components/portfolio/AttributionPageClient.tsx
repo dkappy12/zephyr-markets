@@ -501,31 +501,35 @@ export function AttributionPageClient() {
   );
 
   const currentWindGw = parseNum(physLatest?.wind_gw) ?? 0;
+  const residualDemandGw = parseNum(physLatest?.residual_demand_gw) ?? 22.0;
   const deltaWindGw =
     baselineWindGw != null ? currentWindGw - baselineWindGw : currentWindGw;
   const deltaRemitMw = parseNum(physLatest?.remit_mw_lost) ?? 0;
   const ttfStart = livePrices?.ttfOpenEurMwh ?? null;
   const ttfCurrent = livePrices?.ttfEurMwh ?? null;
-  const windMoveGbpMwh = windPriceImpactGbpPerMwh(deltaWindGw);
+  const windMoveGbpMwh = windPriceImpactGbpPerMwh(deltaWindGw, currentWindGw);
   const gasMoveGbpMwh =
     ttfStart != null && ttfCurrent != null
       ? (ttfCurrent - ttfStart) * (livePrices?.gbpPerEur ?? GBP_PER_EUR)
       : 0;
-  const remitMoveGbpMwh = remitPriceImpactGbpPerMwh(deltaRemitMw);
+  const remitMoveGbpMwh = remitPriceImpactGbpPerMwh(
+    deltaRemitMw,
+    residualDemandGw,
+  );
   const priceResidualMoveGbpMwh =
     totalPriceMoveGbpMwh - windMoveGbpMwh - gasMoveGbpMwh - remitMoveGbpMwh;
 
   const windAtt = useMemo(
-    () => sumWindAttribution(positions, deltaWindGw),
-    [positions, deltaWindGw],
+    () => sumWindAttribution(positions, deltaWindGw, currentWindGw),
+    [positions, deltaWindGw, currentWindGw],
   );
   const gasAttRaw = useMemo(
     () => sumGasAttribution(positions, ttfStart, ttfCurrent),
     [positions, ttfStart, ttfCurrent],
   );
   const remitAtt = useMemo(
-    () => sumRemitAttribution(positions, deltaRemitMw),
-    [positions, deltaRemitMw],
+    () => sumRemitAttribution(positions, deltaRemitMw, residualDemandGw),
+    [positions, deltaRemitMw, residualDemandGw],
   );
   const gasAtt = gasAttRaw;
   const gbNet = netGbPowerSignedMw(positions);
@@ -1253,7 +1257,11 @@ export function AttributionPageClient() {
             {detailOpen ? (
               <div className="mt-4 space-y-4 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/40 px-4 py-4">
                 {positions.map((p) => {
-                  const w = windAttributionForPosition(deltaWindGw, p);
+                  const w = windAttributionForPosition(
+                    deltaWindGw,
+                    p,
+                    currentWindGw,
+                  );
                   const gTotal = gasAttributionForPosition(
                     ttfStart ?? 0,
                     ttfCurrent ?? 0,
@@ -1261,7 +1269,11 @@ export function AttributionPageClient() {
                   );
                   const c = gTotal * carbonShare;
                   const g = gTotal * (1 - carbonShare);
-                  const r = remitAttributionForPosition(deltaRemitMw, p);
+                  const r = remitAttributionForPosition(
+                    deltaRemitMw,
+                    p,
+                    residualDemandGw,
+                  );
                   const sub = w + g + r + c;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";

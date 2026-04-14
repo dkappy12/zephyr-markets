@@ -9,12 +9,8 @@ import {
   type LivePrices,
 } from "@/lib/portfolio/book";
 
-/** £/MWh per GW of wind change (attribution model). */
-export const WIND_SENS_GBP_PER_MWH_PER_GW = 2.5;
 /** £/MWh per €/MWh TTF move (EUR → GBP at 0.86). */
 export const GAS_TTF_GBP_PER_EUR_MWH = GBP_PER_EUR;
-/** £/MWh per 100 MW REMIT delta. */
-export const REMIT_SENS_GBP_PER_100MW = 0.5;
 
 /** Canonical NBP conversion shared with Book/Risk/Optimise. */
 export const attributionTtfToNbpPencePerTherm = ttfToNbpPencePerTherm;
@@ -79,32 +75,54 @@ export function totalTodayPnlGbp(
   return s;
 }
 
-export function windPriceImpactGbpPerMwh(deltaWindGw: number): number {
-  return deltaWindGw * WIND_SENS_GBP_PER_MWH_PER_GW;
+export function windPriceImpactGbpPerMwh(
+  deltaWindGw: number,
+  currentWindGw = 8.0,
+): number {
+  // Piecewise sensitivity matches Python model _wind_price_suppression_gbp_mwh
+  // Uses current wind level to determine which segment we're in
+  let sensPerGw: number;
+  if (currentWindGw <= 5) sensPerGw = 2.5;
+  else if (currentWindGw <= 15) sensPerGw = 1.8;
+  else sensPerGw = 3.5;
+  return deltaWindGw * sensPerGw;
 }
 
 export function windAttributionForPosition(
   deltaWindGw: number,
   p: PositionRow,
+  currentWindGw = 8.0,
 ): number {
   if (!isGbPowerMarket(p)) return 0;
   const dm = dirMult(p.direction);
   if (dm === 0) return 0;
   const sz = Number(p.size);
   if (!Number.isFinite(sz)) return 0;
-  return windPriceImpactGbpPerMwh(deltaWindGw) * sz * dm;
+  return windPriceImpactGbpPerMwh(deltaWindGw, currentWindGw) * sz * dm;
 }
 
-export function remitPriceImpactGbpPerMwh(deltaRemitMw: number): number {
-  return (deltaRemitMw / 100) * REMIT_SENS_GBP_PER_100MW;
+/** REMIT sensitivity is state-dependent based on residual demand segment slope. */
+export function remitPriceImpactGbpPerMwh(
+  deltaRemitMw: number,
+  residualDemandGw = 22.0,
+): number {
+  // Slope matches Python model _residual_demand_premium_gbp_mwh breakpoints
+  let slopePerGw: number;
+  if (residualDemandGw <= 20) slopePerGw = 0.0;
+  else if (residualDemandGw <= 28) slopePerGw = 0.5;
+  else if (residualDemandGw <= 32) slopePerGw = 1.5;
+  else if (residualDemandGw <= 35) slopePerGw = 5.0;
+  else slopePerGw = 20.0;
+  return (deltaRemitMw / 1000) * slopePerGw;
 }
 
 export function remitAttributionForPosition(
   deltaRemitMw: number,
   p: PositionRow,
+  residualDemandGw = 22.0,
 ): number {
   if (!isGbPowerMarket(p)) return 0;
-  const pip = remitPriceImpactGbpPerMwh(deltaRemitMw);
+  const pip = remitPriceImpactGbpPerMwh(deltaRemitMw, residualDemandGw);
   const dm = dirMult(p.direction);
   if (dm === 0) return 0;
   const sz = Number(p.size);
@@ -138,10 +156,11 @@ export function gasAttributionForPosition(
 export function sumWindAttribution(
   positions: PositionRow[],
   deltaWindGw: number,
+  currentWindGw = 8.0,
 ): number {
   let s = 0;
   for (const p of positions) {
-    s += windAttributionForPosition(deltaWindGw, p);
+    s += windAttributionForPosition(deltaWindGw, p, currentWindGw);
   }
   return s;
 }
@@ -169,10 +188,11 @@ export function sumGasAttribution(
 export function sumRemitAttribution(
   positions: PositionRow[],
   deltaRemitMw: number,
+  residualDemandGw = 22.0,
 ): number {
   let s = 0;
   for (const p of positions) {
-    s += remitAttributionForPosition(deltaRemitMw, p);
+    s += remitAttributionForPosition(deltaRemitMw, p, residualDemandGw);
   }
   return s;
 }
@@ -335,28 +355,56 @@ export function partitionPriceMoveGbpMwh(
   totalGbpMwh: number,
   p: PhysicalPremiumInput,
 ): { wind: number; gas: number; remit: number; residual: number } {
-  const w = Math.max(0, Number(p.wind_gw) || 0);
-  const s = Math.max(0, Number(p.solar_gw) || 0);
-  const r = Math.max(0, Number(p.residual_demand_gw) || 0);
-  const denom = w + s + r;
-  const windShare = denom > EPS ? w / denom : 0;
-
-  const mkt = Number(p.market_price_gbp_mwh);
-  const srmc = Number(p.srmc_gbp_mwh);
-  let gasShare =
-    mkt > EPS && Number.isFinite(srmc) && Number.isFinite(mkt)
-      ? srmc / mkt
-      : 0;
-  gasShare = Math.min(1, Math.max(0, gasShare));
-
+  /**
+   * Sensitivity-based attribution using the same piecewise coefficients
+   * as the physical premium model (v1.2.0).
+   *
+   * Wind sensitivity: piecewise £/MWh per GW (matches _wind_price_suppression_gbp_mwh)
+   * Gas sensitivity: 1/ETA_CCGT = 2.0 (£/MWh per £/MWh TTF move at 50% efficiency)
+   * REMIT sensitivity: piecewise based on effective_rd segment slope
+   *
+   * Each factor's contribution is its sensitivity × its observed move,
+   * normalised so contributions sum to totalGbpMwh.
+   */
+  const windGw = Math.max(0, Number(p.wind_gw) || 0);
+  const rdGw = Math.max(0, Number(p.residual_demand_gw) || 0);
   const remitMw = Math.max(0, Number(p.remit_mw_lost) || 0);
-  let remitShare = remitMw / 5000;
-  remitShare = Math.min(1, Math.max(0, remitShare));
+  const srmc = Number(p.srmc_gbp_mwh) || 0;
+  const mkt = Number(p.market_price_gbp_mwh) || 0;
 
-  const windMove = windShare * totalGbpMwh;
-  const gasMove = gasShare * totalGbpMwh;
-  const remitMove = remitShare * totalGbpMwh;
+  // Piecewise wind sensitivity (£/MWh per GW) — matches Python model
+  function windSensPerGw(gw: number): number {
+    if (gw <= 5) return 2.5;
+    if (gw <= 15) return 1.8;
+    return 3.5;
+  }
+
+  // RD premium slope at current residual demand (£/MWh per GW)
+  function rdSlopeAtGw(rd: number): number {
+    if (rd <= 20) return 0.0;
+    if (rd <= 28) return 0.5;
+    if (rd <= 32) return 1.5;
+    if (rd <= 35) return 5.0;
+    return 20.0;
+  }
+
+  // Sensitivity weights (how much each factor explains per unit move)
+  const windWeight = windSensPerGw(windGw) * windGw;
+  const gasWeight =
+    mkt > EPS && srmc > EPS ? Math.min(srmc / mkt, 1) * Math.abs(totalGbpMwh) : 0;
+  const remitWeight = rdSlopeAtGw(rdGw) * (remitMw / 1000);
+
+  const totalWeight = windWeight + gasWeight + remitWeight;
+
+  if (totalWeight < EPS || Math.abs(totalGbpMwh) < EPS) {
+    return { wind: 0, gas: 0, remit: 0, residual: totalGbpMwh };
+  }
+
+  const windMove = (windWeight / totalWeight) * totalGbpMwh;
+  const gasMove = (gasWeight / totalWeight) * totalGbpMwh;
+  const remitMove = (remitWeight / totalWeight) * totalGbpMwh;
   const residual = totalGbpMwh - windMove - gasMove - remitMove;
+
   return { wind: windMove, gas: gasMove, remit: remitMove, residual };
 }
 
