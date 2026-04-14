@@ -19,6 +19,10 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [drag, setDrag] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: 0,
+  });
 
   const runClassify = useCallback(
     async (headers: string[], rows: Record<string, unknown>[]) => {
@@ -30,28 +34,41 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
           setLoading(false);
           return;
         }
-        const slice = rows.slice(0, 100);
-        const res = await fetch("/api/classify-positions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ headers, rows: slice }),
-        });
-        const data = (await res.json()) as {
-          classified?: ClassifiedPosition[];
-          error?: string;
-          detail?: string;
-        };
-        if (!res.ok) {
-          throw new Error(data.error ?? data.detail ?? "Classification failed");
+        const slice = rows.slice(0, 200);
+        const chunkSize = 40;
+        const classifiedAll: ClassifiedPosition[] = [];
+        setProgress({ done: 0, total: slice.length });
+
+        for (let i = 0; i < slice.length; i += chunkSize) {
+          const chunk = slice.slice(i, i + chunkSize);
+          const res = await fetch("/api/classify-positions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ headers, rows: chunk }),
+          });
+          const data = (await res.json()) as {
+            classified?: ClassifiedPosition[];
+            error?: string;
+            detail?: string;
+          };
+          if (!res.ok) {
+            throw new Error(data.error ?? data.detail ?? "Classification failed");
+          }
+          if (!data.classified || !Array.isArray(data.classified)) {
+            throw new Error("Invalid response");
+          }
+          classifiedAll.push(...data.classified);
+          setProgress({
+            done: Math.min(i + chunk.length, slice.length),
+            total: slice.length,
+          });
         }
-        if (!data.classified || !Array.isArray(data.classified)) {
-          throw new Error("Invalid response");
-        }
-        onClassified({ headers, rows: slice, classified: data.classified });
+        onClassified({ headers, rows: slice, classified: classifiedAll });
         onClose();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Something went wrong");
       } finally {
+        setProgress({ done: 0, total: 0 });
         setLoading(false);
       }
     },
@@ -164,6 +181,21 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
                 aria-hidden
               />
               <p className="text-sm text-ink">Analysing your positions…</p>
+              {progress.total > 0 ? (
+                <div className="w-56">
+                  <div className="h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
+                    <div
+                      className="h-full rounded-sm bg-[#1D6B4E]"
+                      style={{
+                        width: `${Math.round((progress.done / progress.total) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-ink-light">
+                    {progress.done}/{progress.total} rows classified
+                  </p>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>
@@ -171,7 +203,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
                 Drop a file here or click to browse
               </p>
               <p className="mt-2 text-[11px] text-ink-light">
-                .csv and .xlsx · up to 100 rows per import
+                .csv and .xlsx · up to 200 rows per import
               </p>
             </>
           )}

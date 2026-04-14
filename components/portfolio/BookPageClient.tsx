@@ -27,6 +27,29 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 const sectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
+const UKA_REF_GBP = 55;
+const EUA_REF_EUR = 72;
+
+function normaliseMarket(value: string | null | undefined):
+  | "GB_POWER"
+  | "TTF"
+  | "NBP"
+  | "UKA"
+  | "EUA"
+  | "OTHER_POWER"
+  | "OTHER_GAS"
+  | "OTHER" {
+  const raw = (value ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "gb_power" || raw === "n2ex" || raw === "apx") return "GB_POWER";
+  if (raw === "ttf") return "TTF";
+  if (raw === "nbp") return "NBP";
+  if (raw === "uka") return "UKA";
+  if (raw === "eua") return "EUA";
+  if (raw === "other_power" || raw.includes("power")) return "OTHER_POWER";
+  if (raw === "other_gas" || raw.includes("gas")) return "OTHER_GAS";
+  return "OTHER";
+}
+
 function utcToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -38,17 +61,31 @@ function pricePoints(
   which: "current" | "open",
 ): number | null {
   if (!lp) return null;
-  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-  if (m === "gb_power") {
+  const market = normaliseMarket(p.market);
+  if (market === "GB_POWER" || market === "OTHER_POWER") {
     return which === "current" ? lp.gbPowerGbpMwh : lp.gbPowerOpenGbpMwh;
   }
-  if (m === "ttf") {
-    return null;
+  if (market === "TTF") {
+    return which === "current" ? lp.ttfEurMwh : lp.ttfOpenEurMwh;
   }
-  if (m === "nbp") {
+  if (market === "NBP") {
     return which === "current" ? lp.nbpPencePerTherm : lp.nbpOpenPencePerTherm;
   }
-  if (m === "uka" || m === "eua") return null;
+  if (market === "UKA") return UKA_REF_GBP;
+  if (market === "EUA") return EUA_REF_EUR;
+  if (market === "OTHER_GAS") {
+    const unit = (p.unit ?? "").toLowerCase();
+    if (unit.includes("therm")) {
+      return which === "current"
+        ? lp.nbpPencePerTherm
+        : lp.nbpOpenPencePerTherm;
+    }
+    if ((p.currency ?? "").toUpperCase() === "EUR") {
+      return which === "current" ? lp.ttfEurMwh : lp.ttfOpenEurMwh;
+    }
+    const cur = which === "current" ? lp.ttfGbpMwh : lp.ttfOpenGbpMwh;
+    return cur ?? null;
+  }
   return null;
 }
 
@@ -76,19 +113,33 @@ function formatEntryPrice(p: PositionRow): string {
 /** Current column: live marks only (never reuse entry). */
 function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   if (!lp) return "—";
-  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-  if (m === "uka" || m === "eua") return "—";
-  if (m === "gb_power") {
+  const market = normaliseMarket(p.market);
+  if (market === "GB_POWER" || market === "OTHER_POWER") {
     const v = lp.gbPowerGbpMwh;
     return v != null ? `£${v.toFixed(2)}` : "—";
   }
-  if (m === "ttf") {
+  if (market === "TTF") {
     const v = lp.ttfEurMwh;
     return v != null ? `€${v.toFixed(2)}/MWh` : "—";
   }
-  if (m === "nbp") {
+  if (market === "NBP") {
     const v = lp.nbpPencePerTherm;
     return v != null ? `${v.toFixed(2)}p/th` : "—";
+  }
+  if (market === "UKA") return `£${UKA_REF_GBP.toFixed(2)}/t`;
+  if (market === "EUA") return `€${EUA_REF_EUR.toFixed(2)}/t`;
+  if (market === "OTHER_GAS") {
+    const unit = (p.unit ?? "").toLowerCase();
+    if (unit.includes("therm")) {
+      const v = lp.nbpPencePerTherm;
+      return v != null ? `${v.toFixed(2)}p/th` : "—";
+    }
+    if ((p.currency ?? "").toUpperCase() === "EUR") {
+      const v = lp.ttfEurMwh;
+      return v != null ? `€${v.toFixed(2)}/MWh` : "—";
+    }
+    const v = lp.ttfGbpMwh;
+    return v != null ? `£${v.toFixed(2)}/MWh` : "—";
   }
   return "—";
 }
@@ -561,9 +612,9 @@ export function BookPageClient() {
               </thead>
               <tbody>
                 {positions.map((p) => {
-                  const mlow = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-                  const isNbp = mlow === "nbp";
-                  const isTtf = mlow === "ttf";
+                  const market = normaliseMarket(p.market);
+                  const isNbp = market === "NBP";
+                  const isTtf = market === "TTF";
                   const cur = pricePoints(p, livePrices, "current");
                   const opn = pricePoints(p, livePrices, "open");
                   const lp = livePrices;
@@ -605,18 +656,7 @@ export function BookPageClient() {
                         : null;
                   }
 
-                  const curCell =
-                    mlow === "uka" ? (
-                    <span title="Live UKA feed coming soon" className="cursor-help">
-                      —
-                    </span>
-                  ) : mlow === "eua" ? (
-                    <span title="Live EUA feed coming soon" className="cursor-help">
-                      —
-                    </span>
-                  ) : (
-                    formatCurrentPrice(p, livePrices)
-                  );
+                  const curCell = formatCurrentPrice(p, livePrices);
                   const tFmt =
                     total != null ? formatGbpColored(total) : null;
                   const tdFmt =

@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 
 const MODEL = "claude-haiku-4-5-20251001";
+const MAX_TOKENS = 3200;
 const REDACT_KEYS = [
   "name",
   "email",
@@ -63,7 +64,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 16384,
+      max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -151,9 +152,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const slice = rows.slice(0, 100);
-    const redactedSlice = slice.map(redactRow);
-    const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows (sensitive fields redacted): ${JSON.stringify(redactedSlice)}`;
+    const redactedRows = rows.map(redactRow);
+    const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows (sensitive fields redacted): ${JSON.stringify(redactedRows)}`;
 
     let rawText: string;
     try {
@@ -246,7 +246,7 @@ ${jsonStr}`;
       if (!entry || typeof entry !== "object") return entry;
       return {
         ...entry,
-        original_row: slice[idx] ?? null,
+        original_row: rows[idx] ?? null,
       };
     });
 
