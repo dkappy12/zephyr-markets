@@ -125,9 +125,19 @@ function ProfilePanel() {
 
   async function handleSignOut() {
     setSigningOut(true);
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
+    setError(null);
+    try {
+      const supabase = createClient();
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        throw signOutError;
+      }
+      // Use hard navigation so middleware sees fresh cookies state.
+      window.location.assign("/login");
+    } catch {
+      setError("Could not sign out. Please try again.");
+      setSigningOut(false);
+    }
   }
 
   async function handleDeleteAccount() {
