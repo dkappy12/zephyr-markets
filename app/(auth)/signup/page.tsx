@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/auth/password-policy";
+import { validatePasswordPolicy } from "@/lib/auth/password-policy";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -40,7 +40,7 @@ export default function SignupPage() {
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const passwordChecks = [
-    { label: "At least 12 characters", ok: password.length >= 12 },
+    { label: "At least 8 characters", ok: password.length >= 8 },
     { label: "One uppercase letter", ok: /[A-Z]/.test(password) },
     { label: "One lowercase letter", ok: /[a-z]/.test(password) },
     { label: "One number", ok: /[0-9]/.test(password) },
@@ -301,7 +301,6 @@ export default function SignupPage() {
                         </div>
                       ))}
                     </div>
-                    <p className="pt-1 text-xs text-ink-light">{passwordPolicyHint()}</p>
                   </motion.div>
                 )}
 

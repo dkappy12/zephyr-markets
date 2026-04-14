@@ -1,4 +1,4 @@
-const MIN_PASSWORD_LENGTH = 12;
+const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordPolicyResult = {
   ok: boolean;
@@ -21,5 +21,5 @@ export function validatePasswordPolicy(input: string): PasswordPolicyResult {
 }
 
 export function passwordPolicyHint() {
-  return "At least 12 characters, with uppercase, lowercase, number, and special character.";
+  return "At least 8 characters, with uppercase, lowercase, number, and special character.";
 }
