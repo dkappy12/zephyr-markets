@@ -74,7 +74,14 @@ export default function OverviewPage() {
   const [premiumRow, setPremiumRow] = useState<{
     normalised_score: number;
     direction: string;
+    implied_price_gbp_mwh: number | null;
+    market_price_gbp_mwh: number | null;
   } | null>(null);
+  const [n2exPrice, setN2exPrice] = useState<number | null>(null);
+  const [ttfPrice, setTtfPrice] = useState<number | null>(null);
+  const [regime, setRegime] = useState<string | null>(null);
+  const [srmcGbp, setSrmcGbp] = useState<number | null>(null);
+  const [residualDemandGw, setResidualDemandGw] = useState<number | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -91,6 +98,8 @@ export default function OverviewPage() {
         windRes,
         solarRes,
         premiumRes,
+        n2exRes,
+        ttfRes,
       ] = await Promise.all([
         supabase
           .from("signals")
@@ -134,9 +143,23 @@ export default function OverviewPage() {
         supabase
           .from("physical_premium")
           .select(
-            "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, calculated_at",
+            "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, calculated_at, regime, srmc_gbp_mwh, residual_demand_gw",
           )
           .order("calculated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("market_prices")
+          .select("price_gbp_mwh, price_time")
+          .eq("market", "N2EX")
+          .order("price_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("gas_prices")
+          .select("price_eur_mwh, price_time")
+          .eq("hub", "TTF")
+          .order("price_time", { ascending: false })
           .limit(1)
           .maybeSingle(),
       ]);
@@ -201,17 +224,56 @@ export default function OverviewPage() {
       const nsRaw = premiumRes.data?.normalised_score;
       const score = parsePhysicalPremiumScore(nsRaw);
 
+      function numOrNull(v: unknown): number | null {
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+        if (typeof v === "string" && v.trim() !== "") {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : null;
+        }
+        return null;
+      }
+
       if (!premiumRes.error && premiumRes.data) {
-        const dirRaw = premiumRes.data.direction;
+        const d = premiumRes.data as Record<string, unknown>;
+        const dirRaw = d.direction;
         const dir =
           typeof dirRaw === "string" ? dirRaw.trim().toUpperCase() : "";
+        const implied = numOrNull(d.implied_price_gbp_mwh);
+        const market = numOrNull(d.market_price_gbp_mwh);
+        const srmc = numOrNull(d.srmc_gbp_mwh);
+        const resGw = numOrNull(d.residual_demand_gw);
         if (Number.isFinite(score)) {
-          setPremiumRow({ normalised_score: score, direction: dir });
+          setPremiumRow({
+            normalised_score: score,
+            direction: dir,
+            implied_price_gbp_mwh: implied,
+            market_price_gbp_mwh: market,
+          });
         } else {
           setPremiumRow(null);
         }
+        setRegime(typeof d.regime === "string" && d.regime.trim() !== "" ? d.regime : null);
+        setSrmcGbp(srmc);
+        setResidualDemandGw(resGw);
       } else {
         setPremiumRow(null);
+        setRegime(null);
+        setSrmcGbp(null);
+        setResidualDemandGw(null);
+      }
+
+      if (!n2exRes.error && n2exRes.data) {
+        const p = (n2exRes.data as { price_gbp_mwh?: unknown }).price_gbp_mwh;
+        setN2exPrice(numOrNull(p));
+      } else {
+        setN2exPrice(null);
+      }
+
+      if (!ttfRes.error && ttfRes.data) {
+        const p = (ttfRes.data as { price_eur_mwh?: unknown }).price_eur_mwh;
+        setTtfPrice(numOrNull(p));
+      } else {
+        setTtfPrice(null);
       }
       setPremiumLoading(false);
       setUpdatedAt(new Date());
@@ -246,18 +308,12 @@ export default function OverviewPage() {
     return `Updated ${hr}h ago`;
   }, [updatedAt, relativeNowMs]);
 
-  const euTooltip = (
-    <ul className="space-y-1">
-      {EU_STORAGE_LOCATIONS.map((code) => (
-        <li key={code} className="flex justify-between gap-6">
-          <span className="text-ink-mid">{EU_LABELS[code]}</span>
-          <span className="font-medium tabular-nums text-ink">
-            {formatPct(euFillByLoc[code] ?? null)}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
+  const impliedPrice = premiumRow?.implied_price_gbp_mwh ?? null;
+  const marketPrice = premiumRow?.market_price_gbp_mwh ?? null;
+  const premiumGap =
+    impliedPrice != null && marketPrice != null
+      ? impliedPrice - marketPrice
+      : null;
 
   return (
     <div className="space-y-10">
@@ -276,27 +332,33 @@ export default function OverviewPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <MetricCard
+            label="GB WIND"
+            value={windGw === null ? "—" : windGw.toFixed(1)}
+            unit="GW"
+            trend={windGw === null ? undefined : "flat"}
+          />
+          <p className="mt-1 text-xs text-ink-mid">
+            Residual demand:{" "}
+            {residualDemandGw != null
+              ? `${residualDemandGw.toFixed(1)} GW`
+              : "—"}
+          </p>
+        </div>
         <MetricCard
-          label="Wind generation"
-          value={windGw === null ? "—" : windGw.toFixed(1)}
-          unit="GW"
-          trend={windGw === null ? undefined : "flat"}
+          label="N2EX DAY-AHEAD"
+          value={n2exPrice == null ? "—" : `£${n2exPrice.toFixed(2)}`}
+          unit="/MWh"
         />
         <MetricCard
-          label="EU storage"
-          value={deFullPct === null ? "—" : String(Math.round(deFullPct))}
-          unit="% full"
-          trend="flat"
-          hoverDetail={euTooltip}
+          label="TTF NGP"
+          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
+          unit="/MWh"
         />
         <MetricCard
-          label="SOLAR GENERATION"
-          value={solarGw === null ? "—" : solarGw.toFixed(1)}
-          unit="GW"
-        />
-        <MetricCard
-          label="REMIT alerts"
+          label="REMIT ALERTS"
           value={remit24h === null ? "—" : String(remit24h)}
           unit="last 24h"
           trend={
@@ -313,67 +375,113 @@ export default function OverviewPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.32, delay: 0.05 }}
-        className="relative overflow-visible rounded-[4px] border-[0.5px] border-gold/45 bg-card px-6 py-6"
+        className="relative overflow-visible rounded-[4px] border-[0.5px] border-gold/45 bg-ink px-6 py-6 text-ivory"
       >
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[4px]">
-          <TopoBackground className="h-full w-full" lineOpacity={0.25} />
+          <TopoBackground className="h-full w-full" lineOpacity={0.12} />
         </div>
-        <div className="relative z-[1] flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-gold">
-              <span className="inline-flex items-center">
-                Physical premium
-                <span className="group relative ml-1.5 inline-flex shrink-0 align-middle">
-                  <span
-                    className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-gray-500"
-                    aria-label="Physical premium score explained"
-                  >
-                    ⓘ
+        <div className="relative z-[1] grid grid-cols-1 gap-8 md:grid-cols-3 md:gap-6">
+          <div className="space-y-4 md:col-span-2">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-gold">
+                  <span className="inline-flex items-center">
+                    Physical premium
+                    <span className="group relative ml-1.5 inline-flex shrink-0 align-middle">
+                      <span
+                        className="cursor-help select-none text-xs font-normal normal-case tracking-normal text-ivory/45"
+                        aria-label="Physical premium score explained"
+                      >
+                        ⓘ
+                      </span>
+                      <span
+                        role="tooltip"
+                        className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[280px] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
+                      >
+                        <span className="block">
+                          The physical premium score measures how far the market price
+                          has diverged from our model&apos;s physically-implied price.
+                        </span>
+                        <span className="mt-3 block">
+                          Negative = market overpriced vs fundamentals (SOFTENING)
+                        </span>
+                        <span className="mt-1 block">
+                          Positive = market underpriced vs fundamentals (FIRMING)
+                        </span>
+                        <span className="mt-3 block">
+                          ±1 moderate · ±2 significant · ±4 extreme
+                        </span>
+                      </span>
+                    </span>
                   </span>
-                  <span
-                    role="tooltip"
-                    className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[280px] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
-                  >
-                    <span className="block">
-                      The physical premium score measures how far the market price
-                      has diverged from our model&apos;s physically-implied price.
-                    </span>
-                    <span className="mt-3 block">
-                      Negative = market overpriced vs fundamentals (SOFTENING)
-                    </span>
-                    <span className="mt-1 block">
-                      Positive = market underpriced vs fundamentals (FIRMING)
-                    </span>
-                    <span className="mt-3 block">
-                      ±1 moderate · ±2 significant · ±4 extreme
-                    </span>
-                  </span>
-                </span>
-              </span>
+                </p>
+                <div className="mt-2 flex flex-wrap items-baseline gap-3">
+                  <p className="font-serif text-5xl leading-none tabular-nums text-ivory">
+                    {premiumLoading
+                      ? "…"
+                      : premiumRow
+                        ? formatSignedNormalisedScore(premiumRow.normalised_score)
+                        : "--"}
+                  </p>
+                  {!premiumLoading &&
+                    premiumRow &&
+                    PREMIUM_DIRECTION_LABEL[premiumRow.direction] && (
+                      <span className="inline-flex w-fit items-center rounded-[2px] border-[0.5px] border-gold/50 bg-gold/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-gold">
+                        {PREMIUM_DIRECTION_LABEL[premiumRow.direction]}
+                      </span>
+                    )}
+                </div>
+              </div>
+            </div>
+            <p className="font-mono text-xs text-ivory/70">
+              {impliedPrice != null && marketPrice != null && premiumGap != null ? (
+                <>
+                  Implied £{impliedPrice.toFixed(2)} · N2EX £{marketPrice.toFixed(2)} · Gap
+                  £{premiumGap.toFixed(2)}/MWh
+                </>
+              ) : (
+                "Implied · N2EX · Gap —"
+              )}
             </p>
-            <p className="mt-2 font-serif text-5xl leading-none text-ink tabular-nums">
-              {premiumLoading
-                ? "…"
-                : premiumRow
-                  ? formatSignedNormalisedScore(premiumRow.normalised_score)
-                  : "--"}
-            </p>
-            <p className="mt-2 text-sm text-ink-mid">
-              Normalised gap between market-implied and physically-implied price.
+            <p className="font-mono text-[10px] text-ivory/50">
+              SRMC{" "}
+              {srmcGbp != null ? `£${srmcGbp.toFixed(2)}/MWh` : "—"} · Regime:{" "}
+              {regime != null && regime.trim() !== ""
+                ? regime.replace(/-/g, " ")
+                : "—"}
             </p>
           </div>
-          {!premiumLoading &&
-            premiumRow &&
-            PREMIUM_DIRECTION_LABEL[premiumRow.direction] && (
-              <span className="inline-flex w-fit items-center rounded-[2px] border-[0.5px] border-gold/50 bg-ivory px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-gold">
-                {PREMIUM_DIRECTION_LABEL[premiumRow.direction]}
-              </span>
-            )}
+          <div className="space-y-4 border-gold/20 md:border-l md:pl-6">
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
+                Wind
+              </p>
+              <p className="mt-1 font-mono text-sm text-ivory">
+                {windGw != null ? `${windGw.toFixed(1)} GW` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
+                Residual demand
+              </p>
+              <p className="mt-1 font-mono text-sm text-ivory">
+                {residualDemandGw != null ? `${residualDemandGw.toFixed(1)} GW` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
+                TTF
+              </p>
+              <p className="mt-1 font-mono text-sm text-ivory">
+                {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
+              </p>
+            </div>
+          </div>
         </div>
       </motion.section>
 
       <section className="space-y-4">
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="font-serif text-xl text-ink">Signal feed</h2>
             <p className="text-xs text-ink-mid">
@@ -384,6 +492,12 @@ export default function OverviewPage() {
               <p className="text-[10px] text-ink-light">Refreshing...</p>
             ) : null}
           </div>
+          <Link
+            href="/dashboard/signals"
+            className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+          >
+            View all signals →
+          </Link>
         </div>
         <div className="grid gap-3">
           {preview.length === 0 ? (
