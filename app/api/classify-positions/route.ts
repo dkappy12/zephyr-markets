@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 
 const MODEL = "claude-haiku-4-5-20251001";
-const MAX_TOKENS = 3200;
+const MAX_TOKENS = 6400;
 const REDACT_KEYS = [
   "name",
   "email",
@@ -159,13 +159,16 @@ export async function POST(req: Request) {
     try {
       rawText = await callAnthropic(key, userMessage);
     } catch (err: unknown) {
-      return NextResponse.json(
-        {
-          error:
+      await logAuthAuditEvent({
+        event: "classify_positions_model_fallback",
+        userId: user.id,
+        status: "failure",
+        metadata: {
+          reason:
             err instanceof Error ? err.message : "Anthropic API request failed",
         },
-        { status: 502 },
-      );
+      });
+      return NextResponse.json({ classified: heuristicClassify(rows) });
     }
 
     let parsed: {
@@ -174,23 +177,26 @@ export async function POST(req: Request) {
     try {
       parsed = JSON.parse(rawText) as typeof parsed;
     } catch {
-      return NextResponse.json(
-        { error: "Invalid response from Anthropic" },
-        { status: 502 },
-      );
+      await logAuthAuditEvent({
+        event: "classify_positions_model_fallback",
+        userId: user.id,
+        status: "failure",
+        metadata: { reason: "Invalid response envelope from Anthropic" },
+      });
+      return NextResponse.json({ classified: heuristicClassify(rows) });
     }
 
     const textBlock = parsed.content?.find((c) => c.type === "text");
     const text = textBlock?.text?.trim() ?? "";
     const jsonStr = extractJsonArray(text);
     if (!jsonStr) {
-      return NextResponse.json(
-        {
-          error: "Could not parse classification JSON",
-          raw: text.slice(0, 4000),
-        },
-        { status: 502 },
-      );
+      await logAuthAuditEvent({
+        event: "classify_positions_model_fallback",
+        userId: user.id,
+        status: "failure",
+        metadata: { reason: "Could not parse classification JSON" },
+      });
+      return NextResponse.json({ classified: heuristicClassify(rows) });
     }
 
     let classified: unknown;
@@ -214,31 +220,34 @@ ${jsonStr}`;
           "";
         const repairedArray = extractJsonArray(repairedText);
         if (!repairedArray) {
-          return NextResponse.json(
-            {
-              error: "Classification JSON parse failed",
-              raw: jsonStr.slice(0, 2000),
-            },
-            { status: 502 },
-          );
+          await logAuthAuditEvent({
+            event: "classify_positions_model_fallback",
+            userId: user.id,
+            status: "failure",
+            metadata: { reason: "Repair pass did not return JSON array" },
+          });
+          return NextResponse.json({ classified: heuristicClassify(rows) });
         }
         classified = JSON.parse(repairedArray);
       } catch {
-        return NextResponse.json(
-          {
-            error: "Classification JSON parse failed",
-            raw: jsonStr.slice(0, 2000),
-          },
-          { status: 502 },
-        );
+        await logAuthAuditEvent({
+          event: "classify_positions_model_fallback",
+          userId: user.id,
+          status: "failure",
+          metadata: { reason: "Classification JSON parse failed" },
+        });
+        return NextResponse.json({ classified: heuristicClassify(rows) });
       }
     }
 
     if (!Array.isArray(classified)) {
-      return NextResponse.json(
-        { error: "Expected JSON array from model" },
-        { status: 502 },
-      );
+      await logAuthAuditEvent({
+        event: "classify_positions_model_fallback",
+        userId: user.id,
+        status: "failure",
+        metadata: { reason: "Model response was not an array" },
+      });
+      return NextResponse.json({ classified: heuristicClassify(rows) });
     }
 
     // Keep user-facing row context local; do not forward raw rows externally.
@@ -249,6 +258,20 @@ ${jsonStr}`;
         original_row: rows[idx] ?? null,
       };
     });
+
+    if (merged.length !== rows.length) {
+      await logAuthAuditEvent({
+        event: "classify_positions_model_fallback",
+        userId: user.id,
+        status: "failure",
+        metadata: {
+          reason: "Model length mismatch",
+          modelCount: merged.length,
+          rowCount: rows.length,
+        },
+      });
+      return NextResponse.json({ classified: heuristicClassify(rows) });
+    }
 
     return NextResponse.json({ classified: merged });
   } catch (e: unknown) {
@@ -262,6 +285,178 @@ ${jsonStr}`;
       { status: 500 },
     );
   }
+}
+
+function heuristicClassify(rows: Record<string, unknown>[]) {
+  return rows.map((row) => classifyRowHeuristic(row));
+}
+
+function classifyRowHeuristic(row: Record<string, unknown>) {
+  const text = Object.values(row)
+    .map((v) => String(v ?? ""))
+    .join(" ")
+    .toLowerCase();
+
+  const market = inferMarket(text);
+  const isEnergy =
+    market != null ||
+    /(power|electricity|spark|dark|gas|ttf|nbp|lng|uka|eua|carbon|co2|eload|baseload|peakload)/i.test(
+      text,
+    );
+
+  const direction = inferDirection(text);
+  const size = inferNumber(row, ["size", "qty", "quantity", "volume", "nominal"]);
+  const tradePrice = inferNumber(row, [
+    "trade_price",
+    "price",
+    "strike",
+    "deal_price",
+    "avg_price",
+  ]);
+  const instrument =
+    inferString(row, ["instrument", "product", "contract", "description"]) ??
+    "Unclassified position";
+  const unit = inferUnit(row, text);
+  const currency = inferCurrency(row, text, market);
+
+  return {
+    keep: isEnergy,
+    discard_reason: isEnergy ? null : "Non-energy instrument",
+    instrument_type: inferInstrumentType(text, market),
+    market,
+    direction,
+    size,
+    unit,
+    tenor: inferString(row, ["tenor", "prompt", "delivery", "period", "strip"]),
+    trade_price: tradePrice,
+    currency,
+    expiry_date: inferDate(row, ["expiry_date", "expiry", "maturity", "end_date"]),
+    entry_date: inferDate(row, ["entry_date", "trade_date", "deal_date", "date"]),
+    instrument,
+    original_row: row,
+  };
+}
+
+function inferMarket(text: string) {
+  if (/\bttf\b/.test(text)) return "TTF";
+  if (/\bnbp\b/.test(text)) return "NBP";
+  if (/\buka\b/.test(text)) return "UKA";
+  if (/\beua\b/.test(text) || /\beuu?a\b/.test(text)) return "EUA";
+  if (/\bnordic\b/.test(text)) return "nordic_power";
+  if (/\bgerman\b|\bde power\b/.test(text)) return "german_power";
+  if (/\bfrench\b|\bfr power\b/.test(text)) return "french_power";
+  if (/\bgb\b|\bapx\b|\bn2ex\b|\bpower\b|\bbaseload\b|\bpeakload\b/.test(text))
+    return "GB_power";
+  if (/\bgas\b|\blng\b/.test(text)) return "other_gas";
+  if (/\bco2\b|\bcarbon\b/.test(text)) return "other_carbon";
+  return null;
+}
+
+function inferInstrumentType(text: string, market: string | null) {
+  if (/\bspark\b/.test(text)) return "spark_spread";
+  if (/\bdark\b/.test(text)) return "dark_spread";
+  if (/\boption\b|\bcall\b|\bput\b/.test(text)) {
+    if (market === "TTF" || market === "NBP" || market === "other_gas") {
+      return "gas_option";
+    }
+    return "power_option";
+  }
+  if (market === "UKA" || market === "EUA" || market === "other_carbon")
+    return "carbon";
+  if (market === "TTF" || market === "NBP" || market === "other_gas")
+    return "gas_forward";
+  if (
+    market === "GB_power" ||
+    market === "nordic_power" ||
+    market === "german_power" ||
+    market === "french_power" ||
+    market === "other_power"
+  ) {
+    return "power_forward";
+  }
+  return "other_energy";
+}
+
+function inferDirection(text: string): "long" | "short" | null {
+  if (/\b(short|sell|sold)\b/.test(text)) return "short";
+  if (/\b(long|buy|bought)\b/.test(text)) return "long";
+  return null;
+}
+
+function inferUnit(
+  row: Record<string, unknown>,
+  text: string,
+): "MW" | "MWh" | "therm" | "MMBtu" | "tCO2" | "lot" | null {
+  const raw = inferString(row, ["unit", "uom", "units"])?.toLowerCase() ?? "";
+  const merged = `${raw} ${text}`;
+  if (merged.includes("mmbtu")) return "MMBtu";
+  if (merged.includes("therm")) return "therm";
+  if (merged.includes("tco2") || merged.includes(" co2") || merged.includes("carbon"))
+    return "tCO2";
+  if (/\bmw\b/.test(merged)) return "MW";
+  if (/\bmwh\b/.test(merged)) return "MWh";
+  if (merged.includes("lot")) return "lot";
+  return null;
+}
+
+function inferCurrency(
+  row: Record<string, unknown>,
+  text: string,
+  market: string | null,
+): "GBP" | "EUR" | "USD" | null {
+  const raw = inferString(row, ["currency", "ccy"])?.toUpperCase() ?? "";
+  if (raw === "GBP" || raw === "EUR" || raw === "USD") return raw;
+  if (market === "TTF" || market === "EUA") return "EUR";
+  if (/\beur\b|€/.test(text)) return "EUR";
+  if (/\busd\b|\$/.test(text)) return "USD";
+  if (/\bgbp\b|£/.test(text)) return "GBP";
+  return null;
+}
+
+function inferNumber(
+  row: Record<string, unknown>,
+  keys: string[],
+): number | null {
+  for (const [k, v] of Object.entries(row)) {
+    const key = k.toLowerCase();
+    if (!keys.some((candidate) => key.includes(candidate))) continue;
+    const parsed = parseLooseNumber(v);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
+function inferString(row: Record<string, unknown>, keys: string[]): string | null {
+  for (const [k, v] of Object.entries(row)) {
+    const key = k.toLowerCase();
+    if (!keys.some((candidate) => key.includes(candidate))) continue;
+    const text = String(v ?? "").trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function inferDate(row: Record<string, unknown>, keys: string[]): string | null {
+  const raw = inferString(row, keys);
+  if (!raw) return null;
+  const value = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    const [d, m, y] = value.split("/");
+    return `${y}-${m}-${d}`;
+  }
+  return null;
+}
+
+function parseLooseNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.\-]/g, "")
+    .trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function redactRow(row: Record<string, unknown>): Record<string, unknown> {
