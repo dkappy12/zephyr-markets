@@ -135,14 +135,25 @@ function ProfilePanel() {
       return;
     }
     setDeleting(true);
+    setError(null);
     try {
+      const resp = await fetch("/api/account/delete", { method: "DELETE" });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to delete account");
+      }
+      // Sign out client-side and redirect
       const supabase = createClient();
       await supabase.auth.signOut();
       router.push("/login");
-    } catch {
-      setError("Could not delete account. Contact contact@zephyr.markets.");
-    } finally {
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete account. Contact contact@zephyr.markets.",
+      );
       setDeleting(false);
+      setDeleteConfirm(false);
     }
   }
 
