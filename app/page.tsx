@@ -693,8 +693,42 @@ export default function Home() {
       </section>
 
       <footer className="border-t-[0.5px] border-ivory-border py-10">
-        <div className="mx-auto max-w-[1100px] px-4 text-center text-xs text-ink-mid sm:px-6 lg:px-8">
-          Zephyr Markets © 2026 · contact@zephyr.markets · Privacy · Terms
+        <div className="mx-auto flex max-w-[1100px] flex-col items-center justify-center gap-3 px-4 text-center sm:px-6 lg:px-8">
+          <p className="text-xs text-ink-mid">
+            Zephyr Markets © 2026 ·{" "}
+            <a
+              href="mailto:contact@zephyr.markets"
+              className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+            >
+              contact@zephyr.markets
+            </a>
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+            <Link
+              href="/privacy"
+              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Privacy
+            </Link>
+            <Link
+              href="/terms"
+              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Terms
+            </Link>
+            <Link
+              href="/login"
+              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Sign up
+            </Link>
+          </div>
         </div>
       </footer>
     </div>
