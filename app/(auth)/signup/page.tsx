@@ -39,6 +39,16 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const passwordChecks = [
+    { label: "At least 12 characters", ok: password.length >= 12 },
+    { label: "One uppercase letter", ok: /[A-Z]/.test(password) },
+    { label: "One lowercase letter", ok: /[a-z]/.test(password) },
+    { label: "One number", ok: /[0-9]/.test(password) },
+    { label: "One special character", ok: /[^A-Za-z0-9]/.test(password) },
+  ];
+  const passwordStrong = passwordChecks.every((c) => c.ok);
+  const canContinueFromAccount =
+    fullName.trim().length > 0 && email.trim().length > 0 && passwordStrong;
 
   useEffect(() => {
     let mounted = true;
@@ -69,6 +79,12 @@ export default function SignupPage() {
   function next() {
     setError(null);
     setInfo(null);
+    if (step === 0 && !canContinueFromAccount) {
+      setError(
+        "Complete account details and meet all password requirements before continuing.",
+      );
+      return;
+    }
     setStep((s) => Math.min(s + 1, steps.length - 1));
   }
 
@@ -265,7 +281,27 @@ export default function SignupPage() {
                       value={password}
                       onChange={(v) => setPassword(v)}
                     />
-                    <p className="text-xs text-ink-light">{passwordPolicyHint()}</p>
+                    <div className="space-y-1.5 pt-1">
+                      {passwordChecks.map((check) => (
+                        <div
+                          key={check.label}
+                          className="flex items-center gap-2 text-xs text-ink-mid"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`inline-flex h-4 w-4 items-center justify-center rounded-full border-[0.5px] text-[10px] transition-colors ${
+                              check.ok
+                                ? "border-[#1D6B4E]/50 bg-[#1D6B4E]/10 text-[#1D6B4E]"
+                                : "border-ivory-border bg-ivory text-transparent"
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span>{check.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="pt-1 text-xs text-ink-light">{passwordPolicyHint()}</p>
                   </motion.div>
                 )}
 
@@ -404,7 +440,8 @@ export default function SignupPage() {
                   <button
                     type="button"
                     onClick={next}
-                    className="rounded-[4px] bg-ink px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-ivory transition-colors duration-200 hover:bg-[#1f1d1a]"
+                    disabled={step === 0 && !canContinueFromAccount}
+                    className="rounded-[4px] bg-ink px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-ivory transition-colors duration-200 enabled:hover:bg-[#1f1d1a] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Continue
                   </button>
