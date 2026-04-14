@@ -266,12 +266,6 @@ function ProfilePanel() {
               {message}
             </p>
           ) : null}
-          {error ? (
-            <p className="text-sm text-bear" role="alert">
-              {error}
-            </p>
-          ) : null}
-
           <div className="mt-8 border-t-[0.5px] border-ivory-border pt-6">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Appearance
@@ -379,6 +373,11 @@ function ProfilePanel() {
                 </div>
               </div>
             )}
+            {error ? (
+              <p className="mt-3 text-sm text-bear" role="alert">
+                {error}
+              </p>
+            ) : null}
           </div>
         </form>
       )}
