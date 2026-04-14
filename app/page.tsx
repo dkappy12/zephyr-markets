@@ -531,11 +531,11 @@ export default function Home() {
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
             <ProductStat
-              value="Every 5 min"
+              value="Every 5 minutes"
               label="SRMC model recalculated against live TTF, wind and REMIT"
             />
             <ProductStat
-              value="60 sec"
+              value="60 seconds"
               label="REMIT notice to scored signal in your feed"
             />
             <ProductStat
