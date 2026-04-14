@@ -254,7 +254,7 @@ ${jsonStr}`;
     const merged = classified.map((entry, idx) => {
       if (!entry || typeof entry !== "object") return entry;
       return {
-        ...entry,
+        ...normaliseClassifiedEntry(entry as Record<string, unknown>),
         original_row: rows[idx] ?? null,
       };
     });
@@ -457,6 +457,176 @@ function parseLooseNumber(value: unknown): number | null {
   if (!text) return null;
   const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+const MARKET_SET = new Set([
+  "GB_power",
+  "NBP",
+  "TTF",
+  "EUA",
+  "UKA",
+  "nordic_power",
+  "german_power",
+  "french_power",
+  "other_gas",
+  "other_power",
+  "other_carbon",
+] as const);
+
+const INSTRUMENT_TYPE_SET = new Set([
+  "power_forward",
+  "gas_forward",
+  "spark_spread",
+  "dark_spread",
+  "carbon",
+  "renewable_certificate",
+  "power_option",
+  "gas_option",
+  "other_energy",
+] as const);
+
+function normaliseClassifiedEntry(entry: Record<string, unknown>) {
+  const market = normaliseMarketValue(entry.market);
+  const unit = normaliseUnitValue(entry.unit, market);
+  const currency = normaliseCurrencyValue(entry.currency, market, unit);
+  const direction = normaliseDirectionValue(entry.direction);
+  const size = parseLooseNumber(entry.size);
+  const tradePrice = parseLooseNumber(entry.trade_price);
+  const keep =
+    typeof entry.keep === "boolean"
+      ? entry.keep
+      : market != null || !!inferDirection(JSON.stringify(entry).toLowerCase());
+  const discardReason = keep
+    ? null
+    : typeof entry.discard_reason === "string" && entry.discard_reason.trim()
+      ? entry.discard_reason.trim()
+      : "Non-energy instrument";
+
+  return {
+    keep,
+    discard_reason: discardReason,
+    instrument_type: normaliseInstrumentTypeValue(entry.instrument_type, market),
+    market,
+    direction,
+    size,
+    unit,
+    tenor: safeString(entry.tenor),
+    trade_price: tradePrice,
+    currency,
+    expiry_date: normaliseDateValue(entry.expiry_date),
+    entry_date: normaliseDateValue(entry.entry_date),
+    instrument: safeString(entry.instrument) ?? "Unclassified position",
+  };
+}
+
+function safeString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normaliseDirectionValue(value: unknown): "long" | "short" | null {
+  const v = safeString(value)?.toLowerCase();
+  if (v === "long") return "long";
+  if (v === "short") return "short";
+  if (v === "buy") return "long";
+  if (v === "sell") return "short";
+  return null;
+}
+
+function normaliseMarketValue(value: unknown): string | null {
+  const v = safeString(value);
+  if (!v) return null;
+  const lowered = v.toLowerCase().replace(/[\s-]+/g, "_");
+  const aliasMap: Record<string, string> = {
+    gb: "GB_power",
+    gb_power: "GB_power",
+    power: "other_power",
+    uk_power: "GB_power",
+    de_power: "german_power",
+    fr_power: "french_power",
+    nordic: "nordic_power",
+    gas: "other_gas",
+    carbon: "other_carbon",
+    co2: "other_carbon",
+  };
+  const mapped = aliasMap[lowered] ?? v;
+  if (MARKET_SET.has(mapped as (typeof MARKET_SET extends Set<infer T> ? T : never))) {
+    return mapped;
+  }
+  return null;
+}
+
+function normaliseInstrumentTypeValue(
+  value: unknown,
+  market: string | null,
+): string | null {
+  const v = safeString(value)?.toLowerCase().replace(/[\s-]+/g, "_");
+  const aliasMap: Record<string, string> = {
+    power: "power_forward",
+    gas: "gas_forward",
+    option: market === "TTF" || market === "NBP" ? "gas_option" : "power_option",
+    spread: "spark_spread",
+  };
+  const mapped = (v ? aliasMap[v] ?? v : null) as string | null;
+  if (mapped && INSTRUMENT_TYPE_SET.has(mapped as (typeof INSTRUMENT_TYPE_SET extends Set<infer T> ? T : never))) {
+    return mapped;
+  }
+  if (market === "UKA" || market === "EUA" || market === "other_carbon") {
+    return "carbon";
+  }
+  if (market === "TTF" || market === "NBP" || market === "other_gas") {
+    return "gas_forward";
+  }
+  if (
+    market === "GB_power" ||
+    market === "nordic_power" ||
+    market === "german_power" ||
+    market === "french_power" ||
+    market === "other_power"
+  ) {
+    return "power_forward";
+  }
+  return "other_energy";
+}
+
+function normaliseUnitValue(value: unknown, market: string | null) {
+  const v = safeString(value)?.toLowerCase();
+  if (v === "mw") return "MW";
+  if (v === "mwh") return "MWh";
+  if (v === "therm" || v === "therms") return "therm";
+  if (v === "mmbtu") return "MMBtu";
+  if (v === "tco2" || v === "tco₂") return "tCO2";
+  if (v === "lot" || v === "lots") return "lot";
+  if (market === "NBP" || market === "other_gas") return "therm";
+  if (market === "UKA" || market === "EUA" || market === "other_carbon")
+    return "tCO2";
+  return "MW";
+}
+
+function normaliseCurrencyValue(
+  value: unknown,
+  market: string | null,
+  unit: string | null,
+): "GBP" | "EUR" | "USD" | null {
+  const v = safeString(value)?.toUpperCase();
+  if (v === "GBP" || v === "EUR" || v === "USD") return v;
+  if (market === "TTF" || market === "EUA") return "EUR";
+  if (market === "NBP") return "GBP";
+  if (market === "UKA") return "GBP";
+  if (unit === "therm") return "GBP";
+  return "GBP";
+}
+
+function normaliseDateValue(value: unknown): string | null {
+  const v = safeString(value);
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) {
+    const [d, m, y] = v.split("/");
+    return `${y}-${m}-${d}`;
+  }
+  return null;
 }
 
 function redactRow(row: Record<string, unknown>): Record<string, unknown> {
