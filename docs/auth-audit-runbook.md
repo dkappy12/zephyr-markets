@@ -114,6 +114,20 @@ order by day desc, status asc;
 - On alert: run Query 2/3/4 immediately, classify as abuse vs regression.
 - Owner: auth on-call (primary), platform lead (secondary).
 
+### Owner Assignments
+
+- Primary on-call owner: `________________`
+- Secondary owner: `________________`
+- Security approver: `________________`
+- Product comms owner: `________________`
+
+### SLA Windows
+
+- Alert acknowledgement: within 15 minutes.
+- Initial triage classification (abuse vs regression): within 30 minutes.
+- Containment for high-severity auth incidents: within 60 minutes.
+- Written incident summary: within 1 business day.
+
 ## Response Matrix
 
 1. `unauthorized_spike`

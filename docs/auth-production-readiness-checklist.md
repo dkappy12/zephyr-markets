@@ -2,6 +2,12 @@
 
 Complete this before declaring auth cutover done.
 
+## Release Policy (Mandatory)
+
+- This checklist is mandatory for any auth-touching release.
+- If any required item is unchecked, release is blocked.
+- No-go rule: failed auth smoke (`npm run test:e2e` or approved staging equivalent) blocks release.
+
 ## Ownership
 
 - SMTP sender owner:
@@ -32,9 +38,25 @@ Complete this before declaring auth cutover done.
 - [ ] Account deletion runbook reviewed: [docs/account-deletion-incident-runbook.md](docs/account-deletion-incident-runbook.md)
 - [ ] Ownership contract reviewed: [docs/auth-schema-contract.md](docs/auth-schema-contract.md)
 
+## CI / Merge Gates
+
+- [ ] Branch protection requires `Auth PR Checks / auth-fast-checks` before merge
+- [ ] Main/nightly `Auth Full E2E / auth-e2e` is monitored and triaged on failure
+
 ## Final Sign-off
 
 - [ ] No regressions in login/signup/forgot/reset/verify flows
+- [ ] Account deletion flow validated with password confirmation
+- [ ] Auth smoke execution recorded (`npm run test:e2e` or staging run)
 - [ ] Security owner approval
 - [ ] Product owner approval
+- [ ] Rollback owner assigned
 - [ ] Date recorded
+
+## Sign-Off Record
+
+- Security owner:
+- Product owner:
+- Rollback owner:
+- Sign-off date:
+- Release/tag:

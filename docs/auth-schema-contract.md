@@ -43,3 +43,12 @@ Any schema change in auth/account scope must update all of:
 1. this file (`docs/auth-schema-contract.md`)
 2. `app/api/account/delete/route.ts` cleanup targets/order
 3. `ACCOUNT_DELETION_VERIFICATION.md` happy-path orphan checks
+
+## Schema-Change PR Checklist
+
+For any PR that changes auth/account schema, include this checklist in the PR description:
+
+- [ ] Ownership map reviewed/updated in `docs/auth-schema-contract.md`
+- [ ] Deletion cleanup keys/order updated in `app/api/account/delete/route.ts`
+- [ ] Verification orphan checks updated in `ACCOUNT_DELETION_VERIFICATION.md`
+- [ ] Route tests still pass (`npm test`)

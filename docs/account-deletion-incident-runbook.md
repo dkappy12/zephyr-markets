@@ -34,6 +34,18 @@ order by created_at desc
 limit 200;
 ```
 
+## First 15 Minutes Checklist
+
+1. Acknowledge incident and assign incident lead.
+2. Classify impact:
+   - single user
+   - multi-user
+   - systemic auth outage
+3. Decide containment:
+   - continue normal traffic
+   - temporarily disable delete action in UI
+4. Post internal status update with next checkpoint time.
+
 ## Failure-Type Playbook
 
 ### A) `PASSWORD_INVALID`
@@ -131,6 +143,19 @@ Escalation path:
 1. Auth on-call engineer
 2. Platform lead
 3. Product owner (if user-facing maintenance banner is required)
+
+### Escalation Contacts
+
+- Auth on-call engineer: `________________`
+- Platform lead: `________________`
+- Product owner: `________________`
+- Security owner: `________________`
+
+### Incident SLAs
+
+- Acknowledge deletion incident: within 15 minutes.
+- Deliver first root-cause hypothesis: within 30 minutes.
+- Apply mitigation or safe disablement: within 60 minutes.
 
 ## Post-Incident Notes Template
 

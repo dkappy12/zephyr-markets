@@ -25,6 +25,8 @@ test("signup to verify-email to login route smoke", async ({ page }) => {
 test("authenticated delete-account attempt smoke (optional env-gated)", async ({
   page,
 }) => {
+  // This test intentionally depends on a real account and is env-gated.
+  // It is skipped unless both secrets are set.
   const email = process.env.E2E_TEST_EMAIL;
   const password = process.env.E2E_TEST_PASSWORD;
 
@@ -43,4 +45,10 @@ test("authenticated delete-account attempt smoke (optional env-gated)", async ({
 
   await page.getByRole("button", { name: "Delete account" }).click();
   await expect(page.getByLabel("Confirm password")).toBeVisible();
+
+  await page.getByLabel("Confirm password").fill("wrong-password");
+  await page.getByRole("button", { name: "Yes, delete my account" }).click();
+  await expect(
+    page.getByText("Password is incorrect. Please try again."),
+  ).toBeVisible();
 });

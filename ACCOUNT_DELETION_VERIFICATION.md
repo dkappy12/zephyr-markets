@@ -5,6 +5,7 @@ Reference ownership contract: [docs/auth-schema-contract.md](docs/auth-schema-co
 ## Preconditions
 - User account exists with rows in user-owned tables: `alerts`, `email_trade_imports`, `attribution_predictions`, `portfolio_pnl`, `positions`, `team_members`, `team_invitations`, `teams`, `profiles`.
 - Route env vars are set: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+- Ownership map and cleanup order match [docs/auth-schema-contract.md](docs/auth-schema-contract.md).
 
 ## Scenarios
 1. Password required
