@@ -907,6 +907,7 @@ export function AttributionPageClient() {
     calibration,
     residual,
     explainedPnl,
+    explainedPct,
     explainedRatio,
     attributionConfidence,
     primary,

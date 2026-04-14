@@ -245,6 +245,7 @@ export default function SignalFeedPage() {
   const [sortMode, setSortMode] = useState<SortMode>("impact");
   const [visibleCount, setVisibleCount] = useState(10);
   const [showCleared, setShowCleared] = useState(false);
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   const loadSignals = useCallback(async () => {
     const supabase = createBrowserClient();
@@ -300,6 +301,11 @@ export default function SignalFeedPage() {
       supabase.removeChannel(channel);
     };
   }, [loadSignals]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTs(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const headerStats = useMemo(
     () => buildCapacityHeaderStats(rows, new Date()),
@@ -361,7 +367,9 @@ export default function SignalFeedPage() {
   const latestTs =
     rows.length > 0 ? new Date(rows[0]!.created_at).getTime() : null;
   const ageMinutes =
-    latestTs != null ? Math.max(0, Math.floor((Date.now() - latestTs) / 60000)) : null;
+    latestTs != null
+      ? Math.max(0, Math.floor((nowTs - latestTs) / 60000))
+      : null;
   const reliability =
     ageMinutes == null ? "LOW" : ageMinutes <= 30 ? "HIGH" : ageMinutes <= 120 ? "MEDIUM" : "LOW";
 
