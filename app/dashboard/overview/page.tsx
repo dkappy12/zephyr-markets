@@ -78,6 +78,10 @@ export default function OverviewPage() {
     market_price_gbp_mwh: number | null;
   } | null>(null);
   const [n2exPrice, setN2exPrice] = useState<number | null>(null);
+  /** Always from latest physical_premium row when present — independent of score parse (feeds N2EX metric). */
+  const [premiumMarketTapeGbp, setPremiumMarketTapeGbp] = useState<number | null>(
+    null,
+  );
   const [ttfPrice, setTtfPrice] = useState<number | null>(null);
   const [regime, setRegime] = useState<string | null>(null);
   const [srmcGbp, setSrmcGbp] = useState<number | null>(null);
@@ -150,9 +154,10 @@ export default function OverviewPage() {
           .maybeSingle(),
         supabase
           .from("market_prices")
-          .select("price_gbp_mwh, price_time")
-          .order("price_time", { ascending: false })
-          .gt("price_gbp_mwh", 0)
+          .select("price_gbp_mwh, price_date, settlement_period, market")
+          .or("market.eq.N2EX,market.eq.APX")
+          .order("price_date", { ascending: false })
+          .order("settlement_period", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
@@ -242,6 +247,7 @@ export default function OverviewPage() {
         const market = numOrNull(d.market_price_gbp_mwh);
         const srmc = numOrNull(d.srmc_gbp_mwh);
         const resGw = numOrNull(d.residual_demand_gw);
+        setPremiumMarketTapeGbp(market);
         if (Number.isFinite(score)) {
           setPremiumRow({
             normalised_score: score,
@@ -257,6 +263,7 @@ export default function OverviewPage() {
         setResidualDemandGw(resGw);
       } else {
         setPremiumRow(null);
+        setPremiumMarketTapeGbp(null);
         setRegime(null);
         setSrmcGbp(null);
         setResidualDemandGw(null);
@@ -310,6 +317,9 @@ export default function OverviewPage() {
 
   const impliedPrice = premiumRow?.implied_price_gbp_mwh ?? null;
   const marketPrice = premiumRow?.market_price_gbp_mwh ?? null;
+  /** Prefer live tape; then premium card row; then raw market field from same API row if score failed to parse. */
+  const n2exDisplayPrice =
+    n2exPrice ?? marketPrice ?? premiumMarketTapeGbp;
   const premiumGap =
     impliedPrice != null && marketPrice != null
       ? impliedPrice - marketPrice
@@ -349,7 +359,11 @@ export default function OverviewPage() {
         </div>
         <MetricCard
           label="N2EX DAY-AHEAD"
-          value={n2exPrice == null ? "—" : `£${n2exPrice.toFixed(2)}`}
+          value={
+            n2exDisplayPrice == null
+              ? "—"
+              : `£${n2exDisplayPrice.toFixed(2)}`
+          }
           unit="/MWh"
         />
         <MetricCard
