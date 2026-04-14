@@ -171,7 +171,6 @@ export async function DELETE(request: Request) {
       "alerts",
       "portfolio_pnl",
       "positions",
-      "brief_entries",
       "premium_predictions",
       "attribution_predictions",
       "scenario_predictions",
