@@ -17,7 +17,25 @@ All major outputs should carry a reliability envelope:
 
 Implementation source: `lib/reliability/contract.ts`.
 
-## Daily Checks
+## CI and local commands
+
+On every push/PR, GitHub Actions runs **lint → tests → benchmark reconcile → economic quality gate** (see `.github/workflows/ci.yml`).
+
+| Command | Needs Supabase secrets? | Purpose |
+|--------|-------------------------|---------|
+| `npm run quality:reconcile` | No | NBP/TTF conversion parity vs fixed benchmarks (fails CI on math regression). |
+| `npm run quality:gate` | Yes (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`) | Live 14d MAE, classifier fallback rate, attribution R² vs thresholds. |
+| `npm run quality:ci-core` | No | Alias for `quality:reconcile`. |
+| `npm run quality:ci` | Optional for gate | Runs reconcile, then gate **if** URL + service role env vars are set (handy before release). |
+
+**GitHub Actions:** Add repository secrets `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` so `quality:gate` actually queries production metrics in CI. Reconcile does **not** use secrets.
+
+**Strict mode:** In `.github/workflows/ci.yml`, `QUALITY_GATE_STRICT=1` makes missing Supabase env or query errors **fail** the gate step; `0` warns and skips when vars are absent (e.g. forks).
+
+- **Reconcile failure** → code/math regression; fix implementation or benchmarks.
+- **Gate failure** → live metrics breached thresholds or DB/query issue; investigate data and thresholds.
+
+## Daily Checks (optional)
 
 Run:
 
@@ -43,7 +61,7 @@ Thresholds can be changed with environment variables:
 
 ## Release Policy
 
-- PRs must pass lint/tests plus `npm run quality:gate`.
+- PRs must pass lint, tests, `npm run quality:reconcile`, and `npm run quality:gate` (when Supabase secrets are configured in CI).
 - If the quality gate reports `FAIL`, merge/release is blocked until:
   - root cause is identified,
   - a mitigation is applied, and

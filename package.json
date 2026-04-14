@@ -14,7 +14,9 @@
     "quality:gate": "node scripts/model-quality-gate.mjs",
     "quality:walk-forward": "node scripts/model-walk-forward-report.mjs",
     "quality:drift": "node scripts/model-drift-check.mjs",
-    "quality:reconcile": "node scripts/model-benchmark-reconcile.mjs"
+    "quality:reconcile": "node scripts/model-benchmark-reconcile.mjs",
+    "quality:ci-core": "npm run quality:reconcile",
+    "quality:ci": "node scripts/quality-ci-bundle.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",

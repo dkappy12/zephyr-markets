@@ -28,6 +28,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Benchmark reconcile
+        run: npm run quality:reconcile
+
       - name: Economic quality gate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

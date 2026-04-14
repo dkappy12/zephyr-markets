@@ -88,3 +88,8 @@ Every intelligence output is logged as a prediction. Nightly at 22:00 GMT a Rail
 - Small format icon: Z lettermark in Cormorant Garamond, charcoal on ivory
 - Banner: wireframe mountain range (LinkedIn, backgrounds)
 - Compass rose: decorative element inside product (LNG map corner, weather page)
+
+## Quality checks (local & CI)
+- CI runs benchmark reconcile (no secrets) plus the economic quality gate when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set in GitHub Actions.
+- Local one-shot before release: `npm run quality:ci` (gate runs only if those env vars are set locally).
+- Details: [docs/self-improvement-assurance.md](docs/self-improvement-assurance.md).
