@@ -1,7 +1,7 @@
-/** GBP per EUR for rough TTF → £ bridge (matches Markets page). */
+/** Fallback GBP/EUR rate used when live fx_rates data is unavailable. Live rate fetched from Supabase fx_rates table in page components. */
 export const GBP_PER_EUR = 0.86;
-/** Rough MWh → therm conversion factor for NBP p/therm from TTF £/MWh style bridge. */
-export const MWH_TO_THERM = 2.931;
+/** Therms per MWh: 1 MWh = 34.121 therms (1 therm = 29.3071 kWh). */
+export const MWH_TO_THERM = 34.121;
 
 export type PositionRow = {
   id: string;
@@ -116,34 +116,39 @@ export type LivePrices = {
   gbPowerGbpMwh: number | null;
   gbPowerOpenGbpMwh: number | null;
   ttfEurMwh: number | null;
-  /** Same as ttfEurMwh × GBP_PER_EUR — for display only; P&amp;L uses EUR × rate. */
+  /** Same as ttfEurMwh × gbpPerEur — for display only; P&amp;L uses EUR × rate. */
   ttfGbpMwh: number | null;
   ttfOpenEurMwh: number | null;
   ttfOpenGbpMwh: number | null;
   nbpPencePerTherm: number | null;
   nbpOpenPencePerTherm: number | null;
+  /** EUR→GBP for TTF £ bridge and TTF P&amp;L (live from fx_rates or {@link GBP_PER_EUR}). */
+  gbpPerEur: number;
 };
 
-/** TTF (and EUR/MWh) P&amp;L in £: diff in EUR/MWh × size, then × GBP_PER_EUR. */
+/** TTF (and EUR/MWh) P&amp;L in £: diff in EUR/MWh × size, then × `gbpPerEur`. */
 export function eurMwhPnlToGbp(
   direction: string | null,
   entryEurMwh: number | null,
   markEurMwh: number | null,
   sizeMwh: number | null,
+  gbpPerEur: number = GBP_PER_EUR,
 ): number | null {
   const eur = linearPnl(direction, entryEurMwh, markEurMwh, sizeMwh);
   if (eur == null) return null;
-  return eur * GBP_PER_EUR;
+  return eur * gbpPerEur;
 }
 
 /**
  * NBP forward proxy from TTF (EUR/MWh): £/MWh → £/therm, then to pence/therm.
- * NBP_p/th ≈ TTF_eur × GBP_per_EUR / therms_per_mwh × 10 (screen range ~80–150p/th).
- * (Using ×10 here, not ×100, corrects the prior factor-of-10 error vs traded NBP.)
+ * p/th = (TTF_eur × gbp_per_eur / therms_per_mwh) × 100.
  */
-export function ttfToNbpPencePerTherm(ttfEurMwh: number): number {
-  const gbpMwh = ttfEurMwh * GBP_PER_EUR;
-  return (gbpMwh / MWH_TO_THERM) * 10;
+export function ttfToNbpPencePerTherm(
+  ttfEurMwh: number,
+  gbpPerEur: number = GBP_PER_EUR,
+): number {
+  const gbpMwh = ttfEurMwh * gbpPerEur;
+  return (gbpMwh / MWH_TO_THERM) * 100;
 }
 
 /**

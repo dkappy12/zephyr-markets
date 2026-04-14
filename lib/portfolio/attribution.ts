@@ -53,7 +53,13 @@ export function positionTodayPnlGbp(
     const curE = lp.ttfEurMwh;
     const opE = lp.ttfOpenEurMwh;
     if (curE == null || opE == null) return null;
-    return eurMwhPnlToGbp(p.direction, opE, curE, p.size);
+    return eurMwhPnlToGbp(
+      p.direction,
+      opE,
+      curE,
+      p.size,
+      lp.gbpPerEur ?? GBP_PER_EUR,
+    );
   }
   const cur = mlow === "gb_power" ? lp.gbPowerGbpMwh : null;
   const opn = mlow === "gb_power" ? lp.gbPowerOpenGbpMwh : null;

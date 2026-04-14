@@ -262,7 +262,7 @@ export function AttributionPageClient() {
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
-    const [mpLatest, mpOpen, gasLatest, gasOpen] = await Promise.all([
+    const [mpLatest, mpOpen, gasLatest, gasOpen, fxLatest] = await Promise.all([
       supabase
         .from("market_prices")
         .select("price_gbp_mwh, price_date, settlement_period, market")
@@ -294,6 +294,14 @@ export function AttributionPageClient() {
         .order("price_time", { ascending: true })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("fx_rates")
+        .select("rate")
+        .eq("base", "EUR")
+        .eq("quote", "GBP")
+        .order("rate_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const gbp =
@@ -313,9 +321,19 @@ export function AttributionPageClient() {
         ? Number((gasOpen.data as { price_eur_mwh?: unknown }).price_eur_mwh)
         : NaN;
 
-    const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * GBP_PER_EUR : null;
+    const fxData = fxLatest.data;
+    const liveFxRate =
+      fxData != null &&
+      typeof fxData === "object" &&
+      "rate" in fxData &&
+      fxData.rate != null
+        ? Number((fxData as { rate: unknown }).rate)
+        : GBP_PER_EUR;
+    const gbpPerEur = Number.isFinite(liveFxRate) ? liveFxRate : GBP_PER_EUR;
+
+    const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * gbpPerEur : null;
     const ttfOpenGbp = Number.isFinite(ttfEurOpen)
-      ? ttfEurOpen * GBP_PER_EUR
+      ? ttfEurOpen * gbpPerEur
       : null;
 
     setLivePrices({
@@ -326,9 +344,12 @@ export function AttributionPageClient() {
       ttfOpenEurMwh: Number.isFinite(ttfEurOpen) ? ttfEurOpen : null,
       ttfOpenGbpMwh: ttfOpenGbp,
       nbpPencePerTherm:
-        Number.isFinite(ttfEur) ? ttfToNbpPencePerTherm(ttfEur) : null,
+        Number.isFinite(ttfEur) ? ttfToNbpPencePerTherm(ttfEur, gbpPerEur) : null,
       nbpOpenPencePerTherm:
-        Number.isFinite(ttfEurOpen) ? ttfToNbpPencePerTherm(ttfEurOpen) : null,
+        Number.isFinite(ttfEurOpen)
+          ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
+          : null,
+      gbpPerEur,
     });
   }, [supabase]);
 
@@ -488,7 +509,7 @@ export function AttributionPageClient() {
   const windMoveGbpMwh = windPriceImpactGbpPerMwh(deltaWindGw);
   const gasMoveGbpMwh =
     ttfStart != null && ttfCurrent != null
-      ? (ttfCurrent - ttfStart) * GBP_PER_EUR
+      ? (ttfCurrent - ttfStart) * (livePrices?.gbpPerEur ?? GBP_PER_EUR)
       : 0;
   const remitMoveGbpMwh = remitPriceImpactGbpPerMwh(deltaRemitMw);
   const priceResidualMoveGbpMwh =

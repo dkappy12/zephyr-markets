@@ -126,7 +126,6 @@ EF_TCO2_PER_MWH_EL = 0.37
 UKA_PRICE_GBP_PER_T = float(os.environ.get("UKA_PRICE_GBP_T", "55.0"))
 CPS_GBP_PER_T = 18.0
 VOM_GBP_PER_MWH = 2.0
-THERMAL_CAPACITY_GW = 45.0
 # GB installed wind capacity ~32 GW (2026). At 8 m/s mean wind speed,
 # capacity factor ~45%, giving ~14.4 GW expected output.
 # This constant is used as fallback only when BMRS FUELINST wind outturn is unavailable.
@@ -3052,7 +3051,7 @@ async def generate_morning_brief() -> None:
             _market_prices_rest_url(),
             headers=_supabase_auth_headers(),
             params={
-                "market": "eq.N2EX",
+                "price_gbp_mwh": "gt.0",
                 "select": "price_gbp_mwh,settlement_period",
                 "order": "price_date.desc,settlement_period.desc",
                 "limit": "1",

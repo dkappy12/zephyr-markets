@@ -152,6 +152,7 @@ export function BookPageClient() {
       mpOpen,
       gasLatest,
       gasOpen,
+      fxLatest,
     ] = await Promise.all([
       supabase
         .from("market_prices")
@@ -184,6 +185,14 @@ export function BookPageClient() {
         .order("price_time", { ascending: true })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("fx_rates")
+        .select("rate")
+        .eq("base", "EUR")
+        .eq("quote", "GBP")
+        .order("rate_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const gbp =
@@ -203,9 +212,19 @@ export function BookPageClient() {
         ? Number((gasOpen.data as { price_eur_mwh?: unknown }).price_eur_mwh)
         : NaN;
 
-    const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * GBP_PER_EUR : null;
+    const fxData = fxLatest.data;
+    const liveFxRate =
+      fxData != null &&
+      typeof fxData === "object" &&
+      "rate" in fxData &&
+      fxData.rate != null
+        ? Number((fxData as { rate: unknown }).rate)
+        : GBP_PER_EUR;
+    const gbpPerEur = Number.isFinite(liveFxRate) ? liveFxRate : GBP_PER_EUR;
+
+    const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * gbpPerEur : null;
     const ttfOpenGbp = Number.isFinite(ttfEurOpen)
-      ? ttfEurOpen * GBP_PER_EUR
+      ? ttfEurOpen * gbpPerEur
       : null;
 
     setLivePrices({
@@ -216,9 +235,12 @@ export function BookPageClient() {
       ttfOpenEurMwh: Number.isFinite(ttfEurOpen) ? ttfEurOpen : null,
       ttfOpenGbpMwh: ttfOpenGbp,
       nbpPencePerTherm:
-        Number.isFinite(ttfEur) ? ttfToNbpPencePerTherm(ttfEur) : null,
+        Number.isFinite(ttfEur) ? ttfToNbpPencePerTherm(ttfEur, gbpPerEur) : null,
       nbpOpenPencePerTherm:
-        Number.isFinite(ttfEurOpen) ? ttfToNbpPencePerTherm(ttfEurOpen) : null,
+        Number.isFinite(ttfEurOpen)
+          ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
+          : null,
+      gbpPerEur,
     });
   }, [supabase]);
 
@@ -555,9 +577,16 @@ export function BookPageClient() {
                       p.trade_price,
                       curE,
                       p.size,
+                      lp.gbpPerEur,
                     );
                     if (curE != null && opE != null) {
-                      today = eurMwhPnlToGbp(p.direction, opE, curE, p.size);
+                      today = eurMwhPnlToGbp(
+                        p.direction,
+                        opE,
+                        curE,
+                        p.size,
+                        lp.gbpPerEur,
+                      );
                     }
                   } else {
                     total = linearPnl(p.direction, p.trade_price, cur, p.size);
