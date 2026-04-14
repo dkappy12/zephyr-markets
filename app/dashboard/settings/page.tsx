@@ -74,6 +74,7 @@ function ProfilePanel() {
   const [signingOut, setSigningOut] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,13 +138,23 @@ function ProfilePanel() {
     setDeleting(true);
     setError(null);
     try {
-      const resp = await fetch("/api/account/delete", { method: "DELETE" });
+      const resp = await fetch("/api/account/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: deletePassword }),
+      });
       if (!resp.ok) {
         const body: { code?: string; error?: string } = await resp
           .json()
           .catch(() => ({}));
         if (body.code === "UNAUTHORIZED") {
           throw new Error("Your session has expired. Please sign in again.");
+        }
+        if (body.code === "PASSWORD_REQUIRED") {
+          throw new Error("Please enter your password to confirm account deletion.");
+        }
+        if (body.code === "PASSWORD_INVALID") {
+          throw new Error("Password is incorrect. Please try again.");
         }
         if (body.code === "SERVER_MISCONFIGURED") {
           throw new Error("Account deletion is temporarily unavailable.");
@@ -169,6 +180,7 @@ function ProfilePanel() {
       );
       setDeleting(false);
       setDeleteConfirm(false);
+      setDeletePassword("");
     }
   }
 
@@ -318,18 +330,38 @@ function ProfilePanel() {
                   Are you sure? This will permanently delete your account and
                   all data.
                 </p>
+                <div className="mt-3 max-w-md">
+                  <label
+                    htmlFor="delete-password"
+                    className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8B3A3A]"
+                  >
+                    Confirm password
+                  </label>
+                  <input
+                    id="delete-password"
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    autoComplete="current-password"
+                    className="w-full rounded-[4px] border-[0.5px] border-[#8B3A3A]/30 bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-[#8B3A3A]/60"
+                    placeholder="Enter your password"
+                  />
+                </div>
                 <div className="mt-3 flex gap-3">
                   <button
                     type="button"
                     onClick={handleDeleteAccount}
-                    disabled={deleting}
+                    disabled={deleting || !deletePassword.trim()}
                     className="rounded-[4px] bg-[#8B3A3A] px-4 py-2 text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a2f2f] disabled:opacity-60"
                   >
                     {deleting ? "Deleting..." : "Yes, delete my account"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDeleteConfirm(false)}
+                    onClick={() => {
+                      setDeleteConfirm(false);
+                      setDeletePassword("");
+                    }}
                     className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 py-2 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark"
                   >
                     Cancel

@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 type DeleteErrorCode =
   | "UNAUTHORIZED"
+  | "PASSWORD_REQUIRED"
+  | "PASSWORD_INVALID"
   | "SERVER_MISCONFIGURED"
   | "DATA_CLEANUP_FAILED"
   | "AUTH_DELETE_FAILED"
@@ -75,7 +77,7 @@ async function logDeletionEvent(
   });
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   // Verify the user is authenticated
   const supabase = await createClient();
   const {
@@ -88,6 +90,30 @@ export async function DELETE() {
   }
 
   const userId = user.id;
+  const email = user.email;
+  const body = await request.json().catch(() => ({}));
+  const password = typeof body?.password === "string" ? body.password : "";
+
+  if (!password.trim()) {
+    return errorResponse(400, "PASSWORD_REQUIRED", "Password is required.");
+  }
+
+  if (!email) {
+    return errorResponse(
+      400,
+      "PASSWORD_INVALID",
+      "Password confirmation is unavailable for this account.",
+    );
+  }
+
+  const { error: reAuthError } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (reAuthError) {
+    return errorResponse(401, "PASSWORD_INVALID", "Invalid password.");
+  }
+
   const env = getRequiredEnv();
   if (!env) {
     console.error("Account deletion misconfigured", {
@@ -116,10 +142,16 @@ export async function DELETE() {
 
     // Delete in dependency order — child tables first
     for (const table of [
+      "alerts",
       "portfolio_pnl",
       "positions",
       "brief_entries",
       "premium_predictions",
+      "attribution_predictions",
+      "scenario_predictions",
+      "signal_predictions",
+      "accuracy_metrics",
+      "team_members",
     ]) {
       const { error: cleanupError } = await adminClient
         .from(table)
@@ -146,6 +178,31 @@ export async function DELETE() {
           "Failed to delete account data.",
         );
       }
+    }
+
+    const { error: profileDeleteError } = await adminClient
+      .from("profiles")
+      .delete()
+      .eq("id", userId);
+    if (profileDeleteError) {
+      await logDeletionEvent(adminClient, {
+        userId,
+        status: "failed",
+        stage: "cleanup",
+        message: "Cleanup failed at table profiles",
+      });
+      console.error("Account deletion cleanup failed", {
+        operation: "account_delete",
+        userId,
+        stage: "cleanup",
+        table: "profiles",
+        reason: profileDeleteError.message,
+      });
+      return errorResponse(
+        500,
+        "DATA_CLEANUP_FAILED",
+        "Failed to delete account data.",
+      );
     }
 
     // Finally delete the auth record

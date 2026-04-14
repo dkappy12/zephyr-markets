@@ -5,9 +5,18 @@
 - Route env vars are set: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Scenarios
+1. Password required
+   - Open Settings -> Danger zone, confirm delete without entering password.
+   - Expect delete action to remain disabled.
+   - If API is called without password, expect `400` with code `PASSWORD_REQUIRED`.
+
 1. Unauthorized request
    - Send `DELETE /api/account/delete` without valid session.
    - Expect `401` with code `UNAUTHORIZED`.
+
+1. Invalid password
+   - Send valid-session delete request with wrong password.
+   - Expect `401` with code `PASSWORD_INVALID`.
 
 2. Missing env configuration
    - Unset one required env var and call `DELETE /api/account/delete` as authenticated user.
@@ -23,9 +32,10 @@
    - Expect `500` with code `AUTH_DELETE_FAILED`.
 
 5. Happy path
-   - Call delete as authenticated user with valid env.
+   - Call delete as authenticated user with valid env and correct password.
    - Expect success payload `{ "success": true }`.
    - Confirm user is signed out and redirected to `/login`.
+   - Confirm no orphaned user rows remain in user-owned tables (`alerts`, `portfolio_pnl`, `positions`, `brief_entries`, `premium_predictions`, `attribution_predictions`, `scenario_predictions`, `signal_predictions`, `accuracy_metrics`, `team_members`, `profiles`).
 
 ## Audit Verification
 - Confirm `admin_job_log` has lifecycle entries for account delete:
