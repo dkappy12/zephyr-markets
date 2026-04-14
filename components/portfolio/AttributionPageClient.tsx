@@ -1,5 +1,6 @@
 "use client";
 
+import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import {
   bookAlignmentCopy,
   gasAttributionForPosition,
@@ -1056,6 +1057,10 @@ export function AttributionPageClient() {
           </h1>
           <p className="text-sm text-ink-light">
             How today&apos;s physical drivers are moving your book.
+          </p>
+          <p className="mt-2 max-w-3xl text-[10px] leading-snug text-ink-light">
+            {PREMIUM_VS_TAPE} Em dashes (—) mean missing mark or insufficient
+            overlap for that series.
           </p>
         </motion.div>
       </div>

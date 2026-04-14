@@ -27,6 +27,13 @@ import {
 const BRAND_GREEN = "#1D6B4E";
 /** Zephyr terracotta — capacity derated, severity HIGH, warnings */
 const TERRACOTTA = "#8B3A3A";
+/** Deration bar fill: low / mid / high (non-colour label remains primary). */
+function derationBarColor(pct: number): string {
+  if (pct >= 99.5 || pct <= 0) return TERRACOTTA;
+  if (pct >= 66) return "#9B3D20";
+  if (pct >= 33) return "#B45309";
+  return BRAND_GREEN;
+}
 
 const ASSET_TABS: AssetTab[] = [
   "ALL",
@@ -210,10 +217,10 @@ function StructuredSignalCard({
             style={{ backgroundColor: "#e5e1d9" }}
           >
             <div
-              className="h-full shrink-0 rounded-sm"
+              className="h-full shrink-0 rounded-sm transition-colors"
               style={{
                 width: `${terrPct}%`,
-                backgroundColor: TERRACOTTA,
+                backgroundColor: derationBarColor(terrPct),
               }}
             />
           </div>
@@ -426,6 +433,11 @@ export default function SignalFeedPage() {
           </p>
         </div>
       </motion.div>
+      <p className="font-mono text-[10px] text-ink-light">
+        Header stats aggregate deduped REMIT rows (no per-event timestamp).
+        Staleness above reflects the latest row time; each card shows its own
+        event timing.
+      </p>
 
       {/* Filters + sort */}
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">

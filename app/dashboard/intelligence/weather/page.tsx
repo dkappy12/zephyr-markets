@@ -770,6 +770,30 @@ export default function WeatherPage() {
     return t;
   }, [hourly]);
 
+  const forecastHorizonStartLabel = useMemo(() => {
+    const t = wf168[0]?.forecast_time;
+    if (!t) return null;
+    try {
+      return (
+        formatInTimeZone(parseISO(t), "UTC", "dd MMM yyyy HH:mm") + " UTC"
+      );
+    } catch {
+      return null;
+    }
+  }, [wf168]);
+
+  const physicalPremiumSnapshotLabel = useMemo(() => {
+    const raw = ppLatest?.calculated_at;
+    if (!raw) return null;
+    try {
+      return (
+        formatInTimeZone(parseISO(raw), "UTC", "dd MMM yyyy HH:mm") + " UTC"
+      );
+    } catch {
+      return null;
+    }
+  }, [ppLatest?.calculated_at]);
+
   return (
     <div className="space-y-8">
       <div>
@@ -835,6 +859,18 @@ export default function WeatherPage() {
           </p>
         </div>
       </motion.div>
+      <p className="font-mono text-[10px] text-ink-light">
+        Forecast: Supabase{" "}
+        <code className="text-[9px]">weather_forecasts</code> (Open-Meteo)
+        {forecastHorizonStartLabel != null
+          ? ` · horizon from ${forecastHorizonStartLabel}`
+          : ""}
+        . &quot;Current wind (implied)&quot; vs{" "}
+        <code className="text-[9px]">physical_premium</code> implied wind: desk
+        snapshot{" "}
+        {physicalPremiumSnapshotLabel ?? "pending"} (aligned with Markets
+        header).
+      </p>
 
       {/* Section 2 — Wind & temperature */}
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4">
@@ -1157,6 +1193,11 @@ export default function WeatherPage() {
           Derived from solar radiation forecast (W/m²) · peak generation typically
           10:00–15:00 UTC
         </p>
+        <p className="mt-1 text-[10px] leading-snug text-ink-light">
+          Orange area: forecast from radiation model · darker line: GB solar
+          outturn (<code className="text-[9px]">solar_outturn</code>, MW→GW)
+          where time-aligned.
+        </p>
         <div className="mt-4 h-[160px] min-h-[160px]">
           {loading ? (
             <div className="flex h-[160px] items-center text-sm text-ink-mid">
@@ -1295,6 +1336,11 @@ export default function WeatherPage() {
         <p className="mt-1 text-[11px] italic text-ink-light">
           Demand baseline minus forecast wind and solar — indicates gas and
           dispatchable generation required
+        </p>
+        <p className="mt-1 text-[10px] leading-snug text-ink-light">
+          Series is model output from{" "}
+          <code className="text-[9px]">physical_premium</code> (residual demand),
+          not N2EX tape — same story as Overview implied stack vs exchange.
         </p>
         <div className="mt-4 h-[200px] min-h-[200px]">
           {hourly.length > 0 ? (

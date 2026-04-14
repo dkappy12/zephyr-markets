@@ -86,6 +86,54 @@ function personalisationSummaryLine(positions: OpenPosition[]): string {
     .join(" · ");
 }
 
+/** Full brief snapshot for same browser session — instant revisit, no duplicate personalise. */
+const BRIEF_SESSION_PREFIX = "zephyr:briefSession:v1:";
+
+type BriefSessionSnapshot = {
+  generatedAt: string;
+  row: BriefRow;
+  bookTouchpointText: string | null;
+};
+
+function briefSessionKey(userId: string) {
+  return `${BRIEF_SESSION_PREFIX}${userId}`;
+}
+
+function loadBriefSessionSnapshot(userId: string): BriefSessionSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(briefSessionKey(userId));
+    if (!raw) return null;
+    const o = JSON.parse(raw) as BriefSessionSnapshot;
+    if (typeof o.generatedAt !== "string" || !o.row) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+function saveBriefSessionSnapshot(
+  userId: string,
+  row: BriefRow,
+  bookTouchpointText: string | null,
+) {
+  if (typeof window === "undefined") return;
+  const ga = row.generated_at?.trim() ?? "";
+  if (!ga) return;
+  try {
+    sessionStorage.setItem(
+      briefSessionKey(userId),
+      JSON.stringify({
+        generatedAt: ga,
+        row,
+        bookTouchpointText,
+      } satisfies BriefSessionSnapshot),
+    );
+  } catch {
+    // quota / private mode
+  }
+}
+
 /** One personalised paragraph per user per morning brief (`generated_at`); avoids refetch on every navigation. */
 const BOOK_TOUCHPOINTS_CACHE_PREFIX = "zephyr:briefBookTouchpoints:v1:";
 
@@ -298,6 +346,16 @@ export default function BriefPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
+      const sessionSnap = user ? loadBriefSessionSnapshot(user.id) : null;
+      if (sessionSnap?.row) {
+        setRow(sessionSnap.row);
+        if (sessionSnap.bookTouchpointText) {
+          setBookTouchpointText(sessionSnap.bookTouchpointText);
+          setBookTouchpointLoading(false);
+        }
+        setLoading(false);
+      }
+
       const [briefRes, posRes, ppRes] = await Promise.all([
         supabase
           .from("brief_entries")
@@ -322,8 +380,15 @@ export default function BriefPage() {
           .maybeSingle(),
       ]);
 
-      if (!briefRes.error && briefRes.data) {
-        setRow(briefRes.data as BriefRow);
+      const latestBrief = !briefRes.error && briefRes.data
+        ? (briefRes.data as BriefRow)
+        : null;
+      const latestGa = latestBrief?.generated_at?.trim() ?? "";
+
+      if (latestBrief) {
+        if (!sessionSnap || sessionSnap.generatedAt !== latestGa) {
+          setRow(latestBrief);
+        }
       } else {
         setRow(null);
       }
@@ -344,16 +409,31 @@ export default function BriefPage() {
         setBookTouchpointText(null);
       }
 
+      let touchFinal: string | null = null;
+
       if (!briefRes.error && briefRes.data && open.length > 0 && user) {
         const b = briefRes.data as BriefRow;
         const generatedAt = b.generated_at?.trim() ?? "";
-        const cached =
+        const cachedLs =
           generatedAt !== ""
             ? loadCachedBookTouchpoints(user.id, generatedAt)
             : null;
-        if (cached) {
-          setBookTouchpointText(cached);
+        const sessionTouchSameBrief =
+          sessionSnap?.generatedAt === generatedAt
+            ? sessionSnap.bookTouchpointText
+            : null;
+
+        if (cachedLs) {
+          setBookTouchpointText(cachedLs);
           setBookTouchpointLoading(false);
+          touchFinal = cachedLs;
+        } else if (sessionTouchSameBrief) {
+          setBookTouchpointText(sessionTouchSameBrief);
+          setBookTouchpointLoading(false);
+          touchFinal = sessionTouchSameBrief;
+          if (generatedAt !== "") {
+            saveCachedBookTouchpoints(user.id, generatedAt, sessionTouchSameBrief);
+          }
         } else {
           setBookTouchpointLoading(true);
           try {
@@ -417,6 +497,7 @@ export default function BriefPage() {
             if (resp.ok && typeof body.text === "string" && body.text.trim() !== "") {
               const t = body.text.trim();
               setBookTouchpointText(t);
+              touchFinal = t;
               if (generatedAt !== "") {
                 saveCachedBookTouchpoints(user.id, generatedAt, t);
               }
@@ -430,6 +511,15 @@ export default function BriefPage() {
       } else {
         setBookTouchpointLoading(false);
       }
+
+      if (user && latestBrief) {
+        saveBriefSessionSnapshot(
+          user.id,
+          latestBrief,
+          open.length === 0 ? null : touchFinal,
+        );
+      }
+
       setLoading(false);
     }
 
@@ -454,15 +544,17 @@ export default function BriefPage() {
 
   const watchItems = parseWatchList(row?.watch_list ?? null);
 
-  const overnightBody = loading
-    ? "…"
-    : (row?.overnight_summary?.trim() ||
-        row?.executive_summary?.trim() ||
-        "Brief generating...");
+  const overnightBody =
+    loading && !row
+      ? "…"
+      : (row?.overnight_summary?.trim() ||
+          row?.executive_summary?.trim() ||
+          "Brief generating...");
 
-  const weatherBody = loading ? "…" : row?.weather_watch?.trim() || "—";
+  const weatherBody =
+    loading && !row ? "…" : row?.weather_watch?.trim() || "—";
 
-  const oneRiskBody = loading ? "…" : row?.one_risk?.trim() || "—";
+  const oneRiskBody = loading && !row ? "…" : row?.one_risk?.trim() || "—";
 
   return (
     <>
@@ -494,8 +586,15 @@ export default function BriefPage() {
         <section>
           <h2 className={sectionLabelClass}>Reliability</h2>
           <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-            Confidence {briefReliability} · {ageHours == null ? "brief timestamp unavailable" : `${ageHours}h since generation`} ·
-            {bookTouchpointText ? " personalised touchpoints active" : " generic briefing mode"}
+            Confidence {briefReliability} ·{" "}
+            {ageHours == null
+              ? "brief timestamp unavailable"
+              : `${ageHours}h since generation`}{" "}
+            · Physical premium context (implied vs N2EX, residual demand) uses the
+            latest model run when book touchpoints are personalised ·
+            {bookTouchpointText
+              ? " personalised touchpoints active"
+              : " generic briefing mode"}
           </p>
         </section>
 

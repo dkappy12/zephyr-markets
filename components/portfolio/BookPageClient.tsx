@@ -9,6 +9,10 @@ import {
 import { createBrowserClient } from "@/lib/supabase/client";
 import type { ClassifiedPosition } from "@/lib/portfolio/book";
 import {
+  DASH_MISSING_HISTORY,
+  DASH_MISSING_MARK,
+} from "@/lib/portfolio/desk-copy";
+import {
   eurMwhPnlToGbp,
   formatGbpColored,
   GBP_PER_EUR,
@@ -746,18 +750,30 @@ export function BookPageClient() {
                       <td className="px-3 py-3 tabular-nums text-ink-mid">
                         {formatEntryPrice(p)}
                       </td>
-                      <td className="px-3 py-3 tabular-nums" title={curReason ?? undefined}>
+                      <td
+                        className="px-3 py-3 tabular-nums"
+                        title={
+                          curReason ??
+                          (curCell === "—" ? DASH_MISSING_MARK : undefined)
+                        }
+                      >
                         {curCell}
                       </td>
                       <td
                         className={`px-3 py-3 tabular-nums ${tdFmt?.className ?? ""}`}
-                        title={today == null ? curReason ?? "Insufficient mark history for intraday P&L." : undefined}
+                        title={
+                          today == null
+                            ? curReason ?? DASH_MISSING_HISTORY
+                            : undefined
+                        }
                       >
                         {tdFmt?.text ?? "—"}
                       </td>
                       <td
                         className={`px-3 py-3 tabular-nums ${tFmt?.className ?? ""}`}
-                        title={total == null ? curReason ?? "Insufficient data for P&L." : undefined}
+                        title={
+                          total == null ? curReason ?? DASH_MISSING_MARK : undefined
+                        }
                       >
                         {tFmt?.text ?? "—"}
                       </td>

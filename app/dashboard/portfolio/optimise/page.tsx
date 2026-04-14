@@ -1,6 +1,7 @@
 "use client";
 
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
+import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -322,6 +323,10 @@ export default function OptimisePage() {
             <p className="mt-1 text-xs text-ink-mid">
               Historical scenarios {data.diagnostics.historicalScenarioCount} · Candidate
               packages {data.diagnostics.candidatePackageCount}
+            </p>
+            <p className="mt-1 text-[10px] leading-snug text-ink-light">
+              {PREMIUM_VS_TAPE} Optimiser quality gates mirror the reliability
+              contract (coverage, fallback, freshness).
             </p>
             {data.reliability ? (
               <p className="mt-1 text-xs text-ink-mid">

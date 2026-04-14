@@ -1,5 +1,6 @@
 "use client";
 
+import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -97,6 +98,13 @@ const STRESS_SCENARIOS: Scenario[] = [
     description:
       "High wind and solar drove negative pricing across multiple settlement periods",
     moves: { GB_power: -40, TTF: -2, NBP: -3 },
+  },
+  {
+    name: "2023 Spring tightness",
+    period: "March 2023",
+    description:
+      "Residual winter risk and storage anxiety; GB power and gas curves stayed bid after the EU winter",
+    moves: { GB_power: 175, TTF: 42, NBP: 58 },
   },
 ];
 
@@ -229,6 +237,9 @@ export default function RiskPage() {
   const [fxRates, setFxRates] = useState<FxRateRow[]>([]);
   const [gbpEurRate, setGbpEurRate] = useState(0.86);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [expandedScenarios, setExpandedScenarios] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     fetch("/api/fx-rate")
@@ -702,40 +713,88 @@ export default function RiskPage() {
             <p className={sectionLabel}>Stress testing</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Historical scenario analysis</h2>
             <p className="mt-1 text-sm text-ink-light">
-              How your current book would have performed during past energy market extremes · price moves are historically observed, not modelled
+              Stylised shocks to GB power, TTF, and NBP — illustrative stress on your
+              current book, not a forecast of future P&amp;L.
+            </p>
+            <p className="mt-1 text-[10px] leading-snug text-ink-light">
+              {RISK_HISTORICAL_NOTE}
             </p>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {scenarioResults.map(({ scenario, total, breakdown }) => (
-                <article
-                  key={scenario.name}
-                  className="rounded-lg border border-[#D4CCBB] p-5"
-                  style={{ borderLeft: `3px solid ${total >= 0 ? BRAND_GREEN : TERRACOTTA}` }}
-                >
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-ink-light">{scenario.period}</p>
-                  <h3 className="mt-1 font-serif text-xl text-ink">{scenario.name}</h3>
-                  <p className="mt-1 text-xs italic text-ink-light">{scenario.description}</p>
-                  <p className={`mt-4 text-3xl font-serif ${total >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"}`}>
-                    {formatSignedGbp(total)}
-                  </p>
-                  <span className={`mt-2 inline-block rounded px-2 py-1 text-[10px] font-semibold uppercase ${
-                    total >= 0 ? "bg-[#1D6B4E]/15 text-[#1D6B4E]" : "bg-[#8B3A3A]/15 text-[#8B3A3A]"
-                  }`}>
-                    {total >= 0 ? "STRESS GAIN" : "STRESS LOSS"}
-                  </span>
-                  <div className="my-3 border-t border-ivory-border" />
-                  <div className="space-y-1 text-xs text-ink-mid">
+              {scenarioResults.map(({ scenario, total, breakdown }) => {
+                const sorted = [...breakdown].sort(
+                  (a, b) => Math.abs(b.impact) - Math.abs(a.impact),
+                );
+                const topLegs = sorted.slice(0, 3);
+                const expanded = expandedScenarios[scenario.name] ?? false;
+                return (
+                  <article
+                    key={scenario.name}
+                    className="rounded-lg border border-[#D4CCBB] p-5"
+                    style={{
+                      borderLeft: `3px solid ${total >= 0 ? BRAND_GREEN : TERRACOTTA}`,
+                    }}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-ink-light">
+                      {scenario.period}
+                    </p>
+                    <h3 className="mt-1 font-serif text-xl text-ink">{scenario.name}</h3>
+                    <p className="mt-1 text-xs italic text-ink-light">{scenario.description}</p>
+                    <p
+                      className={`mt-4 text-3xl font-serif ${total >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"}`}
+                    >
+                      {formatSignedGbp(total)}
+                    </p>
+                    <span
+                      className={`mt-2 inline-block rounded px-2 py-1 text-[10px] font-semibold uppercase ${
+                        total >= 0
+                          ? "bg-[#1D6B4E]/15 text-[#1D6B4E]"
+                          : "bg-[#8B3A3A]/15 text-[#8B3A3A]"
+                      }`}
+                    >
+                      {total >= 0 ? "STRESS GAIN" : "STRESS LOSS"}
+                    </span>
+                    <div className="my-3 border-t border-ivory-border" />
                     {breakdown.length === 0 ? (
-                      <p>No direct exposure in this scenario.</p>
+                      <p className="text-xs text-ink-mid">No direct exposure in this scenario.</p>
                     ) : (
-                      breakdown.map((b, i) => (
-                        <p key={`${b.instrument}-${i}`}>
-                          {b.instrument}: {formatSignedGbp(b.impact)}
+                      <>
+                        <p className="text-[10px] uppercase tracking-[0.1em] text-ink-light">
+                          Position legs ({breakdown.length})
                         </p>
-                      ))
+                        <ul className="mt-2 space-y-1.5 text-xs text-ink-mid">
+                          {(expanded ? sorted : topLegs).map((b, i) => (
+                            <li
+                              key={`${b.instrument}-${i}`}
+                              className="flex justify-between gap-2 border-b border-ivory-border/60 pb-1.5 font-mono last:border-0"
+                            >
+                              <span className="min-w-0 truncate">{b.instrument}</span>
+                              <span className="shrink-0 tabular-nums">
+                                {formatSignedGbp(b.impact)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                        {breakdown.length > 3 ? (
+                          <button
+                            type="button"
+                            className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-mid transition-colors hover:text-ink"
+                            onClick={() =>
+                              setExpandedScenarios((prev) => ({
+                                ...prev,
+                                [scenario.name]: !expanded,
+                              }))
+                            }
+                          >
+                            {expanded
+                              ? "Hide leg detail"
+                              : `Show all ${breakdown.length} legs`}
+                          </button>
+                        ) : null}
+                      </>
                     )}
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </section>
 

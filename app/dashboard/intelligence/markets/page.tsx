@@ -103,6 +103,7 @@ type PhysicalPremiumRow = {
   solar_gw: number | null;
   /** Latest physical_premium row (ingestion). */
   remit_mw_lost: number | null;
+  calculated_at: string | null;
 };
 
 type GasRow = {
@@ -439,6 +440,8 @@ export default function MarketsPage() {
             wind_gw: parseNum(p.wind_gw),
             solar_gw: parseNum(p.solar_gw),
             remit_mw_lost: parseNum(p.remit_mw_lost),
+            calculated_at:
+              typeof p.calculated_at === "string" ? p.calculated_at : null,
           });
         } else {
           setPhysicalPremium(null);
@@ -964,6 +967,18 @@ export default function MarketsPage() {
     return `${formatRemitMw(mw)} MW active outages`;
   }, [physicalPremium]);
 
+  const physicalPremiumAsOf = useMemo(() => {
+    const raw = physicalPremium?.calculated_at;
+    if (raw == null || raw === "") return null;
+    try {
+      return (
+        formatInTimeZone(parseISO(raw), "UTC", "dd MMM yyyy HH:mm") + " UTC"
+      );
+    } catch {
+      return null;
+    }
+  }, [physicalPremium?.calculated_at]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -1042,6 +1057,15 @@ export default function MarketsPage() {
           </p>
         </div>
       </motion.div>
+      <p className="font-mono text-[10px] text-ink-light">
+        Physical premium &amp; residual (header): Supabase{" "}
+        <code className="text-[9px]">physical_premium</code>
+        {physicalPremiumAsOf != null ? ` · as-of ${physicalPremiumAsOf}` : ""}.
+        Power/TTF charts: ingestion timestamps on each card (
+        <code className="text-[9px]">market_prices</code>,{" "}
+        <code className="text-[9px]">gas_prices</code>,{" "}
+        <code className="text-[9px]">storage_levels</code>).
+      </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* GB Power */}
