@@ -139,7 +139,22 @@ function ProfilePanel() {
     try {
       const resp = await fetch("/api/account/delete", { method: "DELETE" });
       if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
+        const body: { code?: string; error?: string } = await resp
+          .json()
+          .catch(() => ({}));
+        if (body.code === "UNAUTHORIZED") {
+          throw new Error("Your session has expired. Please sign in again.");
+        }
+        if (body.code === "SERVER_MISCONFIGURED") {
+          throw new Error("Account deletion is temporarily unavailable.");
+        }
+        if (
+          body.code === "DATA_CLEANUP_FAILED" ||
+          body.code === "AUTH_DELETE_FAILED" ||
+          body.code === "INTERNAL_ERROR"
+        ) {
+          throw new Error("Could not delete account. Contact contact@zephyr.markets.");
+        }
         throw new Error(body.error ?? "Failed to delete account");
       }
       // Sign out client-side and redirect

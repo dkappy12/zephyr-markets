@@ -78,6 +78,7 @@ profiles, positions, signals, alerts, portfolio_pnl, teams, team_members, team_i
 - Admin role set directly in Supabase database only
 - /admin/* routes silently redirect non-admins to dashboard
 - Admin pages: Overview, Model Accuracy, User Analytics, Trade Analytics, Data Pipeline, Signal Quality, Infrastructure, System Logs, Nightly Job Log
+- Account deletion lifecycle events (start/success/failure) are written to `admin_job_log` by `DELETE /api/account/delete` for operational auditing.
 
 ## Accuracy Logging
 Every intelligence output is logged as a prediction. Nightly at 22:00 GMT a Railway job records actual market outcomes, updates Bayesian coefficients, and recalculates accuracy metrics. Fully autonomous — no human intervention required.

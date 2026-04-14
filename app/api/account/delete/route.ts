@@ -2,6 +2,79 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+type DeleteErrorCode =
+  | "UNAUTHORIZED"
+  | "SERVER_MISCONFIGURED"
+  | "DATA_CLEANUP_FAILED"
+  | "AUTH_DELETE_FAILED"
+  | "INTERNAL_ERROR";
+
+type DeletionStage = "start" | "cleanup" | "auth_delete" | "complete";
+
+function errorResponse(
+  status: number,
+  code: DeleteErrorCode,
+  error: string,
+  details?: string,
+) {
+  return NextResponse.json(
+    details ? { code, error, details } : { code, error },
+    { status },
+  );
+}
+
+function getRequiredEnv() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) return null;
+  return { url, serviceRoleKey };
+}
+
+async function logDeletionEvent(
+  adminClient: ReturnType<typeof createAdminClient>,
+  {
+    userId,
+    status,
+    stage,
+    message,
+  }: {
+    userId: string;
+    status: "started" | "succeeded" | "failed";
+    stage: DeletionStage;
+    message: string;
+  },
+) {
+  const eventTime = new Date().toISOString();
+  const payloads = [
+    {
+      job_name: "account_delete",
+      status,
+      message,
+      metadata: { userId, stage, eventTime },
+    },
+    {
+      event_type: "account_delete",
+      status,
+      message,
+      user_id: userId,
+      context: { stage, eventTime },
+    },
+  ];
+
+  for (const payload of payloads) {
+    const { error } = await adminClient.from("admin_job_log").insert(payload);
+    if (!error) return;
+  }
+
+  // Keep deletion flow resilient even if audit table shape differs.
+  console.error("Failed to write admin_job_log entry", {
+    operation: "account_delete",
+    userId,
+    stage,
+    status,
+  });
+}
+
 export async function DELETE() {
   // Verify the user is authenticated
   const supabase = await createClient();
@@ -11,24 +84,69 @@ export async function DELETE() {
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+    return errorResponse(401, "UNAUTHORIZED", "Unauthorized");
   }
 
   const userId = user.id;
+  const env = getRequiredEnv();
+  if (!env) {
+    console.error("Account deletion misconfigured", {
+      operation: "account_delete",
+      userId,
+      stage: "start",
+      reason: "missing_required_env",
+    });
+    return errorResponse(
+      500,
+      "SERVER_MISCONFIGURED",
+      "Account deletion is temporarily unavailable.",
+    );
+  }
 
   try {
     // Delete user data from all tables first
     // Use service role key to bypass RLS
-    const adminClient = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
+    const adminClient = createAdminClient(env.url, env.serviceRoleKey);
+    await logDeletionEvent(adminClient, {
+      userId,
+      status: "started",
+      stage: "start",
+      message: "Account deletion requested",
+    });
 
     // Delete in dependency order — child tables first
-    await adminClient.from("portfolio_pnl").delete().eq("user_id", userId);
-    await adminClient.from("positions").delete().eq("user_id", userId);
-    await adminClient.from("brief_entries").delete().eq("user_id", userId);
-    await adminClient.from("premium_predictions").delete().eq("user_id", userId);
+    for (const table of [
+      "portfolio_pnl",
+      "positions",
+      "brief_entries",
+      "premium_predictions",
+    ]) {
+      const { error: cleanupError } = await adminClient
+        .from(table)
+        .delete()
+        .eq("user_id", userId);
+
+      if (cleanupError) {
+        await logDeletionEvent(adminClient, {
+          userId,
+          status: "failed",
+          stage: "cleanup",
+          message: `Cleanup failed at table ${table}`,
+        });
+        console.error("Account deletion cleanup failed", {
+          operation: "account_delete",
+          userId,
+          stage: "cleanup",
+          table,
+          reason: cleanupError.message,
+        });
+        return errorResponse(
+          500,
+          "DATA_CLEANUP_FAILED",
+          "Failed to delete account data.",
+        );
+      }
+    }
 
     // Finally delete the auth record
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(
@@ -36,16 +154,35 @@ export async function DELETE() {
     );
 
     if (deleteError) {
-      console.error("Failed to delete auth user:", deleteError);
-      return NextResponse.json(
-        { error: "Failed to delete account" },
-        { status: 500 },
-      );
+      await logDeletionEvent(adminClient, {
+        userId,
+        status: "failed",
+        stage: "auth_delete",
+        message: "Failed to delete auth user",
+      });
+      console.error("Failed to delete auth user", {
+        operation: "account_delete",
+        userId,
+        stage: "auth_delete",
+        reason: deleteError.message,
+      });
+      return errorResponse(500, "AUTH_DELETE_FAILED", "Failed to delete account");
     }
 
+    await logDeletionEvent(adminClient, {
+      userId,
+      status: "succeeded",
+      stage: "complete",
+      message: "Account deletion completed",
+    });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Account deletion error:", error);
-    return NextResponse.json({ error: "Failed to delete account" }, { status: 500 });
+    console.error("Account deletion unexpected error", {
+      operation: "account_delete",
+      userId,
+      stage: "start",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    return errorResponse(500, "INTERNAL_ERROR", "Failed to delete account");
   }
 }
