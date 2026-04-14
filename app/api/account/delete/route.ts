@@ -34,7 +34,9 @@ function getRequiredEnv() {
 }
 
 async function logDeletionEvent(
-  adminClient: ReturnType<typeof createAdminClient>,
+  // Supabase generic types are not generated for admin_job_log in this repo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adminClient: any,
   {
     userId,
     status,
@@ -65,7 +67,11 @@ async function logDeletionEvent(
   ];
 
   for (const payload of payloads) {
-    const { error } = await adminClient.from("admin_job_log").insert(payload);
+    // admin_job_log is intentionally loosely typed in this project.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (adminClient as any)
+      .from("admin_job_log")
+      .insert(payload);
     if (!error) return;
   }
 

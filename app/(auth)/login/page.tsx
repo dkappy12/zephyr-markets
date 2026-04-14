@@ -3,32 +3,30 @@
 import { createClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
-  const urlMessage = useMemo(() => {
-    const errorCode = searchParams.get("error");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get("error");
     if (errorCode === "auth_unavailable") {
-      return "Authentication is temporarily unavailable. Please try again shortly.";
+      setInfo("Authentication is temporarily unavailable. Please try again shortly.");
+      return;
     }
     if (errorCode === "auth") {
-      return "Your sign-in link is invalid or has expired.";
+      setInfo("Your sign-in link is invalid or has expired.");
+      return;
     }
-    return null;
-  }, [searchParams]);
-
-  useEffect(() => {
-    setInfo(urlMessage);
-  }, [urlMessage]);
+    setInfo(null);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
