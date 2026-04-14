@@ -92,6 +92,30 @@ function normaliseUnit(value: unknown): string | null {
   return s;
 }
 
+function validateMarketUnitCurrency(
+  market: string,
+  unit: string,
+  currency: string | null,
+): string | null {
+  const m = market.toLowerCase();
+  if (m === "nbp" && unit !== "therm") {
+    return "NBP positions must use therm unit.";
+  }
+  if (m === "ttf" && currency !== "EUR") {
+    return "TTF positions must use EUR currency.";
+  }
+  if (m === "eua" && currency !== "EUR") {
+    return "EUA positions must use EUR currency.";
+  }
+  if (m === "uka" && currency !== "GBP") {
+    return "UKA positions must use GBP currency.";
+  }
+  if ((m === "eua" || m === "uka") && unit !== "tco2") {
+    return "Carbon positions must use tCO2 unit.";
+  }
+  return null;
+}
+
 function defaultEntryDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -136,6 +160,10 @@ export function normalisePositionInput(
   const tenor = asString(input.tenor);
   const tradePrice = asNumber(input.trade_price);
   const currency = normaliseCurrency(input.currency);
+  const compatibilityError = validateMarketUnitCurrency(market, unit, currency);
+  if (compatibilityError) {
+    return { ok: false, error: compatibilityError };
+  }
   const entryDate = normaliseDate(input.entry_date) ?? defaultEntryDate();
   const expiryDate = normaliseDate(input.expiry_date);
   const notes = asString(input.notes);

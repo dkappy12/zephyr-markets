@@ -23,6 +23,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
     done: 0,
     total: 0,
   });
+  const [fallbackChunks, setFallbackChunks] = useState(0);
 
   const runClassify = useCallback(
     async (headers: string[], rows: Record<string, unknown>[]) => {
@@ -38,6 +39,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
         const chunkSize = 40;
         const classifiedAll: ClassifiedPosition[] = [];
         setProgress({ done: 0, total: slice.length });
+        setFallbackChunks(0);
 
         for (let i = 0; i < slice.length; i += chunkSize) {
           const chunk = slice.slice(i, i + chunkSize);
@@ -50,14 +52,19 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
             classified?: ClassifiedPosition[];
             error?: string;
             detail?: string;
+            code?: string;
+            mode?: "model" | "fallback";
           };
           if (!res.ok) {
-            throw new Error(data.error ?? data.detail ?? "Classification failed");
+            throw new Error(mapClassifyError(data.code, data.error ?? data.detail));
           }
           if (!data.classified || !Array.isArray(data.classified)) {
             throw new Error("Invalid response");
           }
           classifiedAll.push(...data.classified);
+          if (data.mode === "fallback") {
+            setFallbackChunks((prev) => prev + 1);
+          }
           setProgress({
             done: Math.min(i + chunk.length, slice.length),
             total: slice.length,
@@ -69,6 +76,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
         setError(e instanceof Error ? e.message : "Something went wrong");
       } finally {
         setProgress({ done: 0, total: 0 });
+        setFallbackChunks(0);
         setLoading(false);
       }
     },
@@ -194,6 +202,12 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
                   <p className="mt-1 text-[11px] text-ink-light">
                     {progress.done}/{progress.total} rows classified
                   </p>
+                  {fallbackChunks > 0 ? (
+                    <p className="mt-1 text-[11px] text-[#8B3A3A]">
+                      Resilience mode used on {fallbackChunks} chunk
+                      {fallbackChunks === 1 ? "" : "s"}.
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -214,4 +228,14 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
       </div>
     </div>
   );
+}
+
+function mapClassifyError(code?: string, message?: string): string {
+  if (code === "RATE_LIMITED") {
+    return "Import rate limit reached. Please wait a minute and retry.";
+  }
+  if (code === "UNAUTHORIZED") {
+    return "Your session expired. Please sign in again.";
+  }
+  return message ?? "Classification failed";
 }

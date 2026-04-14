@@ -144,6 +144,35 @@ function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   return "—";
 }
 
+function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null {
+  if (!lp) return "Live market marks are not loaded yet.";
+  if (p.trade_price == null || !Number.isFinite(p.trade_price)) {
+    return "Trade price is missing, so P&L cannot be computed.";
+  }
+  const market = normaliseMarket(p.market);
+  if (market === "OTHER") return "No mark source configured for this market.";
+  if (market === "GB_POWER" || market === "OTHER_POWER") {
+    return lp.gbPowerGbpMwh == null ? "Missing GB power market mark." : null;
+  }
+  if (market === "TTF") {
+    return lp.ttfEurMwh == null ? "Missing TTF market mark." : null;
+  }
+  if (market === "NBP") {
+    return lp.nbpPencePerTherm == null ? "Missing NBP market mark." : null;
+  }
+  if (market === "OTHER_GAS") {
+    const unit = (p.unit ?? "").toLowerCase();
+    if (unit.includes("therm") && lp.nbpPencePerTherm == null) {
+      return "Missing NBP gas mark for therm-based position.";
+    }
+    if ((p.currency ?? "").toUpperCase() === "EUR" && lp.ttfEurMwh == null) {
+      return "Missing TTF gas mark for EUR position.";
+    }
+    if (lp.ttfGbpMwh == null) return "Missing gas mark for this position.";
+  }
+  return null;
+}
+
 export function BookPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null>(null);
@@ -372,10 +401,21 @@ export function BookPageClient() {
         body: JSON.stringify({ rows: payload, dryRun: false }),
       });
       const body = (await resp.json().catch(() => ({}))) as {
+        code?: string;
         error?: string;
         details?: string;
+        rejects?: Array<{ index: number; error: string }>;
       };
       if (!resp.ok) {
+        if (body.code === "VALIDATION_FAILED" && Array.isArray(body.rejects)) {
+          const first = body.rejects[0];
+          throw new Error(
+            `Import rejected ${body.rejects.length} row(s). First issue: row ${first.index + 1} - ${first.error}`,
+          );
+        }
+        if (body.code === "RATE_LIMITED") {
+          throw new Error("Import rate limit reached. Wait a minute and retry.");
+        }
         throw new Error(body.error ?? body.details ?? "Import failed");
       }
       showToast(`${keeping.length} positions imported successfully`, "ok");
@@ -438,7 +478,13 @@ export function BookPageClient() {
       method: "DELETE",
     });
     const body = (await resp.json().catch(() => ({}))) as { error?: string };
-    if (!resp.ok) showToast(body.error ?? "Could not delete position", "err");
+    if (!resp.ok) {
+      const mapped =
+        body.error === "Position not found or you do not have access."
+          ? "Position not found or already removed."
+          : body.error ?? "Could not delete position";
+      showToast(mapped, "err");
+    }
     else {
       showToast("Position deleted", "ok");
       await loadPositions();
@@ -462,7 +508,14 @@ export function BookPageClient() {
       }),
     });
     const body = (await resp.json().catch(() => ({}))) as { error?: string };
-    if (!resp.ok) showToast(body.error ?? "Could not close position", "err");
+    if (!resp.ok) {
+      const mapped =
+        body.error ===
+        "Position not found, already closed, or you do not have access."
+          ? "Position is already closed or no longer available."
+          : body.error ?? "Could not close position";
+      showToast(mapped, "err");
+    }
     else {
       showToast("Position closed", "ok");
       setCloseModal(null);
@@ -657,6 +710,7 @@ export function BookPageClient() {
                   }
 
                   const curCell = formatCurrentPrice(p, livePrices);
+                  const curReason = currentMarkReason(p, livePrices);
                   const tFmt =
                     total != null ? formatGbpColored(total) : null;
                   const tdFmt =
@@ -692,14 +746,18 @@ export function BookPageClient() {
                       <td className="px-3 py-3 tabular-nums text-ink-mid">
                         {formatEntryPrice(p)}
                       </td>
-                      <td className="px-3 py-3 tabular-nums">{curCell}</td>
+                      <td className="px-3 py-3 tabular-nums" title={curReason ?? undefined}>
+                        {curCell}
+                      </td>
                       <td
                         className={`px-3 py-3 tabular-nums ${tdFmt?.className ?? ""}`}
+                        title={today == null ? curReason ?? "Insufficient mark history for intraday P&L." : undefined}
                       >
                         {tdFmt?.text ?? "—"}
                       </td>
                       <td
                         className={`px-3 py-3 tabular-nums ${tFmt?.className ?? ""}`}
+                        title={total == null ? curReason ?? "Insufficient data for P&L." : undefined}
                       >
                         {tFmt?.text ?? "—"}
                       </td>

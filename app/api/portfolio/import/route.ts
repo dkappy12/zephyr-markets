@@ -4,6 +4,7 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { normalisePositionInput } from "@/lib/portfolio/position-contract";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 
 type ImportItem = Record<string, unknown>;
 
@@ -23,6 +24,12 @@ export async function POST(req: Request) {
     windowMs: 60_000,
   });
   if (!rate.allowed) {
+    await logAuthAuditEvent({
+      event: "portfolio_import_rate_limited",
+      userId: user.id,
+      status: "failure",
+      metadata: { retryAfterSec: rate.retryAfterSec },
+    });
     return NextResponse.json(
       {
         code: "RATE_LIMITED",
@@ -76,6 +83,12 @@ export async function POST(req: Request) {
   });
 
   if (rejects.length > 0) {
+    await logAuthAuditEvent({
+      event: "portfolio_import_validation_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { accepted: prepared.length, rejected: rejects.length },
+    });
     return NextResponse.json(
       {
         code: "VALIDATION_FAILED",
@@ -89,6 +102,12 @@ export async function POST(req: Request) {
   }
 
   if (dryRun) {
+    await logAuthAuditEvent({
+      event: "portfolio_import_dry_run_ok",
+      userId: user.id,
+      status: "info",
+      metadata: { accepted: prepared.length },
+    });
     return NextResponse.json({
       ok: true,
       dryRun: true,
@@ -100,6 +119,12 @@ export async function POST(req: Request) {
 
   const { error } = await supabase.from("positions").insert(prepared);
   if (error) {
+    await logAuthAuditEvent({
+      event: "portfolio_import_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { details: error.message },
+    });
     return NextResponse.json(
       {
         code: "IMPORT_FAILED",
@@ -110,6 +135,12 @@ export async function POST(req: Request) {
     );
   }
 
+  await logAuthAuditEvent({
+    event: "portfolio_import_succeeded",
+    userId: user.id,
+    status: "success",
+    metadata: { imported: prepared.length },
+  });
   return NextResponse.json({
     ok: true,
     dryRun: false,

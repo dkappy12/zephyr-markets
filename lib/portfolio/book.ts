@@ -42,6 +42,7 @@ export type ClassifiedPosition = {
   entry_date: string | null;
   instrument: string | null;
   original_row: Record<string, unknown> | null;
+  warnings?: string[];
 };
 
 /** Always show sign with £ */

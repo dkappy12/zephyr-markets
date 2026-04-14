@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 
 function asNumber(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -45,16 +46,40 @@ export async function POST(req: Request) {
     );
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("positions")
     .update({ is_closed: true, close_price: closePrice, close_date: closeDate })
+    .select("id")
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("is_closed", false)
+    .maybeSingle();
   if (error) {
+    await logAuthAuditEvent({
+      event: "portfolio_position_close_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { id, details: error.message },
+    });
     return NextResponse.json(
       { code: "CLOSE_FAILED", error: error.message },
       { status: 500 },
     );
   }
+  if (!data) {
+    return NextResponse.json(
+      {
+        code: "POSITION_NOT_OPEN",
+        error: "Position not found, already closed, or you do not have access.",
+      },
+      { status: 404 },
+    );
+  }
+  await logAuthAuditEvent({
+    event: "portfolio_position_close_succeeded",
+    userId: user.id,
+    status: "success",
+    metadata: { id },
+  });
   return NextResponse.json({ ok: true });
 }

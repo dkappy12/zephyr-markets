@@ -112,6 +112,16 @@ export function ReviewImportOverlay({
                       <p className="mt-1 text-xs text-ink-mid">
                         {formatPriceHint(item)}
                       </p>
+                      {item.warnings && item.warnings.length > 0 ? (
+                        <div className="mt-2 rounded-[4px] border border-[#8B3A3A]/25 bg-[#8B3A3A]/5 px-2.5 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#8B3A3A]">
+                            Check before import
+                          </p>
+                          <p className="mt-1 text-[11px] text-[#8B3A3A]">
+                            {item.warnings.join(" ")}
+                          </p>
+                        </div>
+                      ) : null}
                     </div>
                   ))
                 )}

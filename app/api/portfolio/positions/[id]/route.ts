@@ -3,6 +3,7 @@ import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { normalisePositionInput } from "@/lib/portfolio/position-contract";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -32,17 +33,40 @@ export async function PATCH(req: Request, ctx: Ctx) {
     );
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("positions")
     .update(normalized.data)
+    .select("id")
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .maybeSingle();
   if (error) {
+    await logAuthAuditEvent({
+      event: "portfolio_position_update_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { id, details: error.message },
+    });
     return NextResponse.json(
       { code: "UPDATE_FAILED", error: error.message },
       { status: 500 },
     );
   }
+  if (!data) {
+    return NextResponse.json(
+      {
+        code: "POSITION_NOT_FOUND",
+        error: "Position not found or you do not have access.",
+      },
+      { status: 404 },
+    );
+  }
+  await logAuthAuditEvent({
+    event: "portfolio_position_update_succeeded",
+    userId: user.id,
+    status: "success",
+    metadata: { id },
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -60,16 +84,39 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   if (auth.response) return auth.response;
   const user = auth.user!;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("positions")
     .delete()
+    .select("id")
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .maybeSingle();
   if (error) {
+    await logAuthAuditEvent({
+      event: "portfolio_position_delete_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { id, details: error.message },
+    });
     return NextResponse.json(
       { code: "DELETE_FAILED", error: error.message },
       { status: 500 },
     );
   }
+  if (!data) {
+    return NextResponse.json(
+      {
+        code: "POSITION_NOT_FOUND",
+        error: "Position not found or you do not have access.",
+      },
+      { status: 404 },
+    );
+  }
+  await logAuthAuditEvent({
+    event: "portfolio_position_delete_succeeded",
+    userId: user.id,
+    status: "success",
+    metadata: { id },
+  });
   return NextResponse.json({ ok: true });
 }

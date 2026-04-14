@@ -168,7 +168,10 @@ export async function POST(req: Request) {
             err instanceof Error ? err.message : "Anthropic API request failed",
         },
       });
-      return NextResponse.json({ classified: heuristicClassify(rows) });
+      return NextResponse.json({
+        classified: heuristicClassify(rows),
+        mode: "fallback",
+      });
     }
 
     let parsed: {
@@ -183,7 +186,10 @@ export async function POST(req: Request) {
         status: "failure",
         metadata: { reason: "Invalid response envelope from Anthropic" },
       });
-      return NextResponse.json({ classified: heuristicClassify(rows) });
+      return NextResponse.json({
+        classified: heuristicClassify(rows),
+        mode: "fallback",
+      });
     }
 
     const textBlock = parsed.content?.find((c) => c.type === "text");
@@ -196,7 +202,10 @@ export async function POST(req: Request) {
         status: "failure",
         metadata: { reason: "Could not parse classification JSON" },
       });
-      return NextResponse.json({ classified: heuristicClassify(rows) });
+      return NextResponse.json({
+        classified: heuristicClassify(rows),
+        mode: "fallback",
+      });
     }
 
     let classified: unknown;
@@ -226,7 +235,10 @@ ${jsonStr}`;
             status: "failure",
             metadata: { reason: "Repair pass did not return JSON array" },
           });
-          return NextResponse.json({ classified: heuristicClassify(rows) });
+          return NextResponse.json({
+            classified: heuristicClassify(rows),
+            mode: "fallback",
+          });
         }
         classified = JSON.parse(repairedArray);
       } catch {
@@ -236,7 +248,10 @@ ${jsonStr}`;
           status: "failure",
           metadata: { reason: "Classification JSON parse failed" },
         });
-        return NextResponse.json({ classified: heuristicClassify(rows) });
+        return NextResponse.json({
+          classified: heuristicClassify(rows),
+          mode: "fallback",
+        });
       }
     }
 
@@ -247,7 +262,10 @@ ${jsonStr}`;
         status: "failure",
         metadata: { reason: "Model response was not an array" },
       });
-      return NextResponse.json({ classified: heuristicClassify(rows) });
+      return NextResponse.json({
+        classified: heuristicClassify(rows),
+        mode: "fallback",
+      });
     }
 
     // Keep user-facing row context local; do not forward raw rows externally.
@@ -270,10 +288,13 @@ ${jsonStr}`;
           rowCount: rows.length,
         },
       });
-      return NextResponse.json({ classified: heuristicClassify(rows) });
+      return NextResponse.json({
+        classified: heuristicClassify(rows),
+        mode: "fallback",
+      });
     }
 
-    return NextResponse.json({ classified: merged });
+    return NextResponse.json({ classified: merged, mode: "model" });
   } catch (e: unknown) {
     await logAuthAuditEvent({
       event: "classify_positions_failed",
@@ -486,12 +507,20 @@ const INSTRUMENT_TYPE_SET = new Set([
 ] as const);
 
 function normaliseClassifiedEntry(entry: Record<string, unknown>) {
+  const warnings: string[] = [];
   const market = normaliseMarketValue(entry.market);
+  if (!market) warnings.push("Unknown market; defaulted to null.");
   const unit = normaliseUnitValue(entry.unit, market);
+  if (!safeString(entry.unit)) warnings.push("Missing unit; inferred default unit.");
   const currency = normaliseCurrencyValue(entry.currency, market, unit);
+  if (!safeString(entry.currency))
+    warnings.push("Missing currency; inferred default currency.");
   const direction = normaliseDirectionValue(entry.direction);
+  if (!direction) warnings.push("Missing direction.");
   const size = parseLooseNumber(entry.size);
+  if (size == null) warnings.push("Missing size.");
   const tradePrice = parseLooseNumber(entry.trade_price);
+  if (tradePrice == null) warnings.push("Missing trade price.");
   const keep =
     typeof entry.keep === "boolean"
       ? entry.keep
@@ -516,6 +545,7 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
     expiry_date: normaliseDateValue(entry.expiry_date),
     entry_date: normaliseDateValue(entry.entry_date),
     instrument: safeString(entry.instrument) ?? "Unclassified position",
+    warnings,
   };
 }
 
