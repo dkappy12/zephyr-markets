@@ -54,6 +54,10 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
             detail?: string;
             code?: string;
             mode?: "model" | "fallback";
+            reliability?: {
+              confidence?: "high" | "medium" | "low";
+              coverage?: number;
+            };
           };
           if (!res.ok) {
             throw new Error(mapClassifyError(data.code, data.error ?? data.detail));

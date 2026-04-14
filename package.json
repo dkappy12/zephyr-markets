@@ -10,7 +10,11 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "rate-limit:smoke": "node scripts/auth-rate-limit-smoke.mjs"
+    "rate-limit:smoke": "node scripts/auth-rate-limit-smoke.mjs",
+    "quality:gate": "node scripts/model-quality-gate.mjs",
+    "quality:walk-forward": "node scripts/model-walk-forward-report.mjs",
+    "quality:drift": "node scripts/model-drift-check.mjs",
+    "quality:reconcile": "node scripts/model-benchmark-reconcile.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",

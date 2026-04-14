@@ -25,6 +25,15 @@ type ApiResponse = {
   qualityWarnings: string[];
   blocked: boolean;
   blockedReason: string | null;
+  reliability?: {
+    model_version: string;
+    data_version: string;
+    fallback_used: boolean;
+    coverage: number;
+    confidence: "high" | "medium" | "low";
+    evidence: string[];
+    freshness_ts: string;
+  };
   provenance: {
     power: string;
     gas: string;
@@ -314,6 +323,13 @@ export default function OptimisePage() {
               Historical scenarios {data.diagnostics.historicalScenarioCount} · Candidate
               packages {data.diagnostics.candidatePackageCount}
             </p>
+            {data.reliability ? (
+              <p className="mt-1 text-xs text-ink-mid">
+                Reliability: {data.reliability.confidence.toUpperCase()} · Coverage{" "}
+                {Math.round(data.reliability.coverage * 100)}% ·{" "}
+                {data.reliability.fallback_used ? "Fallback active" : "Model mode"}
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-ink-mid">
               Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · Index{" "}
               {data.diagnostics.stabilityIndex.toFixed(3)}

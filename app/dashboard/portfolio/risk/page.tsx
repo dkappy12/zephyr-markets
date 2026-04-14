@@ -493,6 +493,12 @@ export default function RiskPage() {
     );
   const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
   const coverageColor = dailyPnLSeries.length < 10 ? TERRACOTTA : dailyPnLSeries.length < 20 ? AMBER : BRAND_GREEN;
+  const reliabilityLabel =
+    dailyPnLSeries.length >= 20
+      ? "HIGH"
+      : dailyPnLSeries.length >= 10
+        ? "MEDIUM"
+        : "LOW";
   const hasAnyPriceSeries =
     Object.keys(powerPricesByDay).length > 0 ||
     Object.keys(ttfPricesByDay).length > 0 ||
@@ -531,6 +537,13 @@ export default function RiskPage() {
               metrics will appear once price series data is available.
             </p>
           ) : null}
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
+            <p className={sectionLabel}>Reliability</p>
+            <p className="mt-1 text-sm text-ink-mid">
+              Confidence {reliabilityLabel} · coverage {coveragePct.toFixed(0)}% ·
+              data mode historical mark-to-market
+            </p>
+          </div>
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}

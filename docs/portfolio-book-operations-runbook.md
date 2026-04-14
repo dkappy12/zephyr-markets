@@ -14,6 +14,9 @@ This runbook covers import reliability and position mutation health for the Book
 - `portfolio_position_delete_failed`
 - `portfolio_position_close_failed`
 - `portfolio_positions_clear_failed`
+- `classify_positions_attempted`
+- `classify_positions_succeeded`
+- `optimise_recommendations_succeeded`
 
 ## Reliability Checks
 
@@ -23,6 +26,8 @@ Track these weekly:
 - Classifier fallback rate (`classify_positions_model_fallback / classify attempts`) <= 10%
 - Median classify latency (p50) <= 12s for 200-row file
 - Mutation error rate (`*_failed`) <= 1%
+- Premium MAE (`premium_predictions.absolute_error_gbp_mwh`) <= 25 £/MWh (14d)
+- Attribution median calibration R2 (`portfolio_pnl.attribution_json.diagnostics.calibration_r2`) >= 0.05 (14d)
 
 ## First 10 Minutes Triage
 
@@ -93,4 +98,34 @@ where job_name = 'auth_audit'
   )
 order by created_at desc
 limit 100;
+```
+
+Classifier fallback rate:
+
+```sql
+with attempts as (
+  select count(*) as n
+  from admin_job_log
+  where job_name = 'auth_audit'
+    and message = 'classify_positions_attempted'
+    and created_at >= now() - interval '14 day'
+), fallbacks as (
+  select count(*) as n
+  from admin_job_log
+  where job_name = 'auth_audit'
+    and message = 'classify_positions_model_fallback'
+    and created_at >= now() - interval '14 day'
+)
+select attempts.n as attempts, fallbacks.n as fallbacks,
+       case when attempts.n = 0 then 0 else fallbacks.n::decimal / attempts.n end as fallback_rate
+from attempts, fallbacks;
+```
+
+Premium MAE:
+
+```sql
+select avg(absolute_error_gbp_mwh) as premium_mae
+from premium_predictions
+where is_filled = true
+  and created_at >= now() - interval '14 day';
 ```

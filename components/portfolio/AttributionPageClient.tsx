@@ -32,6 +32,7 @@ import {
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
 import { mwDeratedForRow } from "@/lib/signal-feed";
 import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
@@ -847,6 +848,24 @@ export function AttributionPageClient() {
       },
       physical: physLatest,
     };
+    const reliability = makeReliabilityEnvelope({
+      modelVersion: "attribution_v1",
+      dataVersion: `history_${calibration.sampleSize}`,
+      fallbackUsed: calibration.fallbackUsed,
+      coverage: Math.min(1, explainedRatio),
+      confidence:
+        attributionConfidence === "High"
+          ? "high"
+          : attributionConfidence === "Medium"
+            ? "medium"
+            : "low",
+      evidence: [
+        `explained_pct=${explainedPct}`,
+        `calibration_r2=${calibration.r2.toFixed(3)}`,
+        `sample_size=${calibration.sampleSize}`,
+      ],
+    });
+    attributionJson.reliability = reliability;
 
     const snapshot = positions.map((p) => ({
       id: p.id,
@@ -869,6 +888,7 @@ export function AttributionPageClient() {
       primary_driver: primary,
       attribution_json: attributionJson,
       positions_snapshot: snapshot,
+      reliability,
     };
     const snapshotHash = hashString(JSON.stringify(payload));
     return { payload, snapshotHash };

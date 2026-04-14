@@ -358,6 +358,12 @@ export default function SignalFeedPage() {
       deduped.every((d) => isOutageExpired(d.latest, now))
     );
   }, [deduped, feedVisible.length, showCleared]);
+  const latestTs =
+    rows.length > 0 ? new Date(rows[0]!.created_at).getTime() : null;
+  const ageMinutes =
+    latestTs != null ? Math.max(0, Math.floor((Date.now() - latestTs) / 60000)) : null;
+  const reliability =
+    ageMinutes == null ? "LOW" : ageMinutes <= 30 ? "HIGH" : ageMinutes <= 120 ? "MEDIUM" : "LOW";
 
   return (
     <div className="space-y-8">
@@ -376,6 +382,12 @@ export default function SignalFeedPage() {
       </div>
 
       {/* Capacity header */}
+      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
+        <p className={sectionLabelClass}>Signal reliability</p>
+        <p className="mt-1 text-xs text-ink-mid">
+          Confidence {reliability} · {ageMinutes == null ? "no recent data" : `${ageMinutes} min since latest REMIT update`}
+        </p>
+      </div>
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}

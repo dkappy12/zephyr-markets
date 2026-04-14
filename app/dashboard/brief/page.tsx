@@ -444,6 +444,13 @@ export default function BriefPage() {
     row?.generated_at != null
       ? formatInTimeZone(parseISO(row.generated_at), "UTC", "HH:mm")
       : null;
+  const generatedTs = row?.generated_at ? Date.parse(row.generated_at) : null;
+  const ageHours =
+    generatedTs != null
+      ? Math.max(0, Math.floor((Date.now() - generatedTs) / (1000 * 60 * 60)))
+      : null;
+  const briefReliability =
+    ageHours == null ? "LOW" : ageHours <= 24 ? "HIGH" : ageHours <= 48 ? "MEDIUM" : "LOW";
 
   const watchItems = parseWatchList(row?.watch_list ?? null);
 
@@ -484,6 +491,14 @@ export default function BriefPage() {
         transition={{ delay: 0.05 }}
         className="space-y-6 py-10"
       >
+        <section>
+          <h2 className={sectionLabelClass}>Reliability</h2>
+          <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+            Confidence {briefReliability} · {ageHours == null ? "brief timestamp unavailable" : `${ageHours}h since generation`} ·
+            {bookTouchpointText ? " personalised touchpoints active" : " generic briefing mode"}
+          </p>
+        </section>
+
         <section>
           <h2 className={sectionLabelClass}>Overnight summary</h2>
           <p className="mt-3 font-serif text-lg leading-relaxed text-ink">

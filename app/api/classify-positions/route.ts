@@ -4,6 +4,7 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
+import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
 
 const MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOKENS = 6400;
@@ -154,6 +155,12 @@ export async function POST(req: Request) {
 
     const redactedRows = rows.map(redactRow);
     const userMessage = `Classify these trading positions. CSV headers: ${JSON.stringify(headers)}. Rows (sensitive fields redacted): ${JSON.stringify(redactedRows)}`;
+    await logAuthAuditEvent({
+      event: "classify_positions_attempted",
+      userId: user.id,
+      status: "info",
+      metadata: { rows: rows.length },
+    });
 
     let rawText: string;
     try {
@@ -168,9 +175,17 @@ export async function POST(req: Request) {
             err instanceof Error ? err.message : "Anthropic API request failed",
         },
       });
+      const reliability = makeReliabilityEnvelope({
+        modelVersion: MODEL,
+        dataVersion: "classify_v1",
+        fallbackUsed: true,
+        coverage: rows.length > 0 ? 1 : 0,
+        evidence: ["anthropic_request_failed"],
+      });
       return NextResponse.json({
         classified: heuristicClassify(rows),
         mode: "fallback",
+        reliability,
       });
     }
 
@@ -186,9 +201,17 @@ export async function POST(req: Request) {
         status: "failure",
         metadata: { reason: "Invalid response envelope from Anthropic" },
       });
+      const reliability = makeReliabilityEnvelope({
+        modelVersion: MODEL,
+        dataVersion: "classify_v1",
+        fallbackUsed: true,
+        coverage: rows.length > 0 ? 1 : 0,
+        evidence: ["invalid_response_envelope"],
+      });
       return NextResponse.json({
         classified: heuristicClassify(rows),
         mode: "fallback",
+        reliability,
       });
     }
 
@@ -202,9 +225,17 @@ export async function POST(req: Request) {
         status: "failure",
         metadata: { reason: "Could not parse classification JSON" },
       });
+      const reliability = makeReliabilityEnvelope({
+        modelVersion: MODEL,
+        dataVersion: "classify_v1",
+        fallbackUsed: true,
+        coverage: rows.length > 0 ? 1 : 0,
+        evidence: ["json_array_extract_failed"],
+      });
       return NextResponse.json({
         classified: heuristicClassify(rows),
         mode: "fallback",
+        reliability,
       });
     }
 
@@ -235,9 +266,17 @@ ${jsonStr}`;
             status: "failure",
             metadata: { reason: "Repair pass did not return JSON array" },
           });
+          const reliability = makeReliabilityEnvelope({
+            modelVersion: MODEL,
+            dataVersion: "classify_v1",
+            fallbackUsed: true,
+            coverage: rows.length > 0 ? 1 : 0,
+            evidence: ["repair_no_json_array"],
+          });
           return NextResponse.json({
             classified: heuristicClassify(rows),
             mode: "fallback",
+            reliability,
           });
         }
         classified = JSON.parse(repairedArray);
@@ -248,9 +287,17 @@ ${jsonStr}`;
           status: "failure",
           metadata: { reason: "Classification JSON parse failed" },
         });
+        const reliability = makeReliabilityEnvelope({
+          modelVersion: MODEL,
+          dataVersion: "classify_v1",
+          fallbackUsed: true,
+          coverage: rows.length > 0 ? 1 : 0,
+          evidence: ["repair_parse_failed"],
+        });
         return NextResponse.json({
           classified: heuristicClassify(rows),
           mode: "fallback",
+          reliability,
         });
       }
     }
@@ -262,9 +309,17 @@ ${jsonStr}`;
         status: "failure",
         metadata: { reason: "Model response was not an array" },
       });
+      const reliability = makeReliabilityEnvelope({
+        modelVersion: MODEL,
+        dataVersion: "classify_v1",
+        fallbackUsed: true,
+        coverage: rows.length > 0 ? 1 : 0,
+        evidence: ["model_not_array"],
+      });
       return NextResponse.json({
         classified: heuristicClassify(rows),
         mode: "fallback",
+        reliability,
       });
     }
 
@@ -288,13 +343,37 @@ ${jsonStr}`;
           rowCount: rows.length,
         },
       });
+      const reliability = makeReliabilityEnvelope({
+        modelVersion: MODEL,
+        dataVersion: "classify_v1",
+        fallbackUsed: true,
+        coverage: rows.length > 0 ? 1 : 0,
+        evidence: ["model_length_mismatch"],
+      });
       return NextResponse.json({
         classified: heuristicClassify(rows),
         mode: "fallback",
+        reliability,
       });
     }
-
-    return NextResponse.json({ classified: merged, mode: "model" });
+    await logAuthAuditEvent({
+      event: "classify_positions_succeeded",
+      userId: user.id,
+      status: "success",
+      metadata: { rows: rows.length, mode: "model" },
+    });
+    const reliability = makeReliabilityEnvelope({
+      modelVersion: MODEL,
+      dataVersion: "classify_v1",
+      fallbackUsed: false,
+      coverage: rows.length > 0 ? 1 : 0,
+      evidence: ["model_json_parse_ok", "normalization_applied"],
+    });
+    return NextResponse.json({
+      classified: merged,
+      mode: "model",
+      reliability,
+    });
   } catch (e: unknown) {
     await logAuthAuditEvent({
       event: "classify_positions_failed",

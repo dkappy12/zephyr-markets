@@ -4,6 +4,7 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
 
 function parseDateOnly(v: string | null): string | null {
   if (!v) return null;
@@ -268,6 +269,34 @@ export async function GET(req: Request) {
       stabilityPass: result.diagnostics.stabilityPass,
     });
     const blocked = quality.quality === "low";
+    const reliability = makeReliabilityEnvelope({
+      modelVersion: "optimise_v1",
+      dataVersion: `hist_${result.diagnostics.historicalScenarioCount}_stress_${result.diagnostics.stressScenarioCount}`,
+      fallbackUsed: result.diagnostics.fallbackUsed,
+      coverage: Math.min(1, result.diagnostics.historicalScenarioCount / 60),
+      confidence:
+        quality.quality === "high"
+          ? "high"
+          : quality.quality === "medium"
+            ? "medium"
+            : "low",
+      evidence: [
+        `historical_scenarios=${result.diagnostics.historicalScenarioCount}`,
+        `candidate_packages=${result.diagnostics.candidatePackageCount}`,
+        `stability_index=${result.diagnostics.stabilityIndex.toFixed(3)}`,
+      ],
+    });
+    await logAuthAuditEvent({
+      event: "optimise_recommendations_succeeded",
+      userId: user.id,
+      status: "success",
+      metadata: {
+        blocked,
+        quality: quality.quality,
+        historicalScenarioCount: result.diagnostics.historicalScenarioCount,
+        candidatePackageCount: result.diagnostics.candidatePackageCount,
+      },
+    });
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -282,6 +311,7 @@ export async function GET(req: Request) {
       blockedReason: blocked
         ? "Recommendations are blocked because model quality is low."
         : null,
+      reliability,
       provenance: {
         power: "market_prices (N2EX/APX daily avg)",
         gas: "gas_prices (TTF+NBP daily avg)",
