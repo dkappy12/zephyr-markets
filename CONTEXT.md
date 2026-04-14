@@ -8,7 +8,7 @@
 - Target: GB and Northwest European power and gas traders
 
 ## What Zephyr Does
-Zephyr is a portfolio intelligence platform. It monitors the physical world in real time — REMIT outages, LNG vessel movements, weather systems, storage levels, pipeline flows — and translates every physical signal into its direct impact on a trader's specific energy book. The core outputs are: live P&L attribution by physical driver, physical premium score, risk scenario analysis, optimisation recommendations, and a daily morning brief.
+Zephyr is a portfolio intelligence platform focused on **GB and Northwest European power** (with gas benchmarks for context). It monitors REMIT, weather-driven fundamentals, market tape, and desk-relevant signals — and translates them into a trader’s book: live P&L attribution by physical driver, **physical premium** (implied vs market), risk (VaR/CVaR), optimisation suggestions, and a daily morning brief. Depth on power first; additional markets only when data and maintenance allow.
 
 ## Tech Stack
 - Frontend: Next.js App Router, TypeScript, Tailwind CSS
@@ -53,7 +53,7 @@ Neoclassical and mathematical. Feels like a 19th century cartographic atlas meet
 
 ## Navigation Structure
 Primary: Overview | Intelligence | Portfolio | Brief | Settings
-Intelligence secondary: Signal Feed | LNG Map | Weather | Markets
+Intelligence secondary: Signal Feed | Weather | Markets (and related intelligence routes)
 Portfolio secondary: Book | Attribution | Risk | Optimise
 
 ## Pricing Tiers
@@ -64,12 +64,12 @@ Portfolio secondary: Book | Attribution | Risk | Optimise
 
 ## Key Features
 1. Signal Feed — AI-interpreted physical events, real-time for Pro
-2. Physical Premium Score — gap between market-implied and physically-implied price (gold treatment)
+2. Physical Premium Score — gap between market-implied and physically-implied GB power price (gold treatment)
 3. P&L Attribution — portfolio P&L decomposed by physical driver (waterfall chart)
 4. Risk Engine — VaR, CVaR, scenario heatmap
 5. Optimisation — three specific hedge recommendations
 6. Morning Brief — 06:00 GMT daily, personalised to trader's book
-7. LNG Map — Mapbox vessel tracking (post-launch when AIS API funded)
+7. Overview desk — GB wind (model), residual demand, N2EX/TTF tape context, REMIT counts, solar outturn (where pipeline feeds data)
 
 ## Database Tables (Supabase)
 profiles, positions, signals, alerts, portfolio_pnl, teams, team_members, team_invitations, premium_predictions, attribution_predictions, scenario_predictions, signal_predictions, accuracy_metrics, model_versions, admin_job_log, organisation_themes
@@ -87,7 +87,7 @@ Every intelligence output is logged as a prediction. Nightly at 22:00 GMT a Rail
 - Primary: wireframe mesh bust (large format)
 - Small format icon: Z lettermark in Cormorant Garamond, charcoal on ivory
 - Banner: wireframe mountain range (LinkedIn, backgrounds)
-- Compass rose: decorative element inside product (LNG map corner, weather page)
+- Compass rose: decorative element inside product (e.g. weather page)
 
 ## Quality checks (local & CI)
 - CI runs benchmark reconcile (no secrets) plus the economic quality gate when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set in GitHub Actions.

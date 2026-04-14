@@ -42,6 +42,28 @@ function parsePhysicalPremiumScore(v: unknown): number {
   return Number.NaN;
 }
 
+/** Age of a DB timestamp vs client clock (for as-of labels). */
+function formatDbAge(
+  iso: string | null | undefined,
+  nowMs: number,
+): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr}h ago`;
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function OverviewPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const relTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -67,6 +89,16 @@ export default function OverviewPage() {
   const [regime, setRegime] = useState<string | null>(null);
   const [srmcGbp, setSrmcGbp] = useState<number | null>(null);
   const [residualDemandGw, setResidualDemandGw] = useState<number | null>(null);
+  const [windForecastTimeIso, setWindForecastTimeIso] = useState<string | null>(
+    null,
+  );
+  const [premiumCalculatedAtIso, setPremiumCalculatedAtIso] = useState<
+    string | null
+  >(null);
+  const [n2exTapeFootnote, setN2exTapeFootnote] = useState<string | null>(null);
+  const [ttfTapeFootnote, setTtfTapeFootnote] = useState<string | null>(null);
+  const [solarGw, setSolarGw] = useState<number | null>(null);
+  const [solarDatetimeGmt, setSolarDatetimeGmt] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -75,8 +107,15 @@ export default function OverviewPage() {
 
     async function load() {
       setLoading(true);
-      const [sigRes, countRes, windRes, premiumRes, n2exRes, ttfRes] =
-        await Promise.all([
+      const [
+        sigRes,
+        countRes,
+        windRes,
+        premiumRes,
+        n2exRes,
+        ttfRes,
+        solarRes,
+      ] = await Promise.all([
         supabase
           .from("signals")
           .select(
@@ -120,6 +159,12 @@ export default function OverviewPage() {
           .order("price_time", { ascending: false })
           .limit(1)
           .maybeSingle(),
+        supabase
+          .from("solar_outturn")
+          .select("solar_mw, datetime_gmt")
+          .order("datetime_gmt", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (!sigRes.error && sigRes.data) {
@@ -139,8 +184,17 @@ export default function OverviewPage() {
         const ms =
           typeof w === "number" ? w : w != null ? Number(w) : Number.NaN;
         setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
+        const ft = windRes.data.forecast_time;
+        setWindForecastTimeIso(
+          typeof ft === "string"
+            ? ft
+            : ft != null
+              ? String(ft)
+              : null,
+        );
       } else {
         setWindGw(null);
+        setWindForecastTimeIso(null);
       }
 
       const nsRaw = premiumRes.data?.normalised_score;
@@ -164,6 +218,14 @@ export default function OverviewPage() {
         const market = numOrNull(d.market_price_gbp_mwh);
         const srmc = numOrNull(d.srmc_gbp_mwh);
         const resGw = numOrNull(d.residual_demand_gw);
+        const calcAt = d.calculated_at;
+        setPremiumCalculatedAtIso(
+          typeof calcAt === "string"
+            ? calcAt
+            : calcAt != null
+              ? String(calcAt)
+              : null,
+        );
         setPremiumMarketTapeGbp(market);
         if (Number.isFinite(score)) {
           setPremiumRow({
@@ -184,20 +246,60 @@ export default function OverviewPage() {
         setRegime(null);
         setSrmcGbp(null);
         setResidualDemandGw(null);
+        setPremiumCalculatedAtIso(null);
       }
 
       if (!n2exRes.error && n2exRes.data) {
-        const p = (n2exRes.data as { price_gbp_mwh?: unknown }).price_gbp_mwh;
-        setN2exPrice(numOrNull(p));
+        const row = n2exRes.data as {
+          price_gbp_mwh?: unknown;
+          price_date?: unknown;
+          settlement_period?: unknown;
+          market?: unknown;
+        };
+        setN2exPrice(numOrNull(row.price_gbp_mwh));
+        const pd =
+          typeof row.price_date === "string" ? row.price_date : null;
+        const sp = row.settlement_period;
+        const mk = typeof row.market === "string" ? row.market : "N2EX";
+        const spStr =
+          sp != null && String(sp).trim() !== "" ? ` · ${String(sp)}` : "";
+        setN2exTapeFootnote(
+          pd ? `Tape ${mk} · ${pd}${spStr}` : `Tape ${mk}`,
+        );
       } else {
         setN2exPrice(null);
+        setN2exTapeFootnote(null);
       }
 
       if (!ttfRes.error && ttfRes.data) {
-        const p = (ttfRes.data as { price_eur_mwh?: unknown }).price_eur_mwh;
-        setTtfPrice(numOrNull(p));
+        const row = ttfRes.data as {
+          price_eur_mwh?: unknown;
+          price_time?: unknown;
+        };
+        setTtfPrice(numOrNull(row.price_eur_mwh));
+        const pt = row.price_time;
+        setTtfTapeFootnote(
+          pt != null && String(pt).trim() !== ""
+            ? `TTF hub · ${String(pt)}`
+            : "TTF hub · EEX",
+        );
       } else {
         setTtfPrice(null);
+        setTtfTapeFootnote(null);
+      }
+
+      if (!solarRes.error && solarRes.data) {
+        const sm = solarRes.data.solar_mw;
+        const mw =
+          typeof sm === "number" ? sm : sm != null ? Number(sm) : Number.NaN;
+        setSolarGw(Number.isFinite(mw) ? mw / 1000 : null);
+        const dt = solarRes.data.datetime_gmt;
+        setSolarDatetimeGmt(
+          typeof dt === "string" ? dt : dt != null ? String(dt) : null,
+        );
+      } else {
+        setSolarGw(null);
+        setSolarDatetimeGmt(null);
       }
       setPremiumLoading(false);
       setUpdatedAt(new Date());
@@ -242,6 +344,11 @@ export default function OverviewPage() {
       ? impliedPrice - marketPrice
       : null;
 
+  const premiumModelRunLabel = useMemo(() => {
+    if (!premiumCalculatedAtIso) return null;
+    return `Model run ${formatDbAge(premiumCalculatedAtIso, relativeNowMs)}`;
+  }, [premiumCalculatedAtIso, relativeNowMs]);
+
   return (
     <div className="space-y-10">
       <div>
@@ -254,26 +361,54 @@ export default function OverviewPage() {
           Overview
         </motion.h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-mid">
-          Physical premium, system fundamentals, and the signals that move your
+          Physical premium, GB power fundamentals, and the signals that move your
           book today.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <MetricCard
-            label="GB WIND"
-            value={windGw === null ? "—" : windGw.toFixed(1)}
-            unit="GW"
-            trend={windGw === null ? undefined : "flat"}
-          />
-          <p className="mt-1 text-xs text-ink-mid">
-            Residual demand:{" "}
-            {residualDemandGw != null
-              ? `${residualDemandGw.toFixed(1)} GW`
-              : "—"}
-          </p>
-        </div>
+      <p className="text-[11px] leading-relaxed text-ink-light">
+        Staleness is per series below. N2EX and TTF are market tape where
+        available; wind is forecast-derived (not Elexon outturn).
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <MetricCard
+          label="GB WIND (MODEL)"
+          value={windGw === null ? "—" : windGw.toFixed(1)}
+          unit="GW"
+          trend={windGw === null ? undefined : "flat"}
+          footnote={
+            windForecastTimeIso
+              ? `Forecast step ${formatDbAge(windForecastTimeIso, relativeNowMs)}`
+              : "No forecast step"
+          }
+          hoverDetail={
+            <span>
+              <span className="block font-medium text-ink">
+                Forecast → GW (not BMRS outturn)
+              </span>
+              <span className="mt-2 block">
+                Uses the latest GB weather forecast (100m wind, m/s), scaled to GW
+                with a fixed heuristic: 17 GW at 8 m/s mean. For live outturn use
+                desk tools — this card is directional context for the premium
+                model only.
+              </span>
+            </span>
+          }
+        />
+        <MetricCard
+          label="RESIDUAL DEMAND"
+          value={
+            residualDemandGw === null ? "—" : residualDemandGw.toFixed(1)
+          }
+          unit="GW"
+          footnote={
+            premiumCalculatedAtIso
+              ? `Premium model · ${formatDbAge(premiumCalculatedAtIso, relativeNowMs)}`
+              : "From physical premium model"
+          }
+          hoverDetail="Residual demand (GW) from the same physical premium calculation as the score and implied vs market gap — not a TTF leg."
+        />
         <MetricCard
           label="N2EX DAY-AHEAD"
           value={
@@ -282,11 +417,8 @@ export default function OverviewPage() {
               : `£${n2exDisplayPrice.toFixed(2)}`
           }
           unit="/MWh"
-        />
-        <MetricCard
-          label="TTF NGP"
-          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
-          unit="/MWh"
+          footnote={n2exTapeFootnote ?? "—"}
+          hoverDetail="Day-ahead power from market_prices (N2EX/APX tape). Shown price may match the premium row when tape aligns."
         />
         <MetricCard
           label="REMIT ALERTS"
@@ -299,6 +431,25 @@ export default function OverviewPage() {
                 ? "up"
                 : "flat"
           }
+          footnote="REMIT-type signals in rolling 24h window"
+        />
+        <MetricCard
+          label="TTF (GAS CONTEXT)"
+          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
+          unit="/MWh"
+          footnote={ttfTapeFootnote ?? "—"}
+          hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
+        />
+        <MetricCard
+          label="GB SOLAR (OUTTURN)"
+          value={solarGw === null ? "—" : solarGw.toFixed(2)}
+          unit="GW"
+          footnote={
+            solarDatetimeGmt
+              ? `Outturn ${formatDbAge(solarDatetimeGmt, relativeNowMs)}`
+              : "No recent outturn"
+          }
+          hoverDetail="Latest GB solar from solar_outturn (MW → GW). Missing if pipeline has no row yet."
         />
       </div>
 
@@ -327,11 +478,19 @@ export default function OverviewPage() {
                       </span>
                       <span
                         role="tooltip"
-                        className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[280px] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
+                        className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[min(100vw-2rem,320px)] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
                       >
                         <span className="block">
-                          The physical premium score measures how far the market price
-                          has diverged from our model&apos;s physically-implied price.
+                          The physical premium score measures how far the N2EX day-ahead
+                          market has diverged from our model&apos;s physically-implied
+                          GB power price (same run as implied £/MWh below).
+                        </span>
+                        <span className="mt-3 block font-medium">
+                          Gap = implied £/MWh − N2EX £/MWh
+                        </span>
+                        <span className="mt-1 block">
+                          Dashes appear if implied, market, or score is missing for
+                          that model run.
                         </span>
                         <span className="mt-3 block">
                           Negative = market overpriced vs fundamentals (SOFTENING)
@@ -341,6 +500,10 @@ export default function OverviewPage() {
                         </span>
                         <span className="mt-3 block">
                           ±1 moderate · ±2 significant · ±4 extreme
+                        </span>
+                        <span className="mt-3 block text-[11px] text-ink-mid">
+                          TTF in the sidebar is gas-market context only — not the
+                          premium&apos;s primary leg.
                         </span>
                       </span>
                     </span>
@@ -362,6 +525,11 @@ export default function OverviewPage() {
                       </span>
                     )}
                 </div>
+                {premiumModelRunLabel ? (
+                  <p className="mt-2 font-mono text-[10px] text-ink-light">
+                    {premiumModelRunLabel}
+                  </p>
+                ) : null}
               </div>
             </div>
             <p className="font-mono text-xs text-ink-mid">
@@ -385,7 +553,7 @@ export default function OverviewPage() {
           <div className="space-y-4 border-gold/20 md:border-l md:pl-6">
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
-                Wind
+                Wind (model)
               </p>
               <p className="mt-1 font-mono text-sm text-ink">
                 {windGw != null ? `${windGw.toFixed(1)} GW` : "—"}
@@ -401,10 +569,13 @@ export default function OverviewPage() {
             </div>
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
-                TTF
+                TTF (context)
               </p>
               <p className="mt-1 font-mono text-sm text-ink">
                 {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
+              </p>
+              <p className="mt-1 text-[10px] leading-snug text-ink-light">
+                Gas leg · not the premium headline
               </p>
             </div>
           </div>

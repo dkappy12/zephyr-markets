@@ -12,6 +12,8 @@ export type MetricCardProps = {
   unit?: string;
   trend?: MetricTrend;
   className?: string;
+  /** One line under the value (e.g. as-of / source). */
+  footnote?: ReactNode;
   /** Extra panel shown on hover (e.g. multi-country breakdown). */
   hoverDetail?: ReactNode;
   /** Override default value typography (e.g. placeholder styling). */
@@ -30,6 +32,7 @@ export function MetricCard({
   unit,
   trend,
   className = "",
+  footnote,
   hoverDetail,
   valueClassName,
 }: MetricCardProps) {
@@ -70,6 +73,9 @@ export function MetricCard({
           </span>
         ) : null}
       </div>
+      {footnote ? (
+        <p className="mt-1.5 text-[10px] leading-snug text-ink-light">{footnote}</p>
+      ) : null}
       {hoverDetail ? (
         <div
           className="pointer-events-none invisible absolute left-0 top-full z-30 mt-2 min-w-[220px] rounded-[3px] border-[0.5px] border-ivory-border bg-card px-3 py-2 text-left text-[11px] leading-snug text-ink shadow-sm opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100"
