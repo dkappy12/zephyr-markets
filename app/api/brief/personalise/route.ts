@@ -127,6 +127,18 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as PersonaliseReq;
+    if (
+      body.positions != null &&
+      (!Array.isArray(body.positions) || body.positions.length > 500)
+    ) {
+      return NextResponse.json(
+        {
+          code: "INVALID_PAYLOAD",
+          error: "positions must be an array with at most 500 rows.",
+        },
+        { status: 400 },
+      );
+    }
     const normalised_score = fmtScore(body.normalised_score);
     const direction = String(body.direction ?? "STABLE");
     const regime = String(body.regime ?? "—").trim() || "—";
@@ -141,7 +153,9 @@ export async function POST(req: Request) {
         ? remitMwRaw.toFixed(1)
         : "—";
 
-    const positions = Array.isArray(body.positions) ? body.positions : [];
+    const positions = Array.isArray(body.positions)
+      ? body.positions.filter((p) => p != null && typeof p === "object")
+      : [];
     const normalizedPositions = positions.map((p) => {
       const dir = String(p.direction ?? "long");
       const size = asNum(p.size) ?? 0;

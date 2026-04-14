@@ -133,35 +133,51 @@ const calculateDailyPnL = (
   nbpPricesByDay: Record<string, number>,
   fxByDay: Record<string, number>,
 ): DailyPnL[] => {
-  const dates = Object.keys(powerPricesByDay).sort();
+  const dateUniverse = new Set<string>([
+    ...Object.keys(powerPricesByDay),
+    ...Object.keys(ttfPricesByDay),
+    ...Object.keys(nbpPricesByDay),
+  ]);
+  const dates = Array.from(dateUniverse).sort();
   const result: DailyPnL[] = [];
 
   for (let i = 1; i < dates.length; i++) {
     const prevDate = dates[i - 1];
     const currDate = dates[i];
     let dayPnL = 0;
+    let hasContributingSeries = false;
 
     for (const pos of positions) {
       const direction = pos.direction === "long" ? 1 : -1;
       const size = pos.size ?? 0;
 
       if (pos.market === "GB_power" || pos.market === "GB POWER") {
-        const prevPrice = powerPricesByDay[prevDate] ?? 0;
-        const currPrice = powerPricesByDay[currDate] ?? 0;
+        const prevPrice = powerPricesByDay[prevDate];
+        const currPrice = powerPricesByDay[currDate];
+        if (prevPrice == null || currPrice == null) continue;
         dayPnL += (currPrice - prevPrice) * size * direction;
+        hasContributingSeries = true;
       } else if (pos.market === "TTF") {
         const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
         const currFx = fxByDay[currDate] ?? HISTORICAL_GBP_PER_EUR;
-        const prevPrice = (ttfPricesByDay[prevDate] ?? 0) * prevFx;
-        const currPrice = (ttfPricesByDay[currDate] ?? 0) * currFx;
+        const prevTtf = ttfPricesByDay[prevDate];
+        const currTtf = ttfPricesByDay[currDate];
+        if (prevTtf == null || currTtf == null) continue;
+        const prevPrice = prevTtf * prevFx;
+        const currPrice = currTtf * currFx;
         dayPnL += (currPrice - prevPrice) * size * direction;
+        hasContributingSeries = true;
       } else if (pos.market === "NBP") {
-        const prevNbp = nbpPricesByDay[prevDate] ?? 0;
-        const currNbp = nbpPricesByDay[currDate] ?? 0;
+        const prevNbp = nbpPricesByDay[prevDate];
+        const currNbp = nbpPricesByDay[currDate];
+        if (prevNbp == null || currNbp == null) continue;
         dayPnL += ((currNbp - prevNbp) * size) / 100 * direction;
+        hasContributingSeries = true;
       }
     }
-    result.push({ date: currDate, pnl: dayPnL });
+    if (hasContributingSeries) {
+      result.push({ date: currDate, pnl: dayPnL });
+    }
   }
   return result;
 };
@@ -212,6 +228,7 @@ export default function RiskPage() {
   const [gasPrices, setGasPrices] = useState<GasPriceRow[]>([]);
   const [fxRates, setFxRates] = useState<FxRateRow[]>([]);
   const [gbpEurRate, setGbpEurRate] = useState(0.86);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/fx-rate")
@@ -223,6 +240,7 @@ export default function RiskPage() {
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setLoadError(null);
       const { data: authData } = await supabase.auth.getUser();
       const user = authData.user;
       setUserId(user?.id ?? null);
@@ -235,12 +253,10 @@ export default function RiskPage() {
       }
 
       const [
-        { data: positionsData },
-        { data: powerData },
-        { data: gasData },
-        { data: fxData },
-        { data: pnlHistory },
-        { data: latestPremium },
+        { data: positionsData, error: positionsError },
+        { data: powerData, error: powerError },
+        { data: gasData, error: gasError },
+        { data: fxData, error: fxError },
       ] = await Promise.all([
           supabase
             .from("positions")
@@ -264,22 +280,17 @@ export default function RiskPage() {
             .eq("base", "EUR")
             .eq("quote", "GBP")
             .order("rate_date", { ascending: true }),
-          supabase
-            .from("portfolio_pnl")
-            .select(
-              "date, total_pnl, wind_attribution_gbp, gas_attribution_gbp, remit_attribution_gbp",
-            )
-            .eq("user_id", user.id)
-            .order("date", { ascending: true }),
-          supabase
-            .from("physical_premium")
-            .select("*")
-            .order("calculated_at", { ascending: false })
-            .limit(1)
-            .single(),
       ]);
-      void pnlHistory;
-      void latestPremium;
+
+      if (positionsError || powerError || gasError || fxError) {
+        setLoadError(
+          positionsError?.message ??
+            powerError?.message ??
+            gasError?.message ??
+            fxError?.message ??
+            "Could not load risk data.",
+        );
+      }
 
       setPositions((positionsData ?? []) as PositionRow[]);
       setPowerPrices((powerData ?? []) as PowerPriceRow[]);
@@ -482,6 +493,10 @@ export default function RiskPage() {
     );
   const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
   const coverageColor = dailyPnLSeries.length < 10 ? TERRACOTTA : dailyPnLSeries.length < 20 ? AMBER : BRAND_GREEN;
+  const hasAnyPriceSeries =
+    Object.keys(powerPricesByDay).length > 0 ||
+    Object.keys(ttfPricesByDay).length > 0 ||
+    Object.keys(nbpPricesByDay).length > 0;
 
   return (
     <div className="space-y-10">
@@ -507,6 +522,15 @@ export default function RiskPage() {
         </div>
       ) : (
         <>
+          {loadError ? (
+            <p className="text-sm text-[#8B3A3A]">{loadError}</p>
+          ) : null}
+          {!loadError && !hasAnyPriceSeries ? (
+            <p className="text-sm text-ink-mid">
+              Insufficient aligned market history for risk calculations. Risk
+              metrics will appear once price series data is available.
+            </p>
+          ) : null}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}

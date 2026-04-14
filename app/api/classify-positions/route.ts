@@ -98,14 +98,27 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as {
-      headers?: string[];
-      rows?: Record<string, unknown>[];
+      headers?: unknown;
+      rows?: unknown;
     };
-    const headers = body.headers ?? [];
-    const rows = body.rows ?? [];
-    if (!Array.isArray(rows) || rows.length === 0) {
+    const headers = Array.isArray(body.headers)
+      ? body.headers.filter((h): h is string => typeof h === "string")
+      : [];
+    const rows = Array.isArray(body.rows)
+      ? body.rows.filter(
+          (r): r is Record<string, unknown> =>
+            r != null && typeof r === "object" && !Array.isArray(r),
+        )
+      : [];
+    if (rows.length === 0) {
       return NextResponse.json(
         { error: "rows array is required" },
+        { status: 400 },
+      );
+    }
+    if (rows.length > 1000) {
+      return NextResponse.json(
+        { error: "Maximum 1000 rows are allowed per request." },
         { status: 400 },
       );
     }

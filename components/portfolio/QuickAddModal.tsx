@@ -83,7 +83,6 @@ function buildTenorOptions(): string[] {
 type Props = {
   open: boolean;
   onClose: () => void;
-  userId: string;
   editPosition: PositionRow | null;
   onSaved: () => void;
   onToast: (message: string, type: "ok" | "err") => void;
@@ -92,7 +91,6 @@ type Props = {
 export function QuickAddModal({
   open,
   onClose,
-  userId,
   editPosition,
   onSaved,
   onToast,
@@ -176,10 +174,7 @@ export function QuickAddModal({
     }
     setSaving(true);
     try {
-      const { createBrowserClient } = await import("@/lib/supabase/client");
-      const supabase = createBrowserClient();
       const payload = {
-        user_id: userId,
         instrument: sel.label,
         instrument_type: sel.instrument_type,
         market: sel.market,
@@ -197,16 +192,22 @@ export function QuickAddModal({
         is_closed: false,
       };
       if (editPosition) {
-        const { error } = await supabase
-          .from("positions")
-          .update(payload)
-          .eq("id", editPosition.id)
-          .eq("user_id", userId);
-        if (error) throw error;
+        const resp = await fetch(`/api/portfolio/positions/${editPosition.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = (await resp.json().catch(() => ({}))) as { error?: string };
+        if (!resp.ok) throw new Error(body.error ?? "Update failed");
         onToast("Position updated", "ok");
       } else {
-        const { error } = await supabase.from("positions").insert(payload);
-        if (error) throw error;
+        const resp = await fetch("/api/portfolio/positions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = (await resp.json().catch(() => ({}))) as { error?: string };
+        if (!resp.ok) throw new Error(body.error ?? "Create failed");
         onToast("Position added", "ok");
       }
       onSaved();

@@ -37,7 +37,7 @@ import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
 import { motion } from "framer-motion";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -244,6 +244,14 @@ function finiteTotalPnlValues(rows: PortfolioPnlRow[]): number[] {
   return out;
 }
 
+function hashString(input: string): string {
+  let h = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    h = (h * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
 export function AttributionPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null>(null);
@@ -259,6 +267,7 @@ export function AttributionPageClient() {
   const [pnlHistory, setPnlHistory] = useState<PortfolioPnlRow[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [persistErr, setPersistErr] = useState<string | null>(null);
+  const lastPersistHashRef = useRef<string | null>(null);
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
@@ -794,10 +803,9 @@ export function AttributionPageClient() {
     return "Alignment blends the physical score with your net GB power direction.";
   }, [physLatest?.regime, alignmentScore]);
 
-  useEffect(() => {
-    if (!userId || !hasPositions || loading) return;
-
-    const attributionJson = {
+  const snapshotPayload = useMemo(() => {
+    if (!userId || !hasPositions || loading) return null;
+    const attributionJson: Record<string, unknown> = {
       generated_at: new Date().toISOString(),
       total_pnl: totalPnl,
       wind_attribution_gbp: windAttCal,
@@ -850,28 +858,20 @@ export function AttributionPageClient() {
       tenor: p.tenor,
     }));
 
-    void (async () => {
-      const row = {
-        user_id: userId,
-        date: utcToday(),
-        total_pnl: totalPnl,
-        wind_attribution_gbp: windAttCal,
-        gas_attribution_gbp: gasAttCal,
-        remit_attribution_gbp: remitAttCal,
-        residual_gbp: residual,
-        carbon_attribution_gbp: carbonAttCal,
-        primary_driver: primary,
-        attribution_json: attributionJson,
-        positions_snapshot: snapshot,
-      };
-
-      const { error } = await supabase.from("portfolio_pnl").upsert(
-        row,
-        { onConflict: "user_id,date" },
-      );
-      if (error) setPersistErr(error.message);
-      else setPersistErr(null);
-    })();
+    const payload = {
+      date: utcToday(),
+      total_pnl: totalPnl,
+      wind_attribution_gbp: windAttCal,
+      gas_attribution_gbp: gasAttCal,
+      remit_attribution_gbp: remitAttCal,
+      residual_gbp: residual,
+      carbon_attribution_gbp: carbonAttCal,
+      primary_driver: primary,
+      attribution_json: attributionJson,
+      positions_snapshot: snapshot,
+    };
+    const snapshotHash = hashString(JSON.stringify(payload));
+    return { payload, snapshotHash };
   }, [
     userId,
     hasPositions,
@@ -890,7 +890,6 @@ export function AttributionPageClient() {
     explainedRatio,
     attributionConfidence,
     primary,
-    supabase,
     positions,
     physLatest,
     marketIntradayGbpMwh,
@@ -910,6 +909,29 @@ export function AttributionPageClient() {
     priceResidualMoveGbpMwh,
     carbonShare,
   ]);
+
+  useEffect(() => {
+    if (!snapshotPayload) return;
+    if (lastPersistHashRef.current === snapshotPayload.snapshotHash) return;
+
+    void (async () => {
+      const resp = await fetch("/api/portfolio/attribution/snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...snapshotPayload.payload,
+          snapshot_hash: snapshotPayload.snapshotHash,
+        }),
+      });
+      const body = (await resp.json().catch(() => ({}))) as { error?: string };
+      if (!resp.ok) {
+        setPersistErr(body.error ?? "Could not save attribution snapshot.");
+        return;
+      }
+      lastPersistHashRef.current = snapshotPayload.snapshotHash;
+      setPersistErr(null);
+    })();
+  }, [snapshotPayload]);
 
   const waterfallRows = useMemo(() => {
     const factors = [

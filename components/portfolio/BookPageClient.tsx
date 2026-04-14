@@ -297,28 +297,35 @@ export function BookPageClient() {
     if (!userId || keeping.length === 0) return;
     setImportBusy(true);
     try {
-      for (const item of keeping) {
-        const row = {
-          user_id: userId,
-          direction: item.direction,
-          instrument: item.instrument ?? "Unknown",
-          instrument_type: item.instrument_type ?? "other_energy",
-          market: item.market ?? "other_power",
-          size: item.size ?? 0,
-          unit: item.unit ?? "MW",
-          tenor: item.tenor,
-          trade_price: item.trade_price,
-          currency: item.currency,
-          expiry_date: item.expiry_date,
-          entry_date: item.entry_date ?? utcToday(),
-          source: "csv",
-          notes: null,
-          is_hypothetical: false,
-          is_closed: false,
-          raw_csv_row: JSON.stringify(item.original_row ?? {}),
-        };
-        const { error } = await supabase.from("positions").insert(row);
-        if (error) throw error;
+      const payload = keeping.map((item) => ({
+        direction: item.direction,
+        instrument: item.instrument ?? "Unknown",
+        instrument_type: item.instrument_type ?? "other_energy",
+        market: item.market ?? "other_power",
+        size: item.size ?? 0,
+        unit: item.unit ?? "MW",
+        tenor: item.tenor,
+        trade_price: item.trade_price,
+        currency: item.currency,
+        expiry_date: item.expiry_date,
+        entry_date: item.entry_date ?? utcToday(),
+        source: "csv",
+        notes: null,
+        is_hypothetical: false,
+        is_closed: false,
+        raw_csv_row: JSON.stringify(item.original_row ?? {}),
+      }));
+      const resp = await fetch("/api/portfolio/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: payload, dryRun: false }),
+      });
+      const body = (await resp.json().catch(() => ({}))) as {
+        error?: string;
+        details?: string;
+      };
+      if (!resp.ok) {
+        throw new Error(body.error ?? body.details ?? "Import failed");
       }
       showToast(`${keeping.length} positions imported successfully`, "ok");
       setReviewOpen(false);
@@ -355,16 +362,18 @@ export function BookPageClient() {
     if (!userId) return;
     if (
       !window.confirm(
-        "Delete all positions in your book? This cannot be undone.",
+        "Clear all open positions in your book? This cannot be undone.",
       )
     ) {
       return;
     }
-    const { error } = await supabase
-      .from("positions")
-      .delete()
-      .eq("user_id", userId);
-    if (error) showToast(error.message, "err");
+    const resp = await fetch("/api/portfolio/positions/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "open" }),
+    });
+    const body = (await resp.json().catch(() => ({}))) as { error?: string };
+    if (!resp.ok) showToast(body.error ?? "Could not clear book", "err");
     else {
       showToast("Book cleared", "ok");
       await loadPositions();
@@ -374,12 +383,11 @@ export function BookPageClient() {
   async function deletePosition(id: string) {
     if (!userId) return;
     if (!window.confirm("Delete this position? This cannot be undone.")) return;
-    const { error } = await supabase
-      .from("positions")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId);
-    if (error) showToast(error.message, "err");
+    const resp = await fetch(`/api/portfolio/positions/${id}`, {
+      method: "DELETE",
+    });
+    const body = (await resp.json().catch(() => ({}))) as { error?: string };
+    if (!resp.ok) showToast(body.error ?? "Could not delete position", "err");
     else {
       showToast("Position deleted", "ok");
       await loadPositions();
@@ -393,16 +401,17 @@ export function BookPageClient() {
       showToast("Enter a close price", "err");
       return;
     }
-    const { error } = await supabase
-      .from("positions")
-      .update({
-        is_closed: true,
+    const resp = await fetch("/api/portfolio/positions/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: closeModal.id,
         close_price: cp,
         close_date: closeDate,
-      })
-      .eq("id", closeModal.id)
-      .eq("user_id", userId);
-    if (error) showToast(error.message, "err");
+      }),
+    });
+    const body = (await resp.json().catch(() => ({}))) as { error?: string };
+    if (!resp.ok) showToast(body.error ?? "Could not close position", "err");
     else {
       showToast("Position closed", "ok");
       setCloseModal(null);
@@ -732,7 +741,6 @@ export function BookPageClient() {
             setQuickOpen(false);
             setEditPos(null);
           }}
-          userId={userId}
           editPosition={editPos}
           onSaved={() => void loadPositions()}
           onToast={showToast}

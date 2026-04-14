@@ -93,17 +93,32 @@ async function fetchGbpPerEur(): Promise<number> {
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const objectiveRaw = (url.searchParams.get("objective") ?? "cvar").toLowerCase();
-    const objective: OptimiseObjective =
-      objectiveRaw === "var" ? "var" : "cvar";
-    const confidence = Math.min(
-      0.99,
-      Math.max(0.9, Number(url.searchParams.get("confidence") ?? "0.95")),
-    );
-    const maxTrades = Math.min(
-      4,
-      Math.max(1, Number(url.searchParams.get("maxTrades") ?? "3")),
-    );
+    const objectiveRaw = (
+      url.searchParams.get("objective") ?? "cvar"
+    ).toLowerCase();
+    if (!["var", "cvar"].includes(objectiveRaw)) {
+      return NextResponse.json(
+        {
+          code: "INVALID_OBJECTIVE",
+          error: "objective must be one of: var, cvar.",
+        },
+        { status: 400 },
+      );
+    }
+    const objective: OptimiseObjective = objectiveRaw as OptimiseObjective;
+    const confidenceRaw = Number(url.searchParams.get("confidence") ?? "0.95");
+    const maxTradesRaw = Number(url.searchParams.get("maxTrades") ?? "3");
+    if (!Number.isFinite(confidenceRaw) || !Number.isFinite(maxTradesRaw)) {
+      return NextResponse.json(
+        {
+          code: "INVALID_QUERY",
+          error: "confidence and maxTrades must be numeric.",
+        },
+        { status: 400 },
+      );
+    }
+    const confidence = Math.min(0.99, Math.max(0.9, confidenceRaw));
+    const maxTrades = Math.min(4, Math.max(1, maxTradesRaw));
     const includeStress =
       (url.searchParams.get("includeStress") ?? "true").toLowerCase() !== "false";
 
