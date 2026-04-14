@@ -184,4 +184,30 @@ describe("DELETE /api/account/delete", () => {
     });
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
+
+  it("returns DATA_CLEANUP_FAILED and does not delete auth user on cleanup error", async () => {
+    const serverClient = makeServerClientMock({});
+    mockCreateServerClient.mockResolvedValue(serverClient);
+
+    const admin = makeAdminClientMock({
+      failDeleteFor: "portfolio_pnl",
+    });
+    mockCreateAdminClient.mockReturnValue(admin.adminClient);
+
+    const request = new Request("http://localhost/api/account/delete", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "correct-password" }),
+    });
+
+    const response = await DELETE(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload).toMatchObject({
+      code: "DATA_CLEANUP_FAILED",
+      error: "Failed to delete account data (table: portfolio_pnl).",
+    });
+    expect(admin.deleteUser).not.toHaveBeenCalled();
+  });
 });
