@@ -109,8 +109,7 @@ MARKET_INDEX_POLL_MINUTES = 30
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
-NESO_WIND_OUTTURN_URL = "https://data.nationalgrideso.com/api/3/action/datastore_search"
-NESO_WIND_RESOURCE_ID = "db6c038f-98af-4570-ab60-24d71ebd0ae5"
+ELEXON_FUELINST_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELINST"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
@@ -130,7 +129,7 @@ VOM_GBP_PER_MWH = 2.0
 THERMAL_CAPACITY_GW = 45.0
 # GB installed wind capacity ~32 GW (2026). At 8 m/s mean wind speed,
 # capacity factor ~45%, giving ~14.4 GW expected output.
-# This constant is used as fallback only when NESO wind outturn is unavailable.
+# This constant is used as fallback only when BMRS FUELINST wind outturn is unavailable.
 WIND_MS_TO_GW = 14.4 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
@@ -1441,30 +1440,74 @@ async def fetch_solar_outturn() -> None:
 
 async def fetch_wind_outturn_gw(client: httpx.AsyncClient) -> float | None:
     """
-    Fetch latest GB wind generation outturn from NESO Data Portal (FUELINST).
+    Fetch latest GB wind generation outturn from Elexon BMRS FUELINST dataset.
+    FUELINST provides generation by fuel type at settlement period resolution.
     Returns wind generation in GW or None if unavailable.
-    Falls back to weather forecast conversion if NESO data unavailable.
     """
     try:
+        now_utc = datetime.now(timezone.utc)
+        # Fetch last 2 hours to ensure we get the latest settlement period
+        from_dt = (now_utc - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        to_dt = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
         resp = await client.get(
-            NESO_WIND_OUTTURN_URL,
+            ELEXON_FUELINST_URL,
             params={
-                "resource_id": NESO_WIND_RESOURCE_ID,
-                "sort": "DATETIME desc",
-                "limit": 1,
+                "from": from_dt,
+                "to": to_dt,
+                "format": "json",
             },
             timeout=HTTP_TIMEOUT,
         )
         resp.raise_for_status()
-        data = resp.json()
-        records = data.get("result", {}).get("records", [])
-        if records:
-            wind_mw = records[0].get("WIND") or records[0].get("wind")
-            if wind_mw is not None:
-                return float(wind_mw) / 1000.0
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or not data:
+            return None
+        # FUELINST rows have fuelType and generation fields
+        # Find the most recent row where fuelType is WIND
+        wind_rows = [
+            r
+            for r in data
+            if isinstance(r, dict)
+            and str(r.get("fuelType", "")).upper()
+            in ("WIND", "WIND_OFFSHORE", "WIND_ONSHORE")
+        ]
+        if not wind_rows:
+            # Try alternative field name
+            wind_rows = [
+                r
+                for r in data
+                if isinstance(r, dict) and "wind" in str(r.get("fuelType", "")).lower()
+            ]
+        if not wind_rows:
+            logger.debug("wind_outturn: no WIND fuel type in FUELINST response")
+            return None
+        # Sum onshore + offshore if separate, or take total wind
+        # Group by settlement period and take the latest
+        latest_sp = max(
+            wind_rows,
+            key=lambda r: r.get("startTime", r.get("settlementPeriod", 0)),
+        )
+        # Check if we need to sum offshore + onshore
+        sp_time = latest_sp.get("startTime", "")
+        same_sp_rows = [
+            r for r in wind_rows if r.get("startTime", "") == sp_time
+        ]
+        total_mw = sum(
+            float(r.get("generation", r.get("initialOutput", 0)) or 0)
+            for r in same_sp_rows
+        )
+        if total_mw > 0:
+            logger.debug(
+                "wind_outturn: ELEXON FUELINST wind = %.0f MW at %s",
+                total_mw,
+                sp_time,
+            )
+            return total_mw / 1000.0
+        return None
     except Exception as e:
-        logger.debug("wind_outturn: NESO fetch failed: %s", e)
-    return None
+        logger.debug("wind_outturn: Elexon FUELINST fetch failed: %s", e)
+        return None
 
 
 def scheduled_solar() -> None:
@@ -1985,7 +2028,8 @@ async def calculate_physical_premium() -> None:
             wind_gw = await fetch_wind_outturn_gw(http)
             if wind_gw is not None:
                 logger.debug(
-                    "premium_cycle: wind outturn from NESO = %.1f GW", wind_gw
+                    "premium_cycle: wind outturn from BMRS FUELINST = %.1f GW",
+                    wind_gw,
                 )
             else:
                 # Fallback: convert Open-Meteo forecast wind speed
