@@ -16,6 +16,46 @@ type DeleteErrorCode =
 
 type DeletionStage = "start" | "cleanup" | "auth_delete" | "complete";
 
+type CleanupTarget = {
+  table: string;
+  userKeyColumns: string[];
+};
+
+async function cleanupByUserKey(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adminClient: any,
+  userId: string,
+  targets: CleanupTarget[],
+) {
+  for (const target of targets) {
+    let cleaned = false;
+    let lastError: string | null = null;
+
+    for (const column of target.userKeyColumns) {
+      const { error: cleanupError } = await adminClient
+        .from(target.table)
+        .delete()
+        .eq(column, userId);
+
+      if (!cleanupError) {
+        cleaned = true;
+        break;
+      }
+
+      lastError = cleanupError.message;
+    }
+
+    if (!cleaned) {
+      return {
+        table: target.table,
+        reason: lastError ?? "unknown_cleanup_error",
+      };
+    }
+  }
+
+  return null;
+}
+
 function errorResponse(
   status: number,
   code: DeleteErrorCode,
@@ -166,44 +206,137 @@ export async function DELETE(request: Request) {
       message: "Account deletion requested",
     });
 
-    // Delete in dependency order — child tables first
-    for (const table of [
-      "alerts",
-      "portfolio_pnl",
-      "positions",
-      "premium_predictions",
-      "attribution_predictions",
-      "scenario_predictions",
-      "signal_predictions",
-      "accuracy_metrics",
-      "team_members",
-    ]) {
-      const { error: cleanupError } = await adminClient
-        .from(table)
-        .delete()
-        .eq("user_id", userId);
+    // Only user-owned tables belong in account cleanup.
+    // Prediction/model tables are global and must not be filtered by user id.
+    const cleanupTargets: CleanupTarget[] = [
+      { table: "alerts", userKeyColumns: ["user_id"] },
+      { table: "email_trade_imports", userKeyColumns: ["user_id"] },
+      { table: "attribution_predictions", userKeyColumns: ["user_id"] },
+      { table: "portfolio_pnl", userKeyColumns: ["user_id"] },
+      { table: "positions", userKeyColumns: ["user_id"] },
+      { table: "team_members", userKeyColumns: ["user_id"] },
+      { table: "team_invitations", userKeyColumns: ["invited_by"] },
+    ];
 
-      if (cleanupError) {
+    const directCleanupFailure = await cleanupByUserKey(
+      adminClient,
+      userId,
+      cleanupTargets,
+    );
+    if (directCleanupFailure) {
+      await logDeletionEvent(adminClient, {
+        userId,
+        status: "failed",
+        stage: "cleanup",
+        message: `Cleanup failed at table ${directCleanupFailure.table}`,
+      });
+      console.error("Account deletion cleanup failed", {
+        operation: "account_delete",
+        userId,
+        stage: "cleanup",
+        table: directCleanupFailure.table,
+        reason: directCleanupFailure.reason,
+      });
+      return errorResponse(
+        500,
+        "DATA_CLEANUP_FAILED",
+        `Failed to delete account data (table: ${directCleanupFailure.table}).`,
+        directCleanupFailure.reason,
+      );
+    }
+
+    // If the user owns teams, clean team-linked rows first, then teams.
+    const { data: ownedTeams, error: ownedTeamsError } = await adminClient
+      .from("teams")
+      .select("id")
+      .eq("owner_id", userId);
+    if (ownedTeamsError) {
+      await logDeletionEvent(adminClient, {
+        userId,
+        status: "failed",
+        stage: "cleanup",
+        message: "Cleanup failed at table teams",
+      });
+      console.error("Account deletion cleanup failed", {
+        operation: "account_delete",
+        userId,
+        stage: "cleanup",
+        table: "teams",
+        reason: ownedTeamsError.message,
+      });
+      return errorResponse(
+        500,
+        "DATA_CLEANUP_FAILED",
+        "Failed to delete account data (table: teams).",
+        ownedTeamsError.message,
+      );
+    }
+
+    const ownedTeamIds: string[] = Array.isArray(ownedTeams)
+      ? ownedTeams
+          .map((row: { id?: unknown }) =>
+            typeof row.id === "string" ? row.id : null,
+          )
+          .filter((id): id is string => Boolean(id))
+      : [];
+
+    if (ownedTeamIds.length > 0) {
+      const { error: invitationsByTeamError } = await adminClient
+        .from("team_invitations")
+        .delete()
+        .in("team_id", ownedTeamIds);
+      if (invitationsByTeamError) {
         await logDeletionEvent(adminClient, {
           userId,
           status: "failed",
           stage: "cleanup",
-          message: `Cleanup failed at table ${table}`,
-        });
-        console.error("Account deletion cleanup failed", {
-          operation: "account_delete",
-          userId,
-          stage: "cleanup",
-          table,
-          reason: cleanupError.message,
+          message: "Cleanup failed at table team_invitations",
         });
         return errorResponse(
           500,
           "DATA_CLEANUP_FAILED",
-          `Failed to delete account data (table: ${table}).`,
-          cleanupError.message,
+          "Failed to delete account data (table: team_invitations).",
+          invitationsByTeamError.message,
         );
       }
+
+      const { error: membersByTeamError } = await adminClient
+        .from("team_members")
+        .delete()
+        .in("team_id", ownedTeamIds);
+      if (membersByTeamError) {
+        await logDeletionEvent(adminClient, {
+          userId,
+          status: "failed",
+          stage: "cleanup",
+          message: "Cleanup failed at table team_members",
+        });
+        return errorResponse(
+          500,
+          "DATA_CLEANUP_FAILED",
+          "Failed to delete account data (table: team_members).",
+          membersByTeamError.message,
+        );
+      }
+    }
+
+    const { error: teamsDeleteError } = await adminClient
+      .from("teams")
+      .delete()
+      .eq("owner_id", userId);
+    if (teamsDeleteError) {
+      await logDeletionEvent(adminClient, {
+        userId,
+        status: "failed",
+        stage: "cleanup",
+        message: "Cleanup failed at table teams",
+      });
+      return errorResponse(
+        500,
+        "DATA_CLEANUP_FAILED",
+        "Failed to delete account data (table: teams).",
+        teamsDeleteError.message,
+      );
     }
 
     const { error: profileDeleteError } = await adminClient
@@ -216,13 +349,6 @@ export async function DELETE(request: Request) {
         status: "failed",
         stage: "cleanup",
         message: "Cleanup failed at table profiles",
-      });
-      console.error("Account deletion cleanup failed", {
-        operation: "account_delete",
-        userId,
-        stage: "cleanup",
-        table: "profiles",
-        reason: profileDeleteError.message,
       });
       return errorResponse(
         500,

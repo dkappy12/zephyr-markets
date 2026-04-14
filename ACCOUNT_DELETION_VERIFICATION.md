@@ -1,7 +1,7 @@
 # Account Deletion Verification Checklist
 
 ## Preconditions
-- User account exists with rows in `portfolio_pnl`, `positions`, `brief_entries`, and `premium_predictions`.
+- User account exists with rows in user-owned tables: `alerts`, `email_trade_imports`, `attribution_predictions`, `portfolio_pnl`, `positions`, `team_members`, `team_invitations`, `teams`, `profiles`.
 - Route env vars are set: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Scenarios
@@ -35,7 +35,8 @@
    - Call delete as authenticated user with valid env and correct password.
    - Expect success payload `{ "success": true }`.
    - Confirm user is signed out and redirected to `/login`.
-   - Confirm no orphaned user rows remain in user-owned tables (`alerts`, `portfolio_pnl`, `positions`, `brief_entries`, `premium_predictions`, `attribution_predictions`, `scenario_predictions`, `signal_predictions`, `accuracy_metrics`, `team_members`, `profiles`).
+   - Confirm no orphaned user rows remain in user-owned tables (`alerts`, `email_trade_imports`, `attribution_predictions`, `portfolio_pnl`, `positions`, `team_members`, `team_invitations`, `teams`, `profiles`).
+   - Confirm global model/market tables are untouched (`brief_entries`, `premium_predictions`, `scenario_predictions`, `signal_predictions`, `accuracy_metrics`).
 
 ## Audit Verification
 - Confirm `admin_job_log` has lifecycle entries for account delete:
