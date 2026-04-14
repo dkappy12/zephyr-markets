@@ -59,7 +59,7 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  if (pathname === "/login" || pathname === "/signup") {
+  if (pathname === "/login") {
     if (user) {
       return NextResponse.redirect(new URL("/dashboard/overview", request.url));
     }

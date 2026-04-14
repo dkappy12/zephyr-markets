@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
@@ -85,15 +87,8 @@ async function logDeletionEvent(
 }
 
 export async function DELETE(request: Request) {
-  const reqUrl = new URL(request.url);
-  const originHeader = request.headers.get("origin");
-  const refererHeader = request.headers.get("referer");
-  const sameOrigin =
-    (originHeader && originHeader === reqUrl.origin) ||
-    (refererHeader && refererHeader.startsWith(reqUrl.origin));
-  if (!sameOrigin) {
-    return errorResponse(403, "CSRF_BLOCKED", "Cross-site request blocked.");
-  }
+  const csrf = assertSameOrigin(request);
+  if (csrf) return csrf;
 
   // Verify the user is authenticated
   const supabase = await createClient();
@@ -103,6 +98,10 @@ export async function DELETE(request: Request) {
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
+    await logAuthAuditEvent({
+      event: "account_delete_unauthorized",
+      status: "failure",
+    });
     return errorResponse(401, "UNAUTHORIZED", "Unauthorized");
   }
 
@@ -112,6 +111,11 @@ export async function DELETE(request: Request) {
   const password = typeof body?.password === "string" ? body.password : "";
 
   if (!password.trim()) {
+    await logAuthAuditEvent({
+      event: "account_delete_password_missing",
+      userId,
+      status: "failure",
+    });
     return errorResponse(400, "PASSWORD_REQUIRED", "Password is required.");
   }
 
@@ -128,6 +132,11 @@ export async function DELETE(request: Request) {
     password,
   });
   if (reAuthError) {
+    await logAuthAuditEvent({
+      event: "account_delete_password_invalid",
+      userId,
+      status: "failure",
+    });
     return errorResponse(401, "PASSWORD_INVALID", "Invalid password.");
   }
 
@@ -248,6 +257,11 @@ export async function DELETE(request: Request) {
       status: "succeeded",
       stage: "complete",
       message: "Account deletion completed",
+    });
+    await logAuthAuditEvent({
+      event: "account_delete_completed",
+      userId,
+      status: "success",
     });
     return NextResponse.json({ success: true });
   } catch (error) {

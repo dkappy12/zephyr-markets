@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/auth/password-policy";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,8 +19,9 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setError(null);
     setInfo(null);
-    if (!password || password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    const policy = validatePasswordPolicy(password);
+    if (!policy.ok) {
+      setError(`Password policy: ${policy.reasons.join(" ")}`);
       return;
     }
     if (password !== confirmPassword) {
@@ -29,6 +31,20 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       const supabase = createClient();
+      const policyResp = await fetch("/api/auth/password-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!policyResp.ok) {
+        const body = await policyResp.json().catch(() => ({}));
+        setError(
+          Array.isArray(body?.reasons)
+            ? `Password policy: ${body.reasons.join(" ")}`
+            : "Password does not meet policy requirements.",
+        );
+        return;
+      }
       const { error: updateError } = await supabase.auth.updateUser({
         password,
       });
@@ -36,10 +52,8 @@ export default function ResetPasswordPage() {
         setError("Reset link is invalid or expired. Request a new one.");
         return;
       }
-      setInfo("Password updated. Redirecting to login...");
-      setTimeout(() => {
-        router.push("/login");
-      }, 900);
+      setInfo("Password updated.");
+      router.push("/login");
     } catch {
       setError("Could not reset password.");
     } finally {
@@ -77,6 +91,7 @@ export default function ResetPasswordPage() {
               required
               className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-light focus:border-ink/40"
             />
+            <p className="mt-2 text-xs text-ink-light">{passwordPolicyHint()}</p>
           </div>
           <div>
             <label

@@ -1,4 +1,5 @@
 import { optimisePortfolio, buildHistoricalScenarios, stressScenarios, type OptimiseObjective } from "@/lib/portfolio/optimise";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
@@ -108,15 +109,26 @@ export async function GET(req: Request) {
 
     const supabase = await createClient();
     const auth = await requireUser(supabase);
-    if (auth.response) return auth.response;
+    if (auth.response) {
+      await logAuthAuditEvent({
+        event: "optimise_recommendations_unauthorized",
+        status: "failure",
+      });
+      return auth.response;
+    }
     const user = auth.user!;
-    const rateLimit = checkRateLimit({
+    const rateLimit = await checkRateLimit({
       key: user.id,
       bucket: "optimise_recommendations",
       limit: 20,
       windowMs: 60_000,
     });
     if (!rateLimit.allowed) {
+      await logAuthAuditEvent({
+        event: "optimise_recommendations_rate_limited",
+        userId: user.id,
+        status: "failure",
+      });
       return NextResponse.json(
         {
           code: "RATE_LIMITED",
@@ -265,6 +277,11 @@ export async function GET(req: Request) {
       alternatives: blocked ? [] : result.alternatives,
     });
   } catch (error: unknown) {
+    await logAuthAuditEvent({
+      event: "optimise_recommendations_failed",
+      status: "failure",
+      metadata: { reason: error instanceof Error ? error.message : String(error) },
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 },

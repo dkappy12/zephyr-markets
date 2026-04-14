@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 
@@ -50,6 +52,9 @@ For TTF and other EUR-denominated markets, set currency to "EUR" and trade_price
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key) {
       return NextResponse.json(
@@ -60,15 +65,26 @@ export async function POST(req: Request) {
 
     const supabase = await createClient();
     const auth = await requireUser(supabase);
-    if (auth.response) return auth.response;
+    if (auth.response) {
+      await logAuthAuditEvent({
+        event: "classify_positions_unauthorized",
+        status: "failure",
+      });
+      return auth.response;
+    }
     const user = auth.user!;
-    const rateLimit = checkRateLimit({
+    const rateLimit = await checkRateLimit({
       key: user.id,
       bucket: "classify_positions",
       limit: 12,
       windowMs: 60_000,
     });
     if (!rateLimit.allowed) {
+      await logAuthAuditEvent({
+        event: "classify_positions_rate_limited",
+        userId: user.id,
+        status: "failure",
+      });
       return NextResponse.json(
         {
           code: "RATE_LIMITED",
@@ -178,6 +194,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ classified: merged });
   } catch (e: unknown) {
+    await logAuthAuditEvent({
+      event: "classify_positions_failed",
+      status: "failure",
+      metadata: { reason: e instanceof Error ? e.message : String(e) },
+    });
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
       { status: 500 },
