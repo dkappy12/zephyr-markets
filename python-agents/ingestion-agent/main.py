@@ -109,6 +109,8 @@ MARKET_INDEX_POLL_MINUTES = 30
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
+NESO_WIND_OUTTURN_URL = "https://data.nationalgrideso.com/api/3/action/datastore_search"
+NESO_WIND_RESOURCE_ID = "db6c038f-98af-4570-ab60-24d71ebd0ae5"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
@@ -126,7 +128,10 @@ UKA_PRICE_GBP_PER_T = float(os.environ.get("UKA_PRICE_GBP_T", "55.0"))
 CPS_GBP_PER_T = 18.0
 VOM_GBP_PER_MWH = 2.0
 THERMAL_CAPACITY_GW = 45.0
-WIND_MS_TO_GW = 17.0 / 8.0
+# GB installed wind capacity ~32 GW (2026). At 8 m/s mean wind speed,
+# capacity factor ~45%, giving ~14.4 GW expected output.
+# This constant is used as fallback only when NESO wind outturn is unavailable.
+WIND_MS_TO_GW = 14.4 / 8.0
 PHYSICAL_PREMIUM_SOURCE = "Zephyr Physical Model v1"
 PHYSICAL_PREMIUM_POLL_MINUTES = 5
 # v1.0.0 — initial hand-tuned coefficients
@@ -1311,6 +1316,26 @@ async def fetch_nbp_price() -> None:
         logger.error("nbp_cycle: failed parsing quote line %r", line[:160])
         return
 
+    gas_day_label = d.strftime("%Y-%m-%d")
+    now_utc = datetime.now(timezone.utc)
+    age_days = (now_utc.date() - d.date()).days
+    if age_days > 3:
+        logger.warning(
+            "nbp_cycle: NBP price is %d days stale (gas day %s) — "
+            "Stooq may not have updated over weekend/holiday. "
+            "Skipping upsert to avoid poisoning P&L calculations.",
+            age_days,
+            gas_day_label,
+        )
+        return
+    elif age_days > 1:
+        logger.warning(
+            "nbp_cycle: NBP price is %d days stale (gas day %s) — "
+            "using anyway but P&L accuracy may be reduced.",
+            age_days,
+            gas_day_label,
+        )
+
     payload = [{
         "price_time": d.isoformat(),
         "hub": HUB_NBP,
@@ -1322,7 +1347,6 @@ async def fetch_nbp_price() -> None:
     async with httpx.AsyncClient(follow_redirects=True) as http:
         await upsert_gas_prices_http(http, payload)
 
-    gas_day_label = d.strftime("%Y-%m-%d")
     logger.info(
         "nbp_cycle: NBP = %.3f for gas day %s (%s)",
         px,
@@ -1413,6 +1437,34 @@ async def fetch_solar_outturn() -> None:
         f"{mw:,.0f}",
         dt_s,
     )
+
+
+async def fetch_wind_outturn_gw(client: httpx.AsyncClient) -> float | None:
+    """
+    Fetch latest GB wind generation outturn from NESO Data Portal (FUELINST).
+    Returns wind generation in GW or None if unavailable.
+    Falls back to weather forecast conversion if NESO data unavailable.
+    """
+    try:
+        resp = await client.get(
+            NESO_WIND_OUTTURN_URL,
+            params={
+                "resource_id": NESO_WIND_RESOURCE_ID,
+                "sort": "DATETIME desc",
+                "limit": 1,
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        records = data.get("result", {}).get("records", [])
+        if records:
+            wind_mw = records[0].get("WIND") or records[0].get("wind")
+            if wind_mw is not None:
+                return float(wind_mw) / 1000.0
+    except Exception as e:
+        logger.debug("wind_outturn: NESO fetch failed: %s", e)
+    return None
 
 
 def scheduled_solar() -> None:
@@ -1928,10 +1980,25 @@ async def calculate_physical_premium() -> None:
         gbp_eur_rate = await fetch_gbp_eur_rate(http)
         await upsert_daily_fx_rate(http, gbp_eur_rate)
         wind_ms: float | None = None
+        wind_gw: float | None = None
         try:
-            wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)
+            wind_gw = await fetch_wind_outturn_gw(http)
+            if wind_gw is not None:
+                logger.debug(
+                    "premium_cycle: wind outturn from NESO = %.1f GW", wind_gw
+                )
+            else:
+                # Fallback: convert Open-Meteo forecast wind speed
+                wind_ms, _wind_ft = await _fetch_weather_wind_closest_now(http)
+                if wind_ms is not None:
+                    wind_gw = wind_ms * WIND_MS_TO_GW
+                    logger.debug(
+                        "premium_cycle: wind from forecast fallback = %.1f GW (%.2f m/s)",
+                        wind_gw,
+                        wind_ms,
+                    )
         except Exception as e:
-            logger.warning("premium_cycle: weather fetch failed: %s", e)
+            logger.warning("premium_cycle: wind fetch failed: %s", e)
 
         solar_mw: float | None = None
         try:
@@ -2037,10 +2104,6 @@ async def calculate_physical_premium() -> None:
             remit_unplanned_mw,
         )
 
-        wind_gw: float | None = None
-        if wind_ms is not None:
-            wind_gw = wind_ms * WIND_MS_TO_GW
-
         solar_gw: float | None = None
         if solar_mw is not None:
             solar_gw = solar_mw / 1000.0
@@ -2067,17 +2130,25 @@ async def calculate_physical_premium() -> None:
         # Research basis: Hagfors & Bunn (2016), Ghelasi & Ziel (2025) — REMIT treated
         # as a supply-side shift moving the system up the merit order curve, not a
         # separate scarcity adder.
-        effective_rd = min(residual_demand_gw + unplanned_gw, 42.0)
-        # Cap at 42 GW — above this the market mechanism breaks down and spot prices
-        # are dominated by emergency measures outside the model's scope.
+        effective_rd = min(residual_demand_gw + unplanned_gw, 38.0)
+        # Cap at 38 GW — GB peak demand rarely exceeds this even in winter.
+        # Above 38 GW the market operates under emergency measures outside model scope.
 
         rd = residual_demand_gw
         rd_premium_mwh = _residual_demand_premium_gbp_mwh(effective_rd)
         wind_suppression_mwh = _wind_price_suppression_gbp_mwh(wg)
         if rd < 15.0:
             premium_regime = "renewable"
+            # Renewable regime: price suppressed below SRMC by renewable surplus.
+            # At rd = 15 GW (boundary), implied = SRMC (no discount).
+            # At rd = 0 GW, implied = SRMC - 30 (maximum renewable discount ~£30/MWh).
+            # Linear interpolation: each GW of surplus below 15 GW reduces price by £2/MWh.
+            # Wind suppression is also applied to avoid double-counting.
             renewable_surplus_gw = 15.0 - rd
-            implied = -2.0 * renewable_surplus_gw + 10.0
+            srmc_anchor = srmc_gbp_mwh if srmc_gbp_mwh is not None else 70.0
+            implied = (
+                srmc_anchor - (renewable_surplus_gw * 2.0) - wind_suppression_mwh
+            )
             logger.debug(
                 "premium_cycle model: rd=%.1fGW unplanned_remit=%.1fGW effective_rd=%.1fGW "
                 "wind_suppression=£%.2f/MWh rd_premium=£%.2f/MWh",
@@ -2092,7 +2163,13 @@ async def calculate_physical_premium() -> None:
             premium_regime = "transitional"
             if srmc_gbp_mwh is not None:
                 transition_factor = (rd - 15.0) / 7.0
-                renewable_price = -2.0 * (15.0 - rd) + 10.0
+                srmc_anchor = srmc_gbp_mwh if srmc_gbp_mwh is not None else 70.0
+                renewable_surplus_gw = max(0.0, 15.0 - rd)
+                renewable_price = (
+                    srmc_anchor
+                    - (renewable_surplus_gw * 2.0)
+                    - wind_suppression_mwh
+                )
                 gas_price = (
                     srmc_gbp_mwh
                     + rd_premium_mwh
@@ -2147,7 +2224,7 @@ async def calculate_physical_premium() -> None:
 
         inputs_available = sum(
             1
-            for x in (wind_ms, solar_mw, ttf_eur_mwh, market_price_gbp_mwh)
+            for x in (wind_gw, solar_mw, ttf_eur_mwh, market_price_gbp_mwh)
             if x is not None
         )
         if inputs_available == 4:
