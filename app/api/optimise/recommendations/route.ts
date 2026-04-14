@@ -1,4 +1,6 @@
 import { optimisePortfolio, buildHistoricalScenarios, stressScenarios, type OptimiseObjective } from "@/lib/portfolio/optimise";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -105,12 +107,26 @@ export async function GET(req: Request) {
       (url.searchParams.get("includeStress") ?? "true").toLowerCase() !== "false";
 
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = await requireUser(supabase);
+    if (auth.response) return auth.response;
+    const user = auth.user!;
+    const rateLimit = checkRateLimit({
+      key: user.id,
+      bucket: "optimise_recommendations",
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          code: "RATE_LIMITED",
+          error: "Too many requests. Please wait before retrying.",
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rateLimit.retryAfterSec) },
+        },
+      );
     }
 
     const since = new Date();

@@ -1,0 +1,130 @@
+"use client";
+
+import { createClient } from "@/lib/supabase/client";
+import { motion } from "framer-motion";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+export default function ResetPasswordPage() {
+  const router = useRouter();
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!password || password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+      });
+      if (updateError) {
+        setError("Reset link is invalid or expired. Request a new one.");
+        return;
+      }
+      setInfo("Password updated. Redirecting to login...");
+      setTimeout(() => {
+        router.push("/login");
+      }, 900);
+    } catch {
+      setError("Could not reset password.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-ivory px-4 py-16">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="w-full max-w-[420px] rounded-[4px] border-[0.5px] border-ivory-border bg-card px-8 py-9"
+      >
+        <h1 className="font-serif text-3xl text-ink">Set new password.</h1>
+        <p className="mt-2 text-sm text-ink-mid">
+          Choose a new password for your account.
+        </p>
+        <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
+          <div>
+            <label
+              htmlFor="password"
+              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+            >
+              New password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-light focus:border-ink/40"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="confirmPassword"
+              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+            >
+              Confirm password
+            </label>
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-light focus:border-ink/40"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-[4px] bg-ink py-3 text-xs font-semibold tracking-[0.06em] text-ivory transition-colors duration-200 hover:bg-[#1f1d1a] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? "Updating..." : "Update password"}
+          </button>
+        </form>
+        {error ? (
+          <p className="mt-4 text-sm text-bear" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {info ? (
+          <p className="mt-4 text-sm text-ink-mid" role="status">
+            {info}
+          </p>
+        ) : null}
+        <p className="mt-6 text-xs text-ink-mid">
+          Need a new reset link?{" "}
+          <Link
+            href="/forgot-password"
+            className="underline-offset-4 hover:underline"
+          >
+            Request one
+          </Link>
+          .
+        </p>
+      </motion.div>
+    </div>
+  );
+}

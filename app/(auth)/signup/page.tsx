@@ -99,7 +99,7 @@ export default function SignupPage() {
       });
 
       if (signUpError) {
-        setError(signUpError.message);
+        setError("Could not create account. Please check your details and try again.");
         return;
       }
 
@@ -279,7 +279,15 @@ export default function SignupPage() {
                   />
                   <span>
                     I agree to the{" "}
-                    <span className="text-ink">Terms of Service</span>.
+                    <Link
+                      href="/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-ink underline-offset-4 hover:underline"
+                    >
+                      Terms of Service
+                    </Link>
+                    .
                   </span>
                 </label>
                 <label className="flex cursor-pointer items-start gap-3 text-sm text-ink-mid">
@@ -291,7 +299,15 @@ export default function SignupPage() {
                   />
                   <span>
                     I acknowledge the{" "}
-                    <span className="text-ink">Privacy Policy</span>.
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-ink underline-offset-4 hover:underline"
+                    >
+                      Privacy Policy
+                    </Link>
+                    .
                   </span>
                 </label>
               </motion.div>
@@ -339,6 +355,15 @@ export default function SignupPage() {
           {info ? (
             <p className="mt-6 text-sm text-ink-mid" role="status">
               {info}
+            </p>
+          ) : null}
+          {info ? (
+            <p className="mt-2 text-sm text-ink-mid">
+              Didn&apos;t get it?{" "}
+              <Link href="/verify-email" className="underline-offset-4 hover:underline">
+                Resend verification email
+              </Link>
+              .
             </p>
           ) : null}
         </motion.div>

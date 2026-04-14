@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 
 type PersonaliseReq = {
@@ -86,21 +88,26 @@ export async function POST(req: Request) {
     }
 
     const supabase = await createClient();
-
-    const authHeader = req.headers.get("authorization");
-    const bearer =
-      authHeader && authHeader.toLowerCase().startsWith("bearer ")
-        ? authHeader.slice(7).trim()
-        : null;
-
-    const fromCookies = await supabase.auth.getUser();
-    let user = fromCookies.data.user;
-    if (!user && bearer) {
-      const fromJwt = await supabase.auth.getUser(bearer);
-      user = fromJwt.data.user ?? null;
-    }
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = await requireUser(supabase);
+    if (auth.response) return auth.response;
+    const user = auth.user!;
+    const rateLimit = checkRateLimit({
+      key: user.id,
+      bucket: "brief_personalise",
+      limit: 6,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          code: "RATE_LIMITED",
+          error: "Too many requests. Please wait before retrying.",
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rateLimit.retryAfterSec) },
+        },
+      );
     }
 
     const body = (await req.json()) as PersonaliseReq;

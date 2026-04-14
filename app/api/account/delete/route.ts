@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 type DeleteErrorCode =
   | "UNAUTHORIZED"
+  | "CSRF_BLOCKED"
   | "PASSWORD_REQUIRED"
   | "PASSWORD_INVALID"
   | "SERVER_MISCONFIGURED"
@@ -78,6 +79,16 @@ async function logDeletionEvent(
 }
 
 export async function DELETE(request: Request) {
+  const reqUrl = new URL(request.url);
+  const originHeader = request.headers.get("origin");
+  const refererHeader = request.headers.get("referer");
+  const sameOrigin =
+    (originHeader && originHeader === reqUrl.origin) ||
+    (refererHeader && refererHeader.startsWith(reqUrl.origin));
+  if (!sameOrigin) {
+    return errorResponse(403, "CSRF_BLOCKED", "Cross-site request blocked.");
+  }
+
   // Verify the user is authenticated
   const supabase = await createClient();
   const {

@@ -3,15 +3,32 @@
 import { createClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const urlMessage = useMemo(() => {
+    const errorCode = searchParams.get("error");
+    if (errorCode === "auth_unavailable") {
+      return "Authentication is temporarily unavailable. Please try again shortly.";
+    }
+    if (errorCode === "auth") {
+      return "Your sign-in link is invalid or has expired.";
+    }
+    return null;
+  }, [searchParams]);
+
+  useEffect(() => {
+    setInfo(urlMessage);
+  }, [urlMessage]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -26,7 +43,7 @@ export default function LoginPage() {
       });
 
       if (signInError) {
-        setError(signInError.message);
+        setError("Invalid email or password.");
         return;
       }
 
@@ -103,6 +120,24 @@ export default function LoginPage() {
             {error}
           </p>
         ) : null}
+        {info ? (
+          <p className="mt-4 text-sm text-ink-mid" role="status">
+            {info}
+          </p>
+        ) : null}
+        <div className="mt-5 flex items-center justify-between text-xs text-ink-mid">
+          <Link href="/forgot-password" className="underline-offset-4 hover:underline">
+            Forgot password?
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/terms" className="underline-offset-4 hover:underline">
+              Terms
+            </Link>
+            <Link href="/privacy" className="underline-offset-4 hover:underline">
+              Privacy
+            </Link>
+          </div>
+        </div>
         <p className="mt-8 text-center text-xs text-ink-mid">
           No account?{" "}
           <Link
