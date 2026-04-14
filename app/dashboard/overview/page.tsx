@@ -151,8 +151,8 @@ export default function OverviewPage() {
         supabase
           .from("market_prices")
           .select("price_gbp_mwh, price_time")
-          .eq("market", "N2EX")
           .order("price_time", { ascending: false })
+          .gt("price_gbp_mwh", 0)
           .limit(1)
           .maybeSingle(),
         supabase
@@ -530,7 +530,7 @@ export default function OverviewPage() {
         </p>
         <Link
           href="/dashboard/portfolio/book"
-          className="mt-4 rounded-[4px] border-[0.5px] border-gold/50 bg-ivory px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gold transition-colors duration-200 hover:bg-ivory-dark"
+          className="mt-4 inline-flex h-9 items-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark"
         >
           Import portfolio
         </Link>
