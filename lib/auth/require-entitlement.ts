@@ -38,6 +38,21 @@ export async function requireEntitlement(
 ) {
   const state = await getEffectiveBillingState(supabase as EntitlementClient, userId);
 
+  if (!state.canUsePremiumNow) {
+    return {
+      state,
+      response: NextResponse.json(
+        {
+          code: "PLAN_REQUIRED",
+          error: "Premium access is currently unavailable for this billing status.",
+          currentTier: state.effectiveTier,
+          billingStatus: state.status,
+        },
+        { status: 403 },
+      ),
+    };
+  }
+
   if (options.feature && !state.entitlements[options.feature]) {
     return {
       state,

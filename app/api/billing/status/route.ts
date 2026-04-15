@@ -10,7 +10,13 @@ export async function GET() {
     if (auth.response) return auth.response;
 
     const state = await getEffectiveBillingState(supabase, auth.user!.id);
-    return NextResponse.json(state);
+    return NextResponse.json({
+      ...state,
+      accessState: state.accessState,
+      actionRequired: state.actionRequired,
+      statusLabel: state.statusLabel,
+      canUsePremiumNow: state.canUsePremiumNow,
+    });
   } catch (e: unknown) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to load billing status" },

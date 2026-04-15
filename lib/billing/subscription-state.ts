@@ -26,6 +26,7 @@ type SubscriptionStateClient = {
 };
 
 export type BillingInterval = "monthly" | "annual";
+export type BillingAccessState = "paid" | "grace" | "free";
 
 export type EffectiveBillingState = {
   effectiveTier: TierCode;
@@ -37,9 +38,20 @@ export type EffectiveBillingState = {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   isPaid: boolean;
+  accessState: BillingAccessState;
+  canUsePremiumNow: boolean;
+  actionRequired: "none" | "payment_method" | "new_subscription";
+  statusLabel: string;
 };
 
 const PAID_STATUSES = new Set(["active", "trialing"]);
+const ACTION_REQUIRED_STATUSES = new Set([
+  "past_due",
+  "unpaid",
+  "incomplete",
+  "incomplete_expired",
+]);
+const BLOCKED_STATUSES = new Set(["unpaid", "incomplete", "incomplete_expired"]);
 
 function normalizeTier(value: string | null | undefined): TierCode {
   if (value === "pro" || value === "team" || value === "enterprise") {
@@ -55,6 +67,45 @@ function normalizeInterval(value: string | null | undefined): BillingInterval | 
 
 export function isPaidSubscriptionStatus(status: string | null | undefined): boolean {
   return PAID_STATUSES.has(String(status ?? "").toLowerCase());
+}
+
+function parseIsoDate(value: string | null): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isFutureDate(date: Date | null): boolean {
+  return !!date && date.getTime() > Date.now();
+}
+
+export function isGracePaidStatus(input: {
+  status: string | null | undefined;
+  currentPeriodEnd: string | null;
+}): boolean {
+  const status = String(input.status ?? "").toLowerCase();
+  if (status !== "past_due") return false;
+  return isFutureDate(parseIsoDate(input.currentPeriodEnd));
+}
+
+export function toBillingAccessState(input: {
+  status: string | null | undefined;
+  currentPeriodEnd: string | null;
+}): BillingAccessState {
+  if (isPaidSubscriptionStatus(input.status)) return "paid";
+  if (isGracePaidStatus(input)) return "grace";
+  return "free";
+}
+
+function actionRequiredForStatus(status: string): EffectiveBillingState["actionRequired"] {
+  if (ACTION_REQUIRED_STATUSES.has(status)) return "payment_method";
+  if (status === "none" || status === "canceled") return "new_subscription";
+  return "none";
+}
+
+function toStatusLabel(status: string): string {
+  if (!status || status === "none") return "No subscription";
+  return status.replace(/_/g, " ");
 }
 
 export async function getEffectiveBillingState(
@@ -77,9 +128,16 @@ export async function getEffectiveBillingState(
   }
 
   const status = data?.status ?? "none";
-  const paid = isPaidSubscriptionStatus(status);
+  const accessState = toBillingAccessState({
+    status,
+    currentPeriodEnd: data?.current_period_end ?? null,
+  });
+  const paid = accessState === "paid" || accessState === "grace";
   const paidTier = normalizeTier(data?.tier);
   const effectiveTier: TierCode = paid ? paidTier : "free";
+  const statusLower = String(status).toLowerCase();
+  const actionRequired = actionRequiredForStatus(statusLower);
+  const canUsePremiumNow = paid && !BLOCKED_STATUSES.has(statusLower);
 
   return {
     effectiveTier,
@@ -91,5 +149,9 @@ export async function getEffectiveBillingState(
     stripeCustomerId: data?.stripe_customer_id ?? null,
     stripeSubscriptionId: data?.stripe_subscription_id ?? null,
     isPaid: paid,
+    accessState,
+    canUsePremiumNow,
+    actionRequired,
+    statusLabel: toStatusLabel(status),
   };
 }

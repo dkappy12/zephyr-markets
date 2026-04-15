@@ -500,9 +500,13 @@ function PlanApiPanel() {
   const [billingStatus, setBillingStatus] = useState<{
     effectiveTier: "free" | "pro" | "team" | "enterprise";
     status: string;
+    statusLabel: string;
     interval: "monthly" | "annual" | null;
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
+    accessState: "paid" | "grace" | "free";
+    actionRequired: "none" | "payment_method" | "new_subscription";
+    canUsePremiumNow: boolean;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -523,9 +527,13 @@ function PlanApiPanel() {
         const body = (await res.json()) as {
           effectiveTier: "free" | "pro" | "team" | "enterprise";
           status: string;
+          statusLabel: string;
           interval: "monthly" | "annual" | null;
           currentPeriodEnd: string | null;
           cancelAtPeriodEnd: boolean;
+          accessState: "paid" | "grace" | "free";
+          actionRequired: "none" | "payment_method" | "new_subscription";
+          canUsePremiumNow: boolean;
         };
         if (!cancelled) setBillingStatus(body);
       } catch (err: unknown) {
@@ -546,9 +554,7 @@ function PlanApiPanel() {
 
   const currentTierCode = billingStatus?.effectiveTier ?? "free";
   const currentTier = TIER_ENTITLEMENTS[currentTierCode];
-  const statusLabel = billingStatus?.status
-    ? billingStatus.status.replace(/_/g, " ")
-    : "active";
+  const statusLabel = billingStatus?.statusLabel ?? "active";
   const periodEndLabel =
     billingStatus?.currentPeriodEnd != null
       ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-GB", {
@@ -557,6 +563,19 @@ function PlanApiPanel() {
           year: "numeric",
         })
       : null;
+  const showBillingIssueBanner =
+    billingStatus?.status === "past_due" ||
+    billingStatus?.status === "unpaid" ||
+    billingStatus?.status === "incomplete" ||
+    billingStatus?.status === "incomplete_expired";
+  const billingIssueMessage =
+    billingStatus?.status === "past_due"
+      ? `Payment is overdue. Premium access remains available until ${periodEndLabel ?? "the current period end"}.`
+      : billingStatus?.status === "unpaid" ||
+          billingStatus?.status === "incomplete" ||
+          billingStatus?.status === "incomplete_expired"
+        ? "Payment action is required. Premium features are currently restricted until billing is resolved."
+        : null;
 
   async function startCheckout(tier: "pro" | "team", interval: "monthly" | "annual") {
     setStartingCheckout(`${tier}-${interval}`);
@@ -660,6 +679,11 @@ function PlanApiPanel() {
         {loadingStatus ? (
           <p className="mt-3 text-xs text-ink-light">Loading billing status...</p>
         ) : null}
+        {showBillingIssueBanner && billingIssueMessage ? (
+          <div className="mt-4 rounded-[4px] border-[0.5px] border-bear/30 bg-bear/5 px-3 py-2">
+            <p className="text-xs text-bear">{billingIssueMessage}</p>
+          </div>
+        ) : null}
         {currentTierCode !== "free" ? (
           <button
             type="button"
@@ -668,6 +692,17 @@ function PlanApiPanel() {
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
             {openingPortal ? "Opening portal..." : "Manage in billing portal"}
+          </button>
+        ) : null}
+        {billingStatus?.actionRequired === "payment_method" &&
+        currentTierCode === "free" ? (
+          <button
+            type="button"
+            disabled={openingPortal}
+            onClick={openPortal}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+          >
+            {openingPortal ? "Opening portal..." : "Update payment method"}
           </button>
         ) : null}
       </div>

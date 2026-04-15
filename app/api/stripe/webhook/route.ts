@@ -8,6 +8,14 @@ export const runtime = "nodejs";
 
 type Tier = "pro" | "team";
 type BillingInterval = "monthly" | "annual";
+type LedgerContext = {
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  userId: string | null;
+  status: string | null;
+  tier: Tier | null;
+  interval: BillingInterval | null;
+};
 
 function toBillingInterval(
   interval: Stripe.Price.Recurring.Interval | null | undefined,
@@ -123,6 +131,94 @@ async function resolveUserIdFromCustomer(
   return data?.user_id ?? null;
 }
 
+function deriveLedgerContext(event: Stripe.Event): LedgerContext {
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const stripeSubscriptionId =
+      typeof session.subscription === "string"
+        ? session.subscription
+        : session.subscription?.id ?? null;
+    const stripeCustomerId =
+      typeof session.customer === "string" ? session.customer : null;
+    return {
+      stripeCustomerId,
+      stripeSubscriptionId,
+      userId: session.metadata?.user_id ?? session.client_reference_id ?? null,
+      status: null,
+      tier: coerceTier(session.metadata?.tier),
+      interval: coerceInterval(session.metadata?.interval),
+    };
+  }
+
+  if (
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const sub = event.data.object as Stripe.Subscription;
+    const stripeCustomerId =
+      typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+    const firstPrice = sub.items.data[0]?.price;
+    return {
+      stripeCustomerId,
+      stripeSubscriptionId: sub.id,
+      userId: sub.metadata?.user_id ?? null,
+      status: sub.status,
+      tier: coerceTier(sub.metadata?.tier) ?? tierFromPriceId(firstPrice?.id),
+      interval:
+        coerceInterval(sub.metadata?.interval) ??
+        toBillingInterval(firstPrice?.recurring?.interval),
+    };
+  }
+
+  return {
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    userId: null,
+    status: null,
+    tier: null,
+    interval: null,
+  };
+}
+
+async function persistWebhookEvent(
+  event: Stripe.Event,
+  context: LedgerContext,
+): Promise<{ shouldProcess: boolean }> {
+  const admin = getAdminSupabase();
+  const { data: existing, error: selectError } = await admin
+    .from("subscription_events")
+    .select("id")
+    .eq("stripe_event_id", event.id)
+    .limit(1)
+    .maybeSingle();
+  if (selectError) throw new Error(selectError.message);
+  if (existing) return { shouldProcess: false };
+
+  const { error: insertError } = await admin.from("subscription_events").insert({
+    stripe_event_id: event.id,
+    event_type: event.type,
+    stripe_customer_id: context.stripeCustomerId,
+    stripe_subscription_id: context.stripeSubscriptionId,
+    user_id: context.userId,
+    status: context.status,
+    tier: context.tier,
+    interval: context.interval,
+    payload_json: event,
+    processed_at: new Date().toISOString(),
+  });
+  if (insertError) {
+    const message = insertError.message ?? "";
+    if (
+      message.toLowerCase().includes("duplicate key") ||
+      message.includes("stripe_event_id")
+    ) {
+      return { shouldProcess: false };
+    }
+    throw new Error(message || "Failed to persist webhook event");
+  }
+  return { shouldProcess: true };
+}
+
 export async function POST(req: Request) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
@@ -160,8 +256,27 @@ export async function POST(req: Request) {
       eventType: event.type,
     },
   });
+  const ledgerContext = deriveLedgerContext(event);
 
   try {
+    const persisted = await persistWebhookEvent(event, ledgerContext);
+    if (!persisted.shouldProcess) {
+      logEvent({
+        scope: "billing_webhook",
+        event: "stripe_event_duplicate_skipped",
+        data: {
+          eventId: event.id,
+          eventType: event.type,
+        },
+      });
+      return NextResponse.json({
+        received: true,
+        eventType: event.type,
+        eventId: event.id,
+        duplicate: true,
+      });
+    }
+
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -274,6 +389,15 @@ export async function POST(req: Request) {
       }
 
       default:
+        logEvent({
+          scope: "billing_webhook",
+          event: "stripe_event_processed",
+          data: {
+            eventId: event.id,
+            eventType: event.type,
+            handled: false,
+          },
+        });
         break;
     }
   } catch (e: unknown) {
@@ -297,5 +421,6 @@ export async function POST(req: Request) {
     received: true,
     eventType: event.type,
     eventId: event.id,
+    duplicate: false,
   });
 }
