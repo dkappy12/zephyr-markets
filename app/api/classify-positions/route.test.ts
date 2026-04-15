@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   mockCreateClient,
   mockRequireUser,
+  mockRequireEntitlement,
   mockAssertSameOrigin,
   mockCheckRateLimit,
   mockLogAuthAuditEvent,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
+  mockRequireEntitlement: vi.fn(),
   mockAssertSameOrigin: vi.fn(),
   mockCheckRateLimit: vi.fn(),
   mockLogAuthAuditEvent: vi.fn(),
@@ -19,6 +21,9 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("@/lib/auth/require-user", () => ({
   requireUser: mockRequireUser,
+}));
+vi.mock("@/lib/auth/require-entitlement", () => ({
+  requireEntitlement: mockRequireEntitlement,
 }));
 vi.mock("@/lib/auth/request-security", () => ({
   assertSameOrigin: mockAssertSameOrigin,
@@ -38,6 +43,7 @@ describe("POST /api/classify-positions", () => {
     mockAssertSameOrigin.mockReturnValue(null);
     mockCreateClient.mockResolvedValue({});
     mockRequireUser.mockResolvedValue({ response: null, user: { id: "u1" } });
+    mockRequireEntitlement.mockResolvedValue({ response: null, state: null });
     mockCheckRateLimit.mockResolvedValue({ allowed: true, retryAfterSec: 0 });
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
   });
