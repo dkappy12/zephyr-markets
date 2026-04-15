@@ -3,7 +3,13 @@ import { NextResponse } from "next/server";
 type SupabaseAuthClient = {
   auth: {
     getUser: () => Promise<{
-      data: { user: { id: string; email_confirmed_at?: string | null } | null };
+      data: {
+        user: {
+          id: string;
+          email?: string | null;
+          email_confirmed_at?: string | null;
+        } | null;
+      };
       error: { message?: string } | null;
     }>;
   };
