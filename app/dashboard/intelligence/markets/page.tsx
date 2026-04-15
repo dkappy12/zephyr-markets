@@ -321,6 +321,35 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
+  const [marketsScope, setMarketsScope] = useState<
+    "gb_nbp_only" | "five_markets" | "all_markets"
+  >("gb_nbp_only");
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) return "gb_nbp_only" as const;
+        const body = (await res.json()) as {
+          entitlements?: {
+            markets?: "gb_nbp_only" | "five_markets" | "all_markets";
+          };
+        };
+        return body.entitlements?.markets ?? "gb_nbp_only";
+      })
+      .then((scope) => {
+        if (!active) return;
+        setMarketsScope(scope);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMarketsScope("gb_nbp_only");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     const supabase = createBrowserClient();
     const today = utcTodayStr();
@@ -375,35 +404,43 @@ export default function MarketsPage() {
             .or("market.eq.N2EX,market.eq.APX")
             .eq("price_date", today)
             .order("settlement_period", { ascending: true }),
-          supabase
-            .from("gas_prices")
-            .select("price_eur_mwh, price_time, fetched_at")
-            .eq("hub", "TTF")
-            .order("price_time", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-          supabase
-            .from("gas_prices")
-            .select("price_eur_mwh, price_time, fetched_at")
-            .eq("hub", "TTF")
-            .gte("price_time", `${sevenAgo}T00:00:00.000Z`)
-            .order("price_time", { ascending: true }),
-          supabase
-            .from("storage_levels")
-            .select(
-              "location, full_pct, working_volume_twh, injection_twh, report_date",
-            )
-            .in("location", [...LOC_ORDER])
-            .order("report_date", { ascending: false })
-            .limit(80),
-          supabase
-            .from("storage_levels")
-            .select(
-              "location, full_pct, injection_twh, report_date",
-            )
-            .in("location", [...LOC_ORDER])
-            .order("report_date", { ascending: false })
-            .limit(120),
+          marketsScope === "gb_nbp_only"
+            ? Promise.resolve({ data: null, error: null })
+            : supabase
+                .from("gas_prices")
+                .select("price_eur_mwh, price_time, fetched_at")
+                .eq("hub", "TTF")
+                .order("price_time", { ascending: false })
+                .limit(1)
+                .maybeSingle(),
+          marketsScope === "gb_nbp_only"
+            ? Promise.resolve({ data: [], error: null })
+            : supabase
+                .from("gas_prices")
+                .select("price_eur_mwh, price_time, fetched_at")
+                .eq("hub", "TTF")
+                .gte("price_time", `${sevenAgo}T00:00:00.000Z`)
+                .order("price_time", { ascending: true }),
+          marketsScope === "gb_nbp_only"
+            ? Promise.resolve({ data: [], error: null })
+            : supabase
+                .from("storage_levels")
+                .select(
+                  "location, full_pct, working_volume_twh, injection_twh, report_date",
+                )
+                .in("location", [...LOC_ORDER])
+                .order("report_date", { ascending: false })
+                .limit(80),
+          marketsScope === "gb_nbp_only"
+            ? Promise.resolve({ data: [], error: null })
+            : supabase
+                .from("storage_levels")
+                .select(
+                  "location, full_pct, injection_twh, report_date",
+                )
+                .in("location", [...LOC_ORDER])
+                .order("report_date", { ascending: false })
+                .limit(120),
           supabase
             .from("market_prices")
             .select(mpSel)
@@ -640,9 +677,14 @@ export default function MarketsPage() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  }, [marketsScope]);
 
   useEffect(() => {
+    if (marketsScope === "gb_nbp_only") {
+      setIcFlows(null);
+      setIcFlowsError(null);
+      return;
+    }
     let cancelled = false;
     fetch("/api/bmrs/interconnector-flows")
       .then((r) => r.json())
@@ -677,7 +719,7 @@ export default function MarketsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [marketsScope]);
 
   const ttfEurRaw = gasRow?.price_eur_mwh ?? null;
   const ttfUnavailable = ttfEurRaw == null || ttfEurRaw <= 0;
@@ -993,6 +1035,12 @@ export default function MarketsPage() {
           Live physical intelligence for GB power, European gas, and cross-border
           flows.
         </p>
+        {marketsScope === "gb_nbp_only" ? (
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-ink-light">
+            Your current plan shows GB power and NBP-context coverage. Upgrade to
+            unlock full European gas, storage, and interconnector views.
+          </p>
+        ) : null}
       </div>
 
       {loadError ? (
@@ -1333,6 +1381,7 @@ export default function MarketsPage() {
         </motion.div>
 
         {/* TTF stack */}
+        {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1392,8 +1441,10 @@ export default function MarketsPage() {
             {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
           </p>
         </motion.div>
+        ) : null}
 
         {/* Spark */}
+        {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1519,8 +1570,10 @@ export default function MarketsPage() {
             {sparkUpdated != null ? `Updated ${sparkUpdated}` : "Data unavailable"}
           </p>
         </motion.div>
+        ) : null}
 
         {/* EU Storage */}
+        {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1637,6 +1690,7 @@ export default function MarketsPage() {
             </div>
           </div>
         </motion.div>
+        ) : null}
       </div>
 
       {/* Live tape */}
@@ -1713,6 +1767,7 @@ export default function MarketsPage() {
       </motion.section>
 
       {/* Interconnector flows (BMRS FUELINST) */}
+      {marketsScope !== "gb_nbp_only" ? (
       <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1794,6 +1849,7 @@ export default function MarketsPage() {
           )}
         </div>
       </motion.section>
+      ) : null}
     </div>
   );
 }

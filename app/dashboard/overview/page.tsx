@@ -99,10 +99,53 @@ export default function OverviewPage() {
   const [ttfTapeFootnote, setTtfTapeFootnote] = useState<string | null>(null);
   const [solarGw, setSolarGw] = useState<number | null>(null);
   const [solarDatetimeGmt, setSolarDatetimeGmt] = useState<string | null>(null);
+  const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
+  const [marketsScope, setMarketsScope] = useState<
+    "gb_nbp_only" | "five_markets" | "all_markets"
+  >("gb_nbp_only");
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) {
+          return {
+            delay: 0,
+            scope: "gb_nbp_only" as const,
+          };
+        }
+        const body = (await res.json()) as {
+          entitlements?: {
+            signalDelayMinutes?: number;
+            markets?: "gb_nbp_only" | "five_markets" | "all_markets";
+          };
+        };
+        return {
+          delay: Number(body.entitlements?.signalDelayMinutes ?? 0),
+          scope: body.entitlements?.markets ?? "gb_nbp_only",
+        };
+      })
+      .then(({ delay, scope }) => {
+        if (!active) return;
+        setSignalDelayMinutes(Number.isFinite(delay) ? Math.max(0, delay) : 0);
+        setMarketsScope(scope);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSignalDelayMinutes(0);
+        setMarketsScope("gb_nbp_only");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const supabase = createBrowserClient();
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const delayedCutoffIso = new Date(
+      Date.now() - signalDelayMinutes * 60_000,
+    ).toISOString();
     const nowIso = new Date().toISOString();
 
     async function load() {
@@ -121,13 +164,15 @@ export default function OverviewPage() {
           .select(
             "id, type, title, description, direction, source, confidence, created_at, raw_data",
           )
+          .lte("created_at", delayedCutoffIso)
           .order("created_at", { ascending: false })
           .limit(32),
         supabase
           .from("signals")
           .select("*", { count: "exact", head: true })
           .eq("type", "remit")
-          .gte("created_at", since),
+          .gte("created_at", since)
+          .lte("created_at", delayedCutoffIso),
         supabase
           .from("weather_forecasts")
           .select("wind_speed_100m, forecast_time")
@@ -152,13 +197,15 @@ export default function OverviewPage() {
           .order("settlement_period", { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase
-          .from("gas_prices")
-          .select("price_eur_mwh, price_time")
-          .eq("hub", "TTF")
-          .order("price_time", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        marketsScope === "gb_nbp_only"
+          ? Promise.resolve({ data: null, error: null })
+          : supabase
+              .from("gas_prices")
+              .select("price_eur_mwh, price_time")
+              .eq("hub", "TTF")
+              .order("price_time", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
         supabase
           .from("solar_outturn")
           .select("solar_mw, datetime_gmt")
@@ -313,7 +360,7 @@ export default function OverviewPage() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  }, [signalDelayMinutes, marketsScope]);
 
   useEffect(() => {
     relTimeRef.current = setInterval(() => {
@@ -433,13 +480,15 @@ export default function OverviewPage() {
           }
           footnote="REMIT-type signals in rolling 24h window"
         />
-        <MetricCard
-          label="TTF (GAS CONTEXT)"
-          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
-          unit="/MWh"
-          footnote={ttfTapeFootnote ?? "—"}
-          hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
-        />
+        {marketsScope !== "gb_nbp_only" ? (
+          <MetricCard
+            label="TTF (GAS CONTEXT)"
+            value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
+            unit="/MWh"
+            footnote={ttfTapeFootnote ?? "—"}
+            hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
+          />
+        ) : null}
         <MetricCard
           label="GB SOLAR (OUTTURN)"
           value={solarGw === null ? "—" : solarGw.toFixed(2)}

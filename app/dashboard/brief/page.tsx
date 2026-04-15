@@ -343,6 +343,30 @@ export default function BriefPage() {
   const [bookTouchpointText, setBookTouchpointText] = useState<string | null>(null);
   const [bookTouchpointLoading, setBookTouchpointLoading] = useState(false);
   const [bookTouchpointError, setBookTouchpointError] = useState<string | null>(null);
+  const [briefDelayMinutes, setBriefDelayMinutes] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) return 0;
+        const body = (await res.json()) as {
+          entitlements?: { signalDelayMinutes?: number };
+        };
+        return Number(body.entitlements?.signalDelayMinutes ?? 0);
+      })
+      .then((delay) => {
+        if (!active) return;
+        setBriefDelayMinutes(Number.isFinite(delay) ? Math.max(0, delay) : 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setBriefDelayMinutes(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -362,13 +386,19 @@ export default function BriefPage() {
         setLoading(false);
       }
 
+      const briefCutoffIso =
+        briefDelayMinutes > 0
+          ? new Date(Date.now() - briefDelayMinutes * 60_000).toISOString()
+          : null;
+      const briefQuery = supabase
+        .from("brief_entries")
+        .select("*")
+        .order("generated_at", { ascending: false })
+        .limit(1);
       const [briefRes, posRes, ppRes] = await Promise.all([
-        supabase
-          .from("brief_entries")
-          .select("*")
-          .order("generated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+        briefCutoffIso
+          ? briefQuery.lte("generated_at", briefCutoffIso).maybeSingle()
+          : briefQuery.maybeSingle(),
         user
           ? supabase
               .from("positions")
@@ -543,7 +573,7 @@ export default function BriefPage() {
     }
 
     load();
-  }, []);
+  }, [briefDelayMinutes]);
 
   const articles: BriefArticle[] = Array.isArray(row?.articles)
     ? row!.articles!

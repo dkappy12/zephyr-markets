@@ -257,6 +257,30 @@ export default function SignalFeedPage() {
   const [visibleCount, setVisibleCount] = useState(10);
   const [showCleared, setShowCleared] = useState(false);
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) return 0;
+        const body = (await res.json()) as {
+          entitlements?: { signalDelayMinutes?: number };
+        };
+        return Number(body.entitlements?.signalDelayMinutes ?? 0);
+      })
+      .then((delay) => {
+        if (!active) return;
+        setSignalDelayMinutes(Number.isFinite(delay) ? Math.max(0, delay) : 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSignalDelayMinutes(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const loadSignals = useCallback(async () => {
     const supabase = createBrowserClient();
@@ -270,6 +294,10 @@ export default function SignalFeedPage() {
       )
       .eq("type", "remit")
       .gte("created_at", since)
+      .lte(
+        "created_at",
+        new Date(Date.now() - signalDelayMinutes * 60_000).toISOString(),
+      )
       .order("created_at", { ascending: false })
       .limit(5000);
 
@@ -280,7 +308,7 @@ export default function SignalFeedPage() {
     }
     setError(null);
     setRows((data ?? []) as SignalRow[]);
-  }, []);
+  }, [signalDelayMinutes]);
 
   useEffect(() => {
     let cancelled = false;
