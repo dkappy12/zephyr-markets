@@ -556,6 +556,7 @@ type TeamMemberRow = {
   role: string;
   status: string;
   created_at: string;
+  display_name?: string;
 };
 
 type InvitationRow = {
@@ -893,8 +894,8 @@ function TeamPanel() {
               <ul className="mt-4 divide-y-[0.5px] divide-ivory-border">
                 {data.members.map((m) => (
                   <li key={m.id} className="py-3 text-sm text-ink">
-                    <span className="font-mono text-[11px] text-ink-mid">
-                      {m.user_id.slice(0, 8)}…
+                    <span className="text-ink">
+                      {m.display_name ?? `${m.user_id.slice(0, 8)}…`}
                     </span>
                     <span className="ml-2 text-ink-light">
                       {m.role} · {m.status}

@@ -45,13 +45,42 @@ export async function GET() {
     if (membersRes.error) throw new Error(membersRes.error.message);
     if (invitationsRes.error) throw new Error(invitationsRes.error.message);
 
+    const rawMembers = membersRes.data ?? [];
+    const userIds = [...new Set(rawMembers.map((m) => m.user_id))];
+    const displayByUserId = new Map<string, string>();
+
+    await Promise.all(
+      userIds.map(async (uid) => {
+        try {
+          const { data, error } = await admin.auth.admin.getUserById(uid);
+          if (error || !data.user) {
+            displayByUserId.set(uid, `${uid.slice(0, 8)}…`);
+            return;
+          }
+          const full = String(data.user.user_metadata?.full_name ?? "").trim();
+          const email = data.user.email?.trim() ?? "";
+          displayByUserId.set(
+            uid,
+            full || email || `${uid.slice(0, 8)}…`,
+          );
+        } catch {
+          displayByUserId.set(uid, `${uid.slice(0, 8)}…`);
+        }
+      }),
+    );
+
+    const members = rawMembers.map((m) => ({
+      ...m,
+      display_name: displayByUserId.get(m.user_id) ?? `${m.user_id.slice(0, 8)}…`,
+    }));
+
     const seats = billingState.entitlements.seats;
     return NextResponse.json({
       team,
-      members: membersRes.data ?? [],
+      members,
       invitations: invitationsRes.data ?? [],
       seatLimit: seats,
-      usedSeats: (membersRes.data ?? []).length + (invitationsRes.data ?? []).length,
+      usedSeats: members.length + (invitationsRes.data ?? []).length,
     });
   } catch (e: unknown) {
     return NextResponse.json(
