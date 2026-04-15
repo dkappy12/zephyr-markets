@@ -2,6 +2,7 @@
 
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { initialsFromUser } from "@/lib/team/user-initials";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +12,6 @@ const primary = [
   { href: "/dashboard/intelligence/signals", label: "Intelligence" },
   { href: "/dashboard/portfolio/book", label: "Portfolio" },
   { href: "/dashboard/brief", label: "Brief" },
-  { href: "/dashboard/settings", label: "Settings" },
 ] as const;
 
 const intelligenceSecondary = [
@@ -52,6 +52,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createBrowserClient(), []);
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [avatarInitials, setAvatarInitials] = useState("U");
   const [effectiveTier, setEffectiveTier] = useState<
     "free" | "pro" | "team" | "enterprise" | null
   >(null);
@@ -66,6 +67,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
     void supabase.auth.getUser().then(({ data }) => {
       if (!active) return;
       setUserEmail(data.user?.email ?? null);
+      setAvatarInitials(initialsFromUser(data.user ?? null));
     });
     return () => {
       active = false;
@@ -145,10 +147,10 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              className="flex size-9 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-card font-serif text-sm text-ink"
+              className="flex size-9 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-card font-serif text-xs font-semibold tracking-tight text-ink"
               aria-label="Account menu"
             >
-              {(userEmail?.[0] ?? "U").toUpperCase()}
+              {avatarInitials}
             </button>
             {menuOpen ? (
               <div className="absolute right-0 top-11 z-20 w-64 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-2">

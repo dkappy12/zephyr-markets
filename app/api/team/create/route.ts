@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 
 export async function POST(req: Request) {
   try {
@@ -17,7 +18,8 @@ export async function POST(req: Request) {
     if (entitlement.response) return entitlement.response;
 
     const body = (await req.json().catch(() => ({}))) as { name?: string };
-    const name = String(body.name ?? "").trim() || "Team";
+    const trimmed = String(body.name ?? "").trim();
+    const name = trimmed || defaultTeamNameFromUser(user);
     const admin = createAdminClient();
 
     const { data: existing, error: existingError } = await admin

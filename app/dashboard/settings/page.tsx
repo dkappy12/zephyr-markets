@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
+import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -570,7 +571,10 @@ function TeamPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [suggestedTeamName, setSuggestedTeamName] = useState("");
   const [teamName, setTeamName] = useState("");
+  const [nameEdit, setNameEdit] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [creating, setCreating] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
@@ -617,6 +621,49 @@ function TeamPanel() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const sb = createClient();
+    void sb.auth.getUser().then(({ data }) => {
+      if (cancelled || !data.user) return;
+      const suggested = defaultTeamNameFromUser(data.user);
+      setSuggestedTeamName(suggested);
+      setTeamName((prev) => (prev === "" ? suggested : prev));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (data?.team?.name) setNameEdit(data.team.name);
+  }, [data?.team?.name]);
+
+  async function saveTeamName() {
+    if (!data?.team) return;
+    const next = nameEdit.trim();
+    if (!next || next === data.team.name) return;
+    setSavingName(true);
+    setError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch("/api/team/name", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: next }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not update team name");
+      }
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not update team name");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   async function createTeam() {
     setCreating(true);
     setError(null);
@@ -625,7 +672,7 @@ function TeamPanel() {
       const res = await fetch("/api/team/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: teamName.trim() || "Team" }),
+        body: JSON.stringify({ name: teamName.trim() }),
       });
       const body = (await res.json()) as { error?: string };
       if (!res.ok) {
@@ -719,7 +766,9 @@ function TeamPanel() {
                 type="text"
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
-                placeholder="Team name"
+                placeholder={
+                  suggestedTeamName || "e.g. Dean's team"
+                }
                 className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
               />
             </label>
@@ -737,9 +786,34 @@ function TeamPanel() {
         <>
           <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              {data.team.name}
+              Team name
             </p>
-            <p className="mt-1 font-mono text-[11px] text-ink-light">
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="block min-w-[200px] flex-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-light">
+                  Name
+                </span>
+                <input
+                  type="text"
+                  value={nameEdit}
+                  onChange={(e) => setNameEdit(e.target.value)}
+                  className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={
+                  savingName ||
+                  !nameEdit.trim() ||
+                  nameEdit.trim() === data.team.name
+                }
+                onClick={() => void saveTeamName()}
+                className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+              >
+                {savingName ? "Saving…" : "Save name"}
+              </button>
+            </div>
+            <p className="mt-3 font-mono text-[11px] text-ink-light">
               Seats: {String(usedSeats)} / {String(seatLimit)}
             </p>
           </div>
@@ -1010,10 +1084,6 @@ function PlanApiPanel() {
         <div className="mt-4 flex items-start justify-between">
           <div>
             <p className="font-serif text-2xl text-ink">{currentTier.label}</p>
-            <p className="mt-1 text-sm text-ink-mid">
-              Physical premium score · Morning brief ({currentTier.morningBriefTimeGmt} GMT)
-              · Signal feed
-            </p>
             {billingStatus?.interval ? (
               <p className="mt-1 text-xs text-ink-light">
                 Billing interval:{" "}
