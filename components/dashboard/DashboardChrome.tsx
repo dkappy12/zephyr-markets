@@ -41,14 +41,25 @@ function sectionActive(
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
+export function tierBadgeLabel(
+  tier: "free" | "pro" | "team" | "enterprise" | null,
+): "pro" | "team" | null {
+  if (tier === "pro" || tier === "team") return tier;
+  return null;
+}
+
 export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createBrowserClient(), []);
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [effectiveTier, setEffectiveTier] = useState<
+    "free" | "pro" | "team" | "enterprise" | null
+  >(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const showIntel = sectionActive(pathname, "/dashboard/intelligence");
   const showPortfolio = sectionActive(pathname, "/dashboard/portfolio");
+  const badge = tierBadgeLabel(effectiveTier);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +71,29 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const body = (await res.json()) as {
+          effectiveTier?: "free" | "pro" | "team" | "enterprise";
+        };
+        return body.effectiveTier ?? null;
+      })
+      .then((tier) => {
+        if (!active) return;
+        setEffectiveTier(tier);
+      })
+      .catch(() => {
+        if (!active) return;
+        setEffectiveTier(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -74,11 +108,17 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
           <TopoBackground className="h-full w-full" lineOpacity={0.25} />
         </div>
         <div className="relative z-10 mx-auto flex h-14 max-w-[1536px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <Link
-            href="/dashboard/overview"
-            className="shrink-0 font-serif text-xl tracking-tight text-ink"
-          >
-            Zephyr
+          <Link href="/dashboard/overview" className="shrink-0">
+            <span className="flex items-baseline gap-2">
+              <span className="font-serif text-xl tracking-tight text-ink">Zephyr</span>
+              <span className="inline-flex min-w-8">
+                {badge ? (
+                  <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                    {badge}
+                  </span>
+                ) : null}
+              </span>
+            </span>
           </Link>
           <nav
             className="-mx-1 flex flex-1 items-center justify-start gap-0.5 overflow-x-auto px-1 md:justify-center"

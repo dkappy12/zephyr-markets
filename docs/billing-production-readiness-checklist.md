@@ -49,3 +49,36 @@ Use this before enabling paid billing for broader traffic.
 - [ ] Team has rollback owner for billing deployment.
 - [ ] Support can temporarily route users to billing portal for manual recovery.
 - [ ] Incident response path is shared with on-call.
+
+## Feature Comparison Parity
+
+- [ ] `Price` parity
+  - enforced by Stripe price ids in `app/api/billing/checkout/route.ts`.
+- [ ] `Seats` parity
+  - enforced by team invite/accept seat checks in:
+    - `app/api/team/invite/route.ts`
+    - `app/api/team/accept/route.ts`
+- [ ] `Portfolio positions` parity
+  - free blocked + max position limits enforced in:
+    - `app/api/portfolio/positions/route.ts`
+    - `lib/auth/require-entitlement.ts`
+    - `lib/billing/subscription-state.ts`
+- [ ] `API access` parity
+  - team-only gate enforced in:
+    - `app/api/v1/premium/route.ts`
+    - `lib/auth/require-entitlement.ts`
+- [ ] `Markets covered` parity
+  - entitlement scope surfaced in:
+    - `app/api/markets/coverage/route.ts`
+- [ ] `Signal history` parity
+  - tier history windows enforced in:
+    - `app/api/signals/history/route.ts`
+- [ ] `Data export` parity
+  - team-only export gate enforced in:
+    - `app/api/portfolio/export/route.ts`
+- [ ] `Team management` parity
+  - team create/invite/list/accept implemented in:
+    - `app/api/team/create/route.ts`
+    - `app/api/team/invite/route.ts`
+    - `app/api/team/members/route.ts`
+    - `app/api/team/accept/route.ts`
