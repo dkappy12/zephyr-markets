@@ -58,6 +58,25 @@ describe("billing subscription state policy", () => {
     expect(state.actionRequired).toBe("payment_method");
   });
 
+  it("treats past_due with no period end as not in grace", async () => {
+    const state = await getEffectiveBillingState(
+      makeSupabaseClient({
+        user_id: "u1",
+        stripe_customer_id: "cus_1",
+        stripe_subscription_id: "sub_1",
+        tier: "pro",
+        interval: "monthly",
+        status: "past_due",
+        current_period_end: null,
+        cancel_at_period_end: false,
+      }),
+      "u1",
+    );
+    expect(state.accessState).toBe("free");
+    expect(state.effectiveTier).toBe("free");
+    expect(state.canUsePremiumNow).toBe(false);
+  });
+
   it("downgrades past_due after period end", async () => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const state = await getEffectiveBillingState(
@@ -114,6 +133,9 @@ describe("billing subscription state policy", () => {
   it("exposes pure status helpers", () => {
     const future = new Date(Date.now() + 1000).toISOString();
     const past = new Date(Date.now() - 1000).toISOString();
+    expect(isGracePaidStatus({ status: "past_due", currentPeriodEnd: null })).toBe(
+      false,
+    );
     expect(isGracePaidStatus({ status: "past_due", currentPeriodEnd: future })).toBe(
       true,
     );

@@ -122,4 +122,141 @@ describe("POST /api/stripe/webhook", () => {
     expect(admin.insertEvent).not.toHaveBeenCalled();
     expect(admin.upsertSubscription).not.toHaveBeenCalled();
   });
+
+  it("processes checkout.session.completed when event is new", async () => {
+    const admin = makeAdminClient({ existingEventId: null });
+    mockCreateAdminClient.mockReturnValue(admin.client);
+
+    mockGetStripe.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_new",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              subscription: "sub_new",
+              customer: "cus_new",
+              metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+              client_reference_id: "u1",
+            },
+          },
+        })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => ({
+          status: "active",
+          metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+          items: {
+            data: [
+              { price: { id: "price_pro_m", recurring: { interval: "month" } } },
+            ],
+          },
+          current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          cancel_at_period_end: false,
+        })),
+      },
+    });
+
+    const req = new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "sig" },
+      body: JSON.stringify({}),
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.duplicate).toBe(false);
+    expect(body.eventId).toBe("evt_new");
+    expect(admin.insertEvent).toHaveBeenCalled();
+    expect(admin.upsertSubscription).toHaveBeenCalled();
+  });
+
+  it("returns 500 and logs failure when subscription upsert would fail", async () => {
+    const insertEvent = vi.fn(async () => ({ error: null }));
+    const upsertSubscription = vi.fn(async () => ({
+      error: { message: "upsert failed" },
+    }));
+
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "subscription_events") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                })),
+              })),
+            })),
+            insert: insertEvent,
+          };
+        }
+        if (table === "subscriptions") {
+          return {
+            upsert: upsertSubscription,
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({
+                    data: { user_id: "u1" },
+                    error: null,
+                  })),
+                })),
+              })),
+            })),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      }),
+    };
+
+    mockCreateAdminClient.mockReturnValue(client);
+
+    mockGetStripe.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_fail",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              subscription: "sub_fail",
+              customer: "cus_fail",
+              metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+              client_reference_id: "u1",
+            },
+          },
+        })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => ({
+          status: "active",
+          metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+          items: {
+            data: [
+              { price: { id: "price_pro_m", recurring: { interval: "month" } } },
+            ],
+          },
+          current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          cancel_at_period_end: false,
+        })),
+      },
+    });
+
+    const req = new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "sig" },
+      body: JSON.stringify({}),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(500);
+    expect(mockLogEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "stripe_event_failed",
+        scope: "billing_webhook",
+      }),
+    );
+  });
 });

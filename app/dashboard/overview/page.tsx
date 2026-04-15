@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
@@ -64,7 +65,29 @@ function formatDbAge(
   });
 }
 
-export default function OverviewPage() {
+function OverviewPageInner() {
+  const searchParams = useSearchParams();
+  const [billingBannerDismissed, setBillingBannerDismissed] = useState(false);
+  const billingParam = searchParams.get("billing");
+  const billingBanner =
+    !billingBannerDismissed &&
+    (billingParam === "success" ||
+      billingParam === "cancelled" ||
+      billingParam === "portal_return")
+      ? billingParam
+      : null;
+
+  function dismissBillingBanner() {
+    setBillingBannerDismissed(true);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("billing");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    } catch {
+      // ignore
+    }
+  }
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const relTimeRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [preview, setPreview] = useState<CardWithId[]>([]);
@@ -396,8 +419,36 @@ export default function OverviewPage() {
     return `Model run ${formatDbAge(premiumCalculatedAtIso, relativeNowMs)}`;
   }, [premiumCalculatedAtIso, relativeNowMs]);
 
+  const billingBannerCopy =
+    billingBanner === "success"
+      ? "Subscription updated. Your plan should reflect here within a few moments."
+      : billingBanner === "cancelled"
+        ? "Checkout was cancelled. No changes were made to your plan."
+        : billingBanner === "portal_return"
+          ? "You’re back from the billing portal. Changes may take a moment to sync."
+          : null;
+
   return (
     <div className="space-y-10">
+      {billingBanner != null && billingBannerCopy ? (
+        <div
+          role="status"
+          className={`flex flex-wrap items-start justify-between gap-3 rounded-[4px] border-[0.5px] px-4 py-3 text-sm ${
+            billingBanner === "cancelled"
+              ? "border-ivory-border bg-ivory text-ink-mid"
+              : "border-gold/45 bg-gold/10 text-ink"
+          }`}
+        >
+          <p className="min-w-0 flex-1 leading-relaxed">{billingBannerCopy}</p>
+          <button
+            type="button"
+            onClick={dismissBillingBanner}
+            className="shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       <div>
         <motion.h1
           initial={{ opacity: 0, y: 8 }}
@@ -687,5 +738,13 @@ export default function OverviewPage() {
         </Link>
       </motion.div>
     </div>
+  );
+}
+
+export default function OverviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <OverviewPageInner />
+    </Suspense>
   );
 }

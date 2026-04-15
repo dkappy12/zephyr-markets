@@ -57,13 +57,15 @@ export async function POST(req: Request) {
     const user = auth.user!;
 
     const stripe = getStripe();
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const rawBase =
+      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = rawBase.replace(/\/+$/, "");
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${baseUrl}/dashboard/settings?billing=success`,
-      cancel_url: `${baseUrl}/dashboard/settings?billing=cancelled`,
+      success_url: `${baseUrl}/dashboard/overview?billing=success`,
+      cancel_url: `${baseUrl}/dashboard/overview?billing=cancelled`,
       customer_email: user.email ?? undefined,
       client_reference_id: user.id,
       metadata: {

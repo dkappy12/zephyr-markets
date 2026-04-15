@@ -3,13 +3,52 @@
 import { createClient } from "@/lib/supabase/client";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 
-const tabs = ["Profile", "Markets & Alerts", "Plan & API"] as const;
+const baseTabs = ["Profile", "Markets & Alerts", "Plan & API"] as const;
+const teamTab = "Team" as const;
 
-export default function SettingsPage() {
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Profile");
+function SettingsPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<string>("Profile");
+  const [showTeamTab, setShowTeamTab] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/billing/status")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const body = (await res.json()) as { effectiveTier?: string };
+        const t = body.effectiveTier;
+        if (!cancelled && (t === "team" || t === "enterprise")) {
+          setShowTeamTab(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const urlWantsTeam =
+    showTeamTab && searchParams.get("tab")?.toLowerCase() === "team";
+  const activeTab = urlWantsTeam ? "Team" : tab;
+
+  function selectTab(next: string) {
+    setTab(next);
+    if (searchParams.has("tab")) {
+      const sp = new URLSearchParams(searchParams.toString());
+      sp.delete("tab");
+      const q = sp.toString();
+      router.replace(q ? `/dashboard/settings?${q}` : "/dashboard/settings");
+    }
+  }
+
+  const visibleTabs = showTeamTab
+    ? ([...baseTabs, teamTab] as const)
+    : baseTabs;
 
   return (
     <div className="space-y-8">
@@ -31,13 +70,13 @@ export default function SettingsPage() {
           className="-mb-[0.5px] flex flex-wrap gap-1"
           aria-label="Settings tabs"
         >
-          {tabs.map((t) => {
-            const on = tab === t;
+          {visibleTabs.map((t) => {
+            const on = activeTab === t;
             return (
               <button
                 key={t}
                 type="button"
-                onClick={() => setTab(t)}
+                onClick={() => selectTab(t)}
                 className={`rounded-t-[4px] border-[0.5px] border-b-0 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors duration-200 ${
                   on
                     ? "border-ivory-border bg-card text-ink"
@@ -52,15 +91,31 @@ export default function SettingsPage() {
       </div>
 
       <AnimatePresence mode="wait">
-        {tab === "Profile" ? (
+        {activeTab === "Profile" ? (
           <ProfilePanel key="profile" />
-        ) : tab === "Markets & Alerts" ? (
+        ) : activeTab === "Markets & Alerts" ? (
           <MarketsAlertsPanel key="markets" />
-        ) : tab === "Plan & API" ? (
+        ) : activeTab === "Plan & API" ? (
           <PlanApiPanel key="plan" />
+        ) : activeTab === "Team" ? (
+          <TeamPanel key="team" />
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-8 py-12 text-center text-sm text-ink-mid">
+          Loading settings…
+        </div>
+      }
+    >
+      <SettingsPageInner />
+    </Suspense>
   );
 }
 
@@ -494,6 +549,293 @@ function MarketsAlertsPanel() {
   );
 }
 
+type TeamMemberRow = {
+  id: string;
+  user_id: string;
+  role: string;
+  status: string;
+  created_at: string;
+};
+
+type InvitationRow = {
+  id: string;
+  invited_email: string;
+  status: string;
+  expires_at: string | null;
+  created_at: string;
+  token?: string;
+};
+
+function TeamPanel() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [data, setData] = useState<{
+    team: { id: string; name: string; owner_id?: string; created_at?: string } | null;
+    members: TeamMemberRow[];
+    invitations: Array<InvitationRow & { token?: string }>;
+    seatLimit: number | "unlimited";
+    usedSeats: number;
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/team/members");
+      const body = (await res.json()) as {
+        error?: string;
+        team?: { id: string; name: string } | null;
+        members?: TeamMemberRow[];
+        invitations?: Array<InvitationRow & { token?: string }>;
+        seatLimit?: number | "unlimited";
+        usedSeats?: number;
+      };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Failed to load team");
+      }
+      setData({
+        team: body.team ?? null,
+        members: body.members ?? [],
+        invitations: body.invitations ?? [],
+        seatLimit: body.seatLimit ?? 5,
+        usedSeats: body.usedSeats ?? 0,
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load team");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function createTeam() {
+    setCreating(true);
+    setError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch("/api/team/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: teamName.trim() || "Team" }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not create team");
+      }
+      await load();
+      setTeamName("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not create team");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function invite() {
+    setInviting(true);
+    setError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch("/api/team/invite", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: inviteEmail.trim() }),
+      });
+      const body = (await res.json()) as {
+        error?: string;
+        code?: string;
+        invitation?: { token?: string };
+      };
+      if (!res.ok) {
+        if (res.status === 409 && body.code === "SEAT_LIMIT_REACHED") {
+          throw new Error(body.error ?? "Seat limit reached for this plan.");
+        }
+        throw new Error(body.error ?? "Could not send invite");
+      }
+      setInviteEmail("");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not send invite");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  function copyInviteLink(token: string) {
+    const url = `${window.location.origin}/dashboard/team/join?token=${encodeURIComponent(token)}`;
+    void navigator.clipboard.writeText(url);
+    setCopyMsg("Invite link copied to clipboard.");
+    setTimeout(() => setCopyMsg(null), 4000);
+  }
+
+  const seatLimit = data?.seatLimit ?? "—";
+  const usedSeats = data?.usedSeats ?? "—";
+
+  return (
+    <motion.div
+      key="team"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.2 }}
+      className="space-y-6"
+    >
+      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+          Team workspace
+        </p>
+        <p className="mt-2 text-sm text-ink-mid">
+          Create a team, invite colleagues by email, and share seats. Invitees
+          open the link below (or paste it after signing in with the invited
+          address).
+        </p>
+        {loading ? (
+          <p className="mt-3 text-xs text-ink-light">Loading team…</p>
+        ) : null}
+        {error ? <p className="mt-3 text-xs text-bear">{error}</p> : null}
+        {copyMsg ? <p className="mt-2 text-xs text-bull">{copyMsg}</p> : null}
+      </div>
+
+      {!data?.team ? (
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Create team
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="block min-w-[200px] flex-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-light">
+                Name
+              </span>
+              <input
+                type="text"
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                placeholder="Team name"
+                className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={creating}
+              onClick={() => void createTeam()}
+              className="inline-flex h-9 items-center justify-center rounded-[4px] bg-gold px-4 text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a5f1a] disabled:opacity-60"
+            >
+              {creating ? "Creating…" : "Create team"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              {data.team.name}
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-ink-light">
+              Seats: {String(usedSeats)} / {String(seatLimit)}
+            </p>
+          </div>
+
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Invite member
+            </p>
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="block min-w-[220px] flex-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-light">
+                  Email
+                </span>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="colleague@company.com"
+                  className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={inviting || !inviteEmail.trim()}
+                onClick={() => void invite()}
+                className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+              >
+                {inviting ? "Sending…" : "Send invite"}
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Pending invitations
+            </p>
+            {data.invitations.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-mid">No pending invites.</p>
+            ) : (
+              <ul className="mt-4 divide-y-[0.5px] divide-ivory-border">
+                {data.invitations.map((inv) => (
+                  <li
+                    key={inv.id}
+                    className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  >
+                    <div>
+                      <p className="text-sm text-ink">{inv.invited_email}</p>
+                      <p className="text-[10px] text-ink-light">
+                        {inv.status} ·{" "}
+                        {inv.expires_at
+                          ? `expires ${new Date(inv.expires_at).toLocaleString("en-GB")}`
+                          : "no expiry"}
+                      </p>
+                    </div>
+                    {inv.token ? (
+                      <button
+                        type="button"
+                        onClick={() => copyInviteLink(inv.token!)}
+                        className="shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
+                      >
+                        Copy invite link
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Members
+            </p>
+            {data.members.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-mid">No members yet.</p>
+            ) : (
+              <ul className="mt-4 divide-y-[0.5px] divide-ivory-border">
+                {data.members.map((m) => (
+                  <li key={m.id} className="py-3 text-sm text-ink">
+                    <span className="font-mono text-[11px] text-ink-mid">
+                      {m.user_id.slice(0, 8)}…
+                    </span>
+                    <span className="ml-2 text-ink-light">
+                      {m.role} · {m.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </motion.div>
+  );
+}
+
 function PlanApiPanel() {
   const pro = TIER_ENTITLEMENTS.pro;
   const team = TIER_ENTITLEMENTS.team;
@@ -701,6 +1043,11 @@ function PlanApiPanel() {
             <p className="text-xs text-bear">{billingIssueMessage}</p>
           </div>
         ) : null}
+        <p className="mt-3 text-xs text-ink-light">
+          Plan changes and payment methods are completed in Stripe&apos;s secure
+          billing portal. You&apos;ll return to Zephyr on the Overview page when
+          finished.
+        </p>
         {currentTierCode !== "free" ? (
           <button
             type="button"
@@ -727,6 +1074,10 @@ function PlanApiPanel() {
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
           Upgrade
+        </p>
+        <p className="mt-2 text-xs text-ink-light">
+          Checkout opens on Stripe. After a successful payment you&apos;ll land on
+          Overview with a confirmation banner.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div className="rounded-[4px] border-[0.5px] border-gold/45 bg-ivory p-5">

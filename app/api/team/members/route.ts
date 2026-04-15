@@ -35,7 +35,7 @@ export async function GET() {
         .order("created_at", { ascending: true }),
       admin
         .from("team_invitations")
-        .select("id, invited_email, status, expires_at, created_at")
+        .select("id, invited_email, status, expires_at, created_at, token")
         .eq("team_id", team.id)
         .eq("status", "pending")
         .order("created_at", { ascending: false }),

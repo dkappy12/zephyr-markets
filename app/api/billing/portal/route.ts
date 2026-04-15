@@ -12,7 +12,9 @@ export async function POST() {
     const user = auth.user!;
 
     const stripe = getStripe();
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const rawBase =
+      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = rawBase.replace(/\/+$/, "");
 
     const billing = await getEffectiveBillingState(supabase, user.id);
     let customerId = billing.stripeCustomerId;
@@ -41,7 +43,7 @@ export async function POST() {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${baseUrl}/dashboard/settings`,
+      return_url: `${baseUrl}/dashboard/overview?billing=portal_return`,
     });
 
     return NextResponse.json({ url: session.url });
