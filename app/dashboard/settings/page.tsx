@@ -579,6 +579,7 @@ function TeamPanel() {
   const [creating, setCreating] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [data, setData] = useState<{
     team: { id: string; name: string; owner_id?: string; created_at?: string } | null;
     members: TeamMemberRow[];
@@ -594,7 +595,7 @@ function TeamPanel() {
       const res = await fetch("/api/team/members");
       const body = (await res.json()) as {
         error?: string;
-        team?: { id: string; name: string } | null;
+        team?: { id: string; name: string; owner_id?: string } | null;
         members?: TeamMemberRow[];
         invitations?: Array<InvitationRow & { token?: string }>;
         seatLimit?: number | "unlimited";
@@ -723,6 +724,34 @@ function TeamPanel() {
     void navigator.clipboard.writeText(url);
     setCopyMsg("Invite link copied to clipboard.");
     setTimeout(() => setCopyMsg(null), 4000);
+  }
+
+  async function removeMember(targetUserId: string, displayLabel: string) {
+    if (
+      !window.confirm(
+        `Remove ${displayLabel} from this team? They will lose access to team features.`,
+      )
+    ) {
+      return;
+    }
+    setRemovingUserId(targetUserId);
+    setError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch(
+        `/api/team/members/${encodeURIComponent(targetUserId)}`,
+        { method: "DELETE" },
+      );
+      const body = (await res.json()) as { error?: string; code?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not remove member");
+      }
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not remove member");
+    } finally {
+      setRemovingUserId(null);
+    }
   }
 
   const seatLimit = data?.seatLimit ?? "—";
@@ -892,16 +921,36 @@ function TeamPanel() {
               <p className="mt-3 text-sm text-ink-mid">No members yet.</p>
             ) : (
               <ul className="mt-4 divide-y-[0.5px] divide-ivory-border">
-                {data.members.map((m) => (
-                  <li key={m.id} className="py-3 text-sm text-ink">
-                    <span className="text-ink">
-                      {m.display_name ?? `${m.user_id.slice(0, 8)}…`}
-                    </span>
-                    <span className="ml-2 text-ink-light">
-                      {m.role} · {m.status}
-                    </span>
-                  </li>
-                ))}
+                {data.members.map((m) => {
+                  const ownerId = data.team?.owner_id;
+                  const isOwnerRow =
+                    (ownerId != null && m.user_id === ownerId) || m.role === "owner";
+                  const label =
+                    m.display_name ?? `${m.user_id.slice(0, 8)}…`;
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm text-ink"
+                    >
+                      <div>
+                        <span className="text-ink">{label}</span>
+                        <span className="ml-2 text-ink-light">
+                          {m.role} · {m.status}
+                        </span>
+                      </div>
+                      {!isOwnerRow ? (
+                        <button
+                          type="button"
+                          disabled={removingUserId === m.user_id}
+                          onClick={() => void removeMember(m.user_id, label)}
+                          className="shrink-0 rounded-[4px] border-[0.5px] border-bear/40 bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
+                        >
+                          {removingUserId === m.user_id ? "Removing…" : "Remove"}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
