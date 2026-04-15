@@ -1,6 +1,10 @@
 "use client";
 
 import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
+import {
+  formatReliabilityConfidenceDesk,
+  reliabilityConfidenceFromVaRHistoryDays,
+} from "@/lib/reliability/contract";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -504,12 +508,9 @@ export default function RiskPage() {
     );
   const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
   const coverageColor = dailyPnLSeries.length < 10 ? TERRACOTTA : dailyPnLSeries.length < 20 ? AMBER : BRAND_GREEN;
-  const reliabilityLabel =
-    dailyPnLSeries.length >= 20
-      ? "HIGH"
-      : dailyPnLSeries.length >= 10
-        ? "MEDIUM"
-        : "LOW";
+  const reliabilityLabel = formatReliabilityConfidenceDesk(
+    reliabilityConfidenceFromVaRHistoryDays(dailyPnLSeries.length),
+  );
   const hasAnyPriceSeries =
     Object.keys(powerPricesByDay).length > 0 ||
     Object.keys(ttfPricesByDay).length > 0 ||

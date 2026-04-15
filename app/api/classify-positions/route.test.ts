@@ -74,6 +74,17 @@ describe("POST /api/classify-positions", () => {
     expect(body.mode).toBe("fallback");
     expect(Array.isArray(body.classified)).toBe(true);
     expect(body.classified[0].keep).toBe(true);
+    expect(body.reliability).toEqual(
+      expect.objectContaining({
+        model_version: expect.any(String),
+        data_version: expect.any(String),
+        fallback_used: true,
+        coverage: expect.any(Number),
+        confidence: expect.stringMatching(/^(high|medium|low)$/),
+        evidence: expect.any(Array),
+        freshness_ts: expect.any(String),
+      }),
+    );
   });
 
   it("normalizes model output and returns model mode", async () => {
@@ -127,5 +138,16 @@ describe("POST /api/classify-positions", () => {
     expect(body.classified[0].market).toBe("other_power");
     expect(body.classified[0].currency).toBe("GBP");
     expect(Array.isArray(body.classified[0].warnings)).toBe(true);
+    expect(body.reliability).toEqual(
+      expect.objectContaining({
+        model_version: expect.any(String),
+        data_version: expect.any(String),
+        fallback_used: false,
+        coverage: expect.any(Number),
+        confidence: expect.stringMatching(/^(high|medium|low)$/),
+        evidence: expect.any(Array),
+        freshness_ts: expect.any(String),
+      }),
+    );
   });
 });

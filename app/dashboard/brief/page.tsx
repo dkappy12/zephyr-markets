@@ -2,6 +2,10 @@
 
 import { ManuscriptMarginalia } from "@/components/ui/ManuscriptMarginalia";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  formatReliabilityConfidenceDesk,
+  reliabilityConfidenceFromBriefAgeHours,
+} from "@/lib/reliability/contract";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
@@ -539,8 +543,9 @@ export default function BriefPage() {
     generatedTs != null
       ? Math.max(0, Math.floor((Date.now() - generatedTs) / (1000 * 60 * 60)))
       : null;
-  const briefReliability =
-    ageHours == null ? "LOW" : ageHours <= 24 ? "HIGH" : ageHours <= 48 ? "MEDIUM" : "LOW";
+  const briefReliability = formatReliabilityConfidenceDesk(
+    reliabilityConfidenceFromBriefAgeHours(ageHours),
+  );
 
   const watchItems = parseWatchList(row?.watch_list ?? null);
 

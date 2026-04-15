@@ -90,6 +90,6 @@ Every intelligence output is logged as a prediction. Nightly at 22:00 GMT a Rail
 - Compass rose: decorative element inside product (e.g. weather page)
 
 ## Quality checks (local & CI)
-- CI runs benchmark reconcile (no secrets) plus the economic quality gate when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set in GitHub Actions.
-- Local one-shot before release: `npm run quality:ci` (gate runs only if those env vars are set locally).
-- Details: [docs/self-improvement-assurance.md](docs/self-improvement-assurance.md).
+- CI runs benchmark reconcile (no secrets) plus the **strict** economic quality gate when `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` are set in GitHub Actions (fork PRs skip the gate step).
+- Local one-shot before release: `npm run quality:ci` (gate runs only if those env vars are set locally). Release artifact: `npm run trust:report -- --out trust-report.md`.
+- Details: [docs/self-improvement-assurance.md](docs/self-improvement-assurance.md). Desk QA: [docs/trader-trust-checklist.md](docs/trader-trust-checklist.md).

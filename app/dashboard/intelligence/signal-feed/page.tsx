@@ -7,6 +7,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import type { SignalRow } from "@/lib/signals";
 import {
+  formatReliabilityConfidenceDesk,
+  reliabilityConfidenceFromRemitStalenessMinutes,
+} from "@/lib/reliability/contract";
+import {
   type AssetTab,
   type DedupedSignal,
   assetNameFromTitle,
@@ -377,8 +381,9 @@ export default function SignalFeedPage() {
     latestTs != null
       ? Math.max(0, Math.floor((nowTs - latestTs) / 60000))
       : null;
-  const reliability =
-    ageMinutes == null ? "LOW" : ageMinutes <= 30 ? "HIGH" : ageMinutes <= 120 ? "MEDIUM" : "LOW";
+  const reliability = formatReliabilityConfidenceDesk(
+    reliabilityConfidenceFromRemitStalenessMinutes(ageMinutes),
+  );
 
   return (
     <div className="space-y-8">

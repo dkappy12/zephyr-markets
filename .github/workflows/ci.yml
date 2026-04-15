@@ -31,10 +31,17 @@ jobs:
       - name: Benchmark reconcile
         run: npm run quality:reconcile
 
-      - name: Economic quality gate
+      # Strict when secrets exist (canonical repo). Fork PRs typically have no secrets — step skipped.
+      - name: Economic quality gate (strict live metrics)
+        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' && (secrets.SUPABASE_URL != '' || secrets.NEXT_PUBLIC_SUPABASE_URL != '') }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          QUALITY_GATE_STRICT: "0"
+          QUALITY_GATE_STRICT: "1"
         run: npm run quality:gate
+
+      - name: Economic quality gate skipped
+        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY == '' || (secrets.SUPABASE_URL == '' && secrets.NEXT_PUBLIC_SUPABASE_URL == '') }}
+        run: |
+          echo "::notice title=Economic quality gate::Skipped — no Supabase URL + service role in repository secrets (expected for forks). Configure SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL on the canonical repo for strict 14d metric checks on every merge."
