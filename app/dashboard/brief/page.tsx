@@ -339,8 +339,10 @@ export default function BriefPage() {
   const [loading, setLoading] = useState(true);
   const [row, setRow] = useState<BriefRow | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
+  const [touchpointPositions, setTouchpointPositions] = useState<OpenPosition[]>([]);
   const [bookTouchpointText, setBookTouchpointText] = useState<string | null>(null);
   const [bookTouchpointLoading, setBookTouchpointLoading] = useState(false);
+  const [bookTouchpointError, setBookTouchpointError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -409,8 +411,14 @@ export default function BriefPage() {
             : Number(p.trade_price),
       }));
       setPositions(open);
+      const focus = [...open]
+        .filter((p) => p.instrument.trim() !== "")
+        .sort((a, b) => Math.abs(b.size) - Math.abs(a.size))
+        .slice(0, 8);
+      setTouchpointPositions(focus);
       if (open.length === 0) {
         setBookTouchpointText(null);
+        setBookTouchpointError(null);
       }
 
       let touchFinal: string | null = null;
@@ -440,6 +448,7 @@ export default function BriefPage() {
           }
         } else {
           setBookTouchpointLoading(true);
+          setBookTouchpointError(null);
           try {
             const {
               data: { session },
@@ -494,10 +503,10 @@ export default function BriefPage() {
                 gap: pp?.premium_value ?? null,
                 srmc: pp?.srmc_gbp_mwh ?? null,
                 remit_mw: pp?.remit_mw_lost ?? null,
-                positions: open,
+                positions: focus,
               }),
             });
-            const body = (await resp.json()) as { text?: string };
+            const body = (await resp.json()) as { text?: string; error?: string };
             if (resp.ok && typeof body.text === "string" && body.text.trim() !== "") {
               const t = body.text.trim();
               setBookTouchpointText(t);
@@ -505,9 +514,15 @@ export default function BriefPage() {
               if (generatedAt !== "") {
                 saveCachedBookTouchpoints(user.id, generatedAt, t);
               }
+            } else {
+              setBookTouchpointError(
+                typeof body.error === "string" && body.error.trim() !== ""
+                  ? body.error
+                  : "Touchpoints are temporarily unavailable.",
+              );
             }
           } catch {
-            // Silent fallback as requested.
+            setBookTouchpointError("Touchpoints are temporarily unavailable.");
           } finally {
             setBookTouchpointLoading(false);
           }
@@ -596,10 +611,8 @@ export default function BriefPage() {
               ? "brief timestamp unavailable"
               : `${ageHours}h since generation`}{" "}
             · Physical premium context (implied vs N2EX, residual demand) uses the
-            latest model run when book touchpoints are personalised ·
-            {bookTouchpointText
-              ? " personalised touchpoints active"
-              : " generic briefing mode"}
+            latest model run when book touchpoints are personalised
+            {bookTouchpointText ? " · personalised touchpoints active" : ""}
           </p>
         </section>
 
@@ -682,7 +695,7 @@ export default function BriefPage() {
               </p>
               <div className="mt-4 border-t-[0.5px] border-ivory-border pt-3">
                 <p className="text-[11px] text-ink-light">
-                  Personalised to: {personalisationSummaryLine(positions)}
+                  Personalised to: {personalisationSummaryLine(touchpointPositions)}
                 </p>
               </div>
             </>
@@ -693,6 +706,36 @@ export default function BriefPage() {
               model maps each signal — wind, gas, REMIT, carbon — to your open
               positions and tells you what it means for your P&amp;L.
             </p>
+          ) : bookTouchpointError ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-sm leading-relaxed text-ink-mid">
+                {bookTouchpointError}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  // Simple retry: clear cached LS for this brief and reload.
+                  // (Avoids chasing state in-place.)
+                  try {
+                    const ga = row?.generated_at?.trim() ?? "";
+                    const supabase = createBrowserClient();
+                    void supabase.auth.getUser().then(({ data }) => {
+                      const uid = data.user?.id;
+                      if (!uid || !ga) return;
+                      localStorage.removeItem(
+                        `${BOOK_TOUCHPOINTS_CACHE_PREFIX}${uid}:${ga}`,
+                      );
+                      window.location.reload();
+                    });
+                  } catch {
+                    window.location.reload();
+                  }
+                }}
+                className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark"
+              >
+                Retry touchpoints
+              </button>
+            </div>
           ) : (
             <p className="mt-3 text-sm italic leading-relaxed text-ink-light">
               A personalised read for your open positions is unavailable right

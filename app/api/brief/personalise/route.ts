@@ -27,6 +27,8 @@ type PersonaliseReq = {
   }>;
 };
 
+const MAX_FOCUS_POSITIONS = 8;
+
 function asNum(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") {
@@ -173,16 +175,18 @@ export async function POST(req: Request) {
       (a, b) => Math.abs(b.size) - Math.abs(a.size),
     );
 
-    if (focusPositions.length === 0) {
+    const focus = focusPositions.slice(0, MAX_FOCUS_POSITIONS);
+
+    if (focus.length === 0) {
       return NextResponse.json(
         { error: "No open positions to personalise" },
         { status: 400 },
       );
     }
 
-    const requiredLabels = focusPositions.map((p) => p.label).filter(Boolean);
+    const requiredLabels = focus.map((p) => p.label).filter(Boolean);
 
-    const position_lines = focusPositions
+    const position_lines = focus
       .map((p) => {
         const side = p.dir.toLowerCase() === "short" ? "SHORT" : "LONG";
         const inst = p.instrument || p.label;
