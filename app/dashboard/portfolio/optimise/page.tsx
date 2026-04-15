@@ -2,6 +2,7 @@
 
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
 import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
+import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -39,6 +40,8 @@ type ApiResponse = {
     power: string;
     gas: string;
     fx: string;
+    windowDays?: number;
+    sinceDate?: string;
   };
   before: { varLoss: number; cvarLoss: number; worstStressLoss: number };
   after: { varLoss: number; cvarLoss: number; worstStressLoss: number };
@@ -101,6 +104,8 @@ function formatGbp(n: number): string {
 }
 
 export default function OptimisePage() {
+  const supabase = useMemo(() => createBrowserClient(), []);
+  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   const [objective, setObjective] = useState<"cvar" | "var">("cvar");
   const [confidence, setConfidence] = useState(0.95);
   const [maxTrades, setMaxTrades] = useState(3);
@@ -116,6 +121,16 @@ export default function OptimisePage() {
       setLoading(true);
       setError(null);
       try {
+        const { data: authData } = await supabase.auth.getUser();
+        const uid = authData.user?.id ?? null;
+        if (!cancelled) setUserId(uid);
+        if (!uid) {
+          if (!cancelled) {
+            setData(null);
+            setLoading(false);
+          }
+          return;
+        }
         const params = new URLSearchParams({
           objective,
           confidence: String(confidence),
@@ -124,8 +139,15 @@ export default function OptimisePage() {
         });
         const res = await fetch(`/api/optimise/recommendations?${params.toString()}`);
         const body = (await res.json()) as ApiResponse | { error?: string };
+        if (res.status === 401) {
+          if (!cancelled) {
+            setError("Sign in to view optimise recommendations.");
+            setData(null);
+          }
+          return;
+        }
         if (!res.ok) {
-          throw new Error("error" in body ? body.error : "Optimiser request failed");
+          throw new Error("error" in body ? String(body.error) : "Optimiser request failed");
         }
         if (!cancelled) setData(body as ApiResponse);
       } catch (e: unknown) {
@@ -141,7 +163,7 @@ export default function OptimisePage() {
     return () => {
       cancelled = true;
     };
-  }, [objective, confidence, maxTrades, includeStress]);
+  }, [supabase, objective, confidence, maxTrades, includeStress]);
 
   const cards = useMemo(() => {
     if (!data) return [];
@@ -192,16 +214,26 @@ export default function OptimisePage() {
 
   const frontierData = useMemo(() => {
     if (!data) return null;
+    const riskX = (m: { varLoss: number; cvarLoss: number }) =>
+      objective === "cvar" ? m.cvarLoss : m.varLoss;
     return {
-      current: [{ label: "Current", x: data.before.cvarLoss, y: 0 }],
-      recommended: [{ label: "Recommended", x: data.after.cvarLoss, y: data.recommendations.length }],
+      current: [{ label: "Current", x: riskX(data.before), y: 0 }],
+      recommended: [
+        {
+          label: "Recommended",
+          x: riskX(data.after),
+          y: data.recommendations.length,
+        },
+      ],
       alternatives: data.alternatives.map((alt) => ({
         label: `Alt #${alt.rank}`,
-        x: alt.after.cvarLoss,
+        x: riskX(alt.after),
         y: alt.trades.length,
       })),
     };
-  }, [data]);
+  }, [data, objective]);
+
+  const tailRiskAxisLabel = objective === "cvar" ? "CVaR loss" : "VaR loss";
 
   return (
     <div className="space-y-8">
@@ -265,6 +297,10 @@ export default function OptimisePage() {
         </label>
       </section>
 
+      {userId === null && !loading && (
+        <p className="text-sm text-ink-mid">Sign in to view optimise recommendations.</p>
+      )}
+
       {loading && (
         <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5 text-sm text-ink-mid">
           Running optimiser...
@@ -276,7 +312,7 @@ export default function OptimisePage() {
         </div>
       )}
 
-      {!loading && data && (
+      {!loading && userId && data && (
         <>
           {data.blocked && (
             <section className="rounded-[4px] border-[0.5px] border-[#8B3A3A]/40 bg-[#8B3A3A]/5 p-4">
@@ -321,9 +357,15 @@ export default function OptimisePage() {
               {data.quality.toUpperCase()}
             </p>
             <p className="mt-1 text-xs text-ink-mid">
-              Historical scenarios {data.diagnostics.historicalScenarioCount} · Candidate
+              Historical return scenarios {data.diagnostics.historicalScenarioCount} · Candidate
               packages {data.diagnostics.candidatePackageCount}
             </p>
+            {(data.diagnostics.fallbackUsed || data.diagnostics.historicalScenarioCount === 0) && (
+              <p className="mt-1 text-xs text-ink-mid">
+                With no aligned historical window, empirical tail uses the same stress baseline as
+                the Risk tab; total scenario count still includes stress tests.
+              </p>
+            )}
             <p className="mt-1 text-[10px] leading-snug text-ink-light">
               {PREMIUM_VS_TAPE} Optimiser quality gates mirror the reliability
               contract (coverage, fallback, freshness).
@@ -342,7 +384,7 @@ export default function OptimisePage() {
                 ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered by stress guardrail`
                 : ""}
             </p>
-            {data.qualityWarnings.length > 0 && (
+            {data.qualityWarnings.length > 0 && !data.blocked && (
               <div className="mt-2 space-y-1">
                 {data.qualityWarnings.map((w) => (
                   <p key={w} className="text-xs text-ink-mid">
@@ -351,15 +393,24 @@ export default function OptimisePage() {
                 ))}
               </div>
             )}
+            {data.blocked && data.qualityWarnings.length > 0 && (
+              <p className="mt-2 text-xs text-ink-mid">
+                Warning details are listed in the reliability gate above.
+              </p>
+            )}
           </section>
 
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Efficient frontier
+              Tail risk vs trade count
+            </p>
+            <p className="mt-1 text-[10px] leading-snug text-ink-light">
+              Scatter of {objective === "cvar" ? "CVaR" : "VaR"} loss versus number of hedges — not a
+              mean–variance efficient frontier.
             </p>
             {!frontierData || frontierData.alternatives.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
-                No alternatives available yet to draw an efficient frontier.
+                No alternatives available yet for this view.
               </p>
             ) : (
               <div className="mt-2 h-[200px]">
@@ -381,7 +432,10 @@ export default function OptimisePage() {
                     <Tooltip
                       formatter={(v, n) =>
                         n === "x"
-                          ? [`£${Math.round(Number(v)).toLocaleString("en-GB")}`, "CVaR loss"]
+                          ? [
+                              `£${Math.round(Number(v)).toLocaleString("en-GB")}`,
+                              tailRiskAxisLabel,
+                            ]
                           : [Math.round(Number(v)), "Trades"]
                       }
                     />
@@ -519,6 +573,9 @@ export default function OptimisePage() {
             <p className="mt-2">
               Provenance: Power {data.provenance.power} · Gas {data.provenance.gas} · FX{" "}
               {data.provenance.fx}
+              {data.provenance.sinceDate != null && data.provenance.windowDays != null
+                ? ` · Data window: ${data.provenance.windowDays} days from ${data.provenance.sinceDate}`
+                : ""}
             </p>
           </section>
         </>

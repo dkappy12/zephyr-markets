@@ -1,6 +1,7 @@
 "use client";
 
 import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
+import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 import {
   formatReliabilityConfidenceDesk,
   reliabilityConfidenceFromVaRHistoryDays,
@@ -67,50 +68,12 @@ type Scenario = {
   moves: { GB_power: number; TTF: number; NBP: number };
 };
 
-const STRESS_SCENARIOS: Scenario[] = [
-  {
-    name: "2022 Energy Crisis Peak",
-    period: "August 2022",
-    description:
-      "European gas and power markets reached record highs following supply disruptions",
-    moves: { GB_power: 400, TTF: 100, NBP: 150 },
-  },
-  {
-    name: "Ukraine Invasion Spike",
-    period: "February 2022",
-    description:
-      "Immediate market reaction to Russia's invasion of Ukraine",
-    moves: { GB_power: 150, TTF: 50, NBP: 60 },
-  },
-  {
-    name: "2021 Gas Supply Crisis",
-    period: "October 2021",
-    description:
-      "Low storage and reduced Norwegian flows drove GB gas to record levels",
-    moves: { GB_power: 200, TTF: 80, NBP: 100 },
-  },
-  {
-    name: "Wind Drought Event",
-    period: "January 2025",
-    description:
-      "Sustained low wind output drove gas-marginal pricing across GB",
-    moves: { GB_power: 80, TTF: 5, NBP: 8 },
-  },
-  {
-    name: "Renewable Oversupply",
-    period: "Summer 2024",
-    description:
-      "High wind and solar drove negative pricing across multiple settlement periods",
-    moves: { GB_power: -40, TTF: -2, NBP: -3 },
-  },
-  {
-    name: "2023 Spring tightness",
-    period: "March 2023",
-    description:
-      "Residual winter risk and storage anxiety; GB power and gas curves stayed bid after the EU winter",
-    moves: { GB_power: 175, TTF: 42, NBP: 58 },
-  },
-];
+const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
+  name: s.name,
+  period: s.period,
+  description: s.description,
+  moves: { GB_power: s.gbPowerMove, TTF: s.ttfMoveEurMwh, NBP: s.nbpMovePth },
+}));
 
 function asNum(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);

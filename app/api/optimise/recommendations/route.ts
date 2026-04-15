@@ -1,4 +1,10 @@
-import { optimisePortfolio, buildHistoricalScenarios, stressScenarios, type OptimiseObjective } from "@/lib/portfolio/optimise";
+import {
+  buildHistoricalScenarios,
+  nbpEurMwhLevelsToPthByDay,
+  optimisePortfolio,
+  stressScenarios,
+  type OptimiseObjective,
+} from "@/lib/portfolio/optimise";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireUser } from "@/lib/auth/require-user";
@@ -229,9 +235,9 @@ export async function GET(req: Request) {
     }
     const powerByDay = finaliseDailyAverage(powerAgg);
     const ttfByDay = finaliseDailyAverage(ttfAgg);
-    const nbpByDay = finaliseDailyAverage(nbpAgg);
+    const nbpByDayEurMwh = finaliseDailyAverage(nbpAgg);
     for (const day of Object.keys(ttfByDay)) {
-      if (nbpByDay[day] == null) nbpProxyUsed = true;
+      if (nbpByDayEurMwh[day] == null) nbpProxyUsed = true;
     }
     const fxByDay: Record<string, number> = {};
     for (const row of (fxRes.error ? [] : fxRes.data) ?? []) {
@@ -241,11 +247,13 @@ export async function GET(req: Request) {
       fxByDay[day] = rate;
     }
 
+    const nbpByDayPth = nbpEurMwhLevelsToPthByDay(nbpByDayEurMwh, fxByDay, gbpPerEur);
+
     const scenarios = [
       ...buildHistoricalScenarios({
         powerByDay,
         ttfByDayEur: ttfByDay,
-        nbpByDayPth: nbpByDay,
+        nbpByDayPth,
         fxByDay,
       }),
       ...stressScenarios(),
@@ -314,8 +322,11 @@ export async function GET(req: Request) {
       reliability,
       provenance: {
         power: "market_prices (N2EX/APX daily avg)",
-        gas: "gas_prices (TTF+NBP daily avg)",
+        gas:
+          "gas_prices (TTF+NBP hub EUR/MWh daily avg; NBP converted to p/th levels before return diffs)",
         fx: "Frankfurter ECB latest + fx_rates historical",
+        windowDays: 120,
+        sinceDate,
       },
       ...result,
       recommendations: blocked ? [] : result.recommendations,

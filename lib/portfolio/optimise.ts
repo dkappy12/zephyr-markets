@@ -1,4 +1,5 @@
 import type { PositionRow } from "@/lib/portfolio/book";
+import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 
 export type OptimiseObjective = "cvar" | "var";
 
@@ -80,48 +81,14 @@ export type OptimiseResult = {
   };
 };
 
-const STRESS_SCENARIOS: Scenario[] = [
-  {
-    id: "stress-2022-energy-crisis",
-    label: "2022 Energy Crisis Peak",
-    source: "stress",
-    gbPowerMove: 400,
-    ttfMoveEurMwh: 100,
-    nbpMovePth: 150,
-  },
-  {
-    id: "stress-ukraine-invasion",
-    label: "Ukraine Invasion Spike",
-    source: "stress",
-    gbPowerMove: 150,
-    ttfMoveEurMwh: 50,
-    nbpMovePth: 60,
-  },
-  {
-    id: "stress-gas-supply-crisis",
-    label: "2021 Gas Supply Crisis",
-    source: "stress",
-    gbPowerMove: 200,
-    ttfMoveEurMwh: 80,
-    nbpMovePth: 100,
-  },
-  {
-    id: "stress-wind-drought",
-    label: "Wind Drought Event",
-    source: "stress",
-    gbPowerMove: 80,
-    ttfMoveEurMwh: 5,
-    nbpMovePth: 8,
-  },
-  {
-    id: "stress-renewables-oversupply",
-    label: "Renewable Oversupply",
-    source: "stress",
-    gbPowerMove: -40,
-    ttfMoveEurMwh: -2,
-    nbpMovePth: -3,
-  },
-];
+const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
+  id: s.id,
+  label: s.label,
+  source: "stress" as const,
+  gbPowerMove: s.gbPowerMove,
+  ttfMoveEurMwh: s.ttfMoveEurMwh,
+  nbpMovePth: s.nbpMovePth,
+}));
 
 const EUR_MWH_PER_THERM = 293.1;
 const HISTORICAL_MOVE_CAPS = {
@@ -132,6 +99,13 @@ const HISTORICAL_MOVE_CAPS = {
 
 function directionMult(direction: string | null): number {
   return (direction ?? "").toLowerCase() === "short" ? -1 : 1;
+}
+
+function hasMaterialPositions(positions: PositionRow[]): boolean {
+  return positions.some((p) => {
+    const s = Number(p.size ?? 0);
+    return Number.isFinite(s) && s !== 0;
+  });
 }
 
 function marketKey(market: string | null): "GB_POWER" | "TTF" | "NBP" | "OTHER" {
@@ -341,10 +315,7 @@ function relativeImprovement(before: number, after: number): number {
   return (before - after) / denom;
 }
 
-function confidenceLabel(
-  scenarioCount: number,
-  improvement: number,
-): "High" | "Medium" | "Low" {
+function confidenceLabel(scenarioCount: number, improvement: number): "High" | "Medium" | "Low" {
   if (scenarioCount >= 40 && improvement > 0.15) return "High";
   if (scenarioCount >= 20 && improvement > 0.05) return "Medium";
   return "Low";
@@ -398,6 +369,33 @@ export function optimisePortfolio(input: {
     gbpPerEur,
     confidence,
   );
+
+  if (!hasMaterialPositions(positions)) {
+    return {
+      before,
+      after: before,
+      deltas: {
+        var95Reduction: 0,
+        cvar95Reduction: 0,
+        worstStressReduction: 0,
+      },
+      recommendations: [],
+      alternatives: [],
+      diagnostics: {
+        scenarioCount: empiricalScenarios.length + stressOnlyScenarios.length,
+        historicalScenarioCount: historicalScenarios.length,
+        stressScenarioCount: stressOnlyScenarios.length,
+        fallbackUsed,
+        candidatePackageCount: 0,
+        nbpProxyUsed,
+        stabilityIndex: 0,
+        stabilityPass: true,
+        noAction: true,
+        noActionReason: "No open positions to hedge.",
+        guardrailFilteredCount: 0,
+      },
+    };
+  }
 
   const options = generateTradeOptions(positions);
   const combos = cartesianCombos(options).filter((c) => c.length <= maxTrades);
@@ -480,7 +478,10 @@ export function optimisePortfolio(input: {
         pnlAfter: row.pnlAfter,
         improvement: row.improvement,
       }));
-    const singleImprovement = (before.cvarLoss - singleAfter.cvarLoss) / Math.max(before.cvarLoss, 1);
+    const beforeObj = objectiveLoss(before, objective);
+    const afterObj = objectiveLoss(singleAfter, objective);
+    const singleImprovement =
+      (beforeObj - afterObj) / Math.max(Math.abs(beforeObj), 1);
     return {
       instrument: trade.market,
       direction: trade.direction,
@@ -590,4 +591,18 @@ export function buildHistoricalScenarios(input: {
 
 export function ttfEurMwhToNbpPth(ttf: number, gbpPerEur: number): number {
   return (ttf * gbpPerEur * 100) / EUR_MWH_PER_THERM;
+}
+
+/** Convert NBP hub daily EUR/MWh levels to implied p/th price levels (same therm basis as stress scenarios). */
+export function nbpEurMwhLevelsToPthByDay(
+  nbpByDayEurMwh: Record<string, number>,
+  fxByDay: Record<string, number> | undefined,
+  gbpPerEurFallback: number,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [day, eurMwh] of Object.entries(nbpByDayEurMwh)) {
+    const fx = fxByDay?.[day] ?? gbpPerEurFallback;
+    out[day] = ttfEurMwhToNbpPth(eurMwh, fx);
+  }
+  return out;
 }
