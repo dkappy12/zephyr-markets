@@ -62,12 +62,12 @@ async function main() {
         )}`,
       ),
       query(
-        `admin_job_log?select=message,created_at&job_name=eq.auth_audit&message=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=event,created_at&event=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
           since,
         )}`,
       ),
       query(
-        `admin_job_log?select=message,created_at&job_name=eq.auth_audit&message=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=event,created_at&event=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
           since,
         )}`,
       ),

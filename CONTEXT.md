@@ -72,7 +72,7 @@ Portfolio secondary: Book | Attribution | Risk | Optimise
 7. Overview desk — GB wind (model), residual demand, N2EX/TTF tape context, REMIT counts, solar outturn (where pipeline feeds data)
 
 ## Database Tables (Supabase)
-profiles, positions, signals, alerts, portfolio_pnl, teams, team_members, team_invitations, premium_predictions, attribution_predictions, scenario_predictions, signal_predictions, accuracy_metrics, model_versions, admin_job_log, organisation_themes
+profiles, positions, signals, alerts, portfolio_pnl, teams, team_members, team_invitations, premium_predictions, attribution_predictions, scenario_predictions, signal_predictions, accuracy_metrics, model_versions, **auth_audit_log** (API/auth events via `logAuthAuditEvent`), **admin_job_log** (batch/pipeline runs; account-delete lifecycle inserts may also use this table), organisation_themes
 
 ## Admin Layer
 - Admin role set directly in Supabase database only

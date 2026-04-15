@@ -36,7 +36,7 @@ Track these weekly:
    - Wrong classification quality
    - Mark/P&L missing in Book table
    - Mutation failures (create/update/delete/close/clear)
-2. Check latest `auth_audit` events in `admin_job_log` filtered by `portfolio_` and `classify_positions_`.
+2. Check latest events in **`auth_audit_log`** filtered by `event` matching `portfolio_%` or `classify_positions_%`.
 3. Verify dependent feeds:
    - `market_prices` for GB power
    - `gas_prices` for TTF
@@ -74,13 +74,10 @@ Track these weekly:
 Recent Book events:
 
 ```sql
-select created_at, status, message, metadata
-from admin_job_log
-where job_name = 'auth_audit'
-  and (
-    message like 'portfolio_%'
-    or message like 'classify_positions_%'
-  )
+select created_at, status, event, metadata
+from auth_audit_log
+where event like 'portfolio_%'
+   or event like 'classify_positions_%'
 order by created_at desc
 limit 200;
 ```
@@ -89,9 +86,8 @@ Recent import failures:
 
 ```sql
 select created_at, metadata
-from admin_job_log
-where job_name = 'auth_audit'
-  and message in (
+from auth_audit_log
+where event in (
     'portfolio_import_failed',
     'portfolio_import_validation_failed',
     'portfolio_import_rate_limited'
@@ -105,15 +101,13 @@ Classifier fallback rate:
 ```sql
 with attempts as (
   select count(*) as n
-  from admin_job_log
-  where job_name = 'auth_audit'
-    and message = 'classify_positions_attempted'
+  from auth_audit_log
+  where event = 'classify_positions_attempted'
     and created_at >= now() - interval '14 day'
 ), fallbacks as (
   select count(*) as n
-  from admin_job_log
-  where job_name = 'auth_audit'
-    and message = 'classify_positions_model_fallback'
+  from auth_audit_log
+  where event = 'classify_positions_model_fallback'
     and created_at >= now() - interval '14 day'
 )
 select attempts.n as attempts, fallbacks.n as fallbacks,

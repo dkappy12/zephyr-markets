@@ -7,7 +7,7 @@ This runbook defines auth lifecycle audit events and operator checks.
 Auth events are emitted via:
 
 - structured server logs (`[auth_audit]`)
-- optional persisted rows in `admin_job_log` when service role credentials are available
+- optional persisted rows in **`auth_audit_log`** when service role credentials are available (`logAuthAuditEvent`). Account-deletion lifecycle rows may still use `admin_job_log` depending on deployment.
 
 ## Key Event Names
 
@@ -29,25 +29,24 @@ Auth events are emitted via:
 
 Run in Supabase SQL editor.
 
-### 1) Latest auth/account activity (triage feed)
+### 1) Latest API audit events (`auth_audit_log`)
 
 ```sql
-select created_at, status, message, metadata
-from admin_job_log
-where job_name in ('auth_audit', 'account_delete')
+select created_at, event, status, user_id, metadata
+from auth_audit_log
 order by created_at desc
 limit 200;
 ```
 
-### 2) Unauthorized spike (last 15 minutes)
+### 2) Unauthorized spike (last 15 minutes, `auth_audit_log`)
 
 ```sql
 select
   count(*) as unauthorized_events
-from admin_job_log
+from auth_audit_log
 where created_at >= now() - interval '15 minutes'
   and (
-    message ilike '%unauthorized%'
+    event ilike '%unauthorized%'
     or metadata::text ilike '%unauthorized%'
   );
 ```

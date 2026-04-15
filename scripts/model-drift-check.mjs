@@ -51,22 +51,22 @@ async function main() {
         )}`,
       ),
       query(
-        `admin_job_log?select=created_at&job_name=eq.auth_audit&message=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=created_at&event=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
           prev7,
         )}&created_at=lt.${encodeURIComponent(last7)}`,
       ),
       query(
-        `admin_job_log?select=created_at&job_name=eq.auth_audit&message=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=created_at&event=eq.classify_positions_model_fallback&created_at=gte.${encodeURIComponent(
           last7,
         )}`,
       ),
       query(
-        `admin_job_log?select=created_at&job_name=eq.auth_audit&message=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=created_at&event=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
           prev7,
         )}&created_at=lt.${encodeURIComponent(last7)}`,
       ),
       query(
-        `admin_job_log?select=created_at&job_name=eq.auth_audit&message=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
+        `auth_audit_log?select=created_at&event=eq.classify_positions_attempted&created_at=gte.${encodeURIComponent(
           last7,
         )}`,
       ),

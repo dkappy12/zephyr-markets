@@ -25,11 +25,14 @@ export async function logAuthAuditEvent(input: AuthAuditInput) {
   try {
     const admin = createAdminClient(url, serviceRoleKey);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("admin_job_log").insert({
-      job_name: "auth_audit",
+    await (admin as any).from("auth_audit_log").insert({
+      event: input.event,
+      user_id: input.userId ?? null,
       status: input.status,
-      message: input.event,
-      metadata: payload,
+      metadata: {
+        ...(input.metadata ?? {}),
+        _logged_at: payload.timestamp,
+      },
     });
   } catch {
     // Keep auth flow resilient even if audit write fails.
