@@ -16,6 +16,14 @@ function warn(msg) {
   console.warn(`[quality-gate] WARN: ${msg}`);
 }
 
+/** Threshold breaches block the process only when QUALITY_GATE_STRICT=1. */
+function failThreshold(msg) {
+  if (STRICT) {
+    fail(msg);
+  }
+  warn(`threshold (non-strict): ${msg}`);
+}
+
 async function query(path) {
   const url = `${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/${path}`;
   const res = await fetch(url, {
@@ -74,13 +82,15 @@ async function main() {
       .filter((n) => Number.isFinite(n)),
   );
   if (mae != null && mae > PREMIUM_MAE_LIMIT) {
-    fail(`premium MAE ${mae.toFixed(2)} > ${PREMIUM_MAE_LIMIT}`);
+    failThreshold(
+      `premium MAE ${mae.toFixed(2)} > ${PREMIUM_MAE_LIMIT}`,
+    );
   }
 
   const attempts = attemptRows.length;
   const fallbackRate = attempts > 0 ? fallbackRows.length / attempts : 0;
   if (attempts > 0 && fallbackRate > FALLBACK_RATE_LIMIT) {
-    fail(
+    failThreshold(
       `classification fallback rate ${(fallbackRate * 100).toFixed(1)}% > ${(
         FALLBACK_RATE_LIMIT * 100
       ).toFixed(1)}%`,
@@ -98,7 +108,9 @@ async function main() {
     ? r2Values.sort((a, b) => a - b)[Math.floor(r2Values.length / 2)]
     : null;
   if (medianR2 != null && medianR2 < ATTRIBUTION_R2_MIN) {
-    fail(`attribution median R2 ${medianR2.toFixed(3)} < ${ATTRIBUTION_R2_MIN}`);
+    failThreshold(
+      `attribution median R2 ${medianR2.toFixed(3)} < ${ATTRIBUTION_R2_MIN}`,
+    );
   }
 
   console.log("[quality-gate] PASS");

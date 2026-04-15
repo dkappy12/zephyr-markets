@@ -29,14 +29,16 @@ On every push/PR, GitHub Actions runs **lint → tests → benchmark reconcile �
 | `npm run quality:ci` | Optional for gate | Runs reconcile, then gate **if** URL + service role env vars are set (handy before release). |
 | `npm run trust:report` | Optional | Markdown artifact: reconcile + gate + drift + walk-forward (`scripts/trust-report.mjs`). Use `--out file.md` to save. |
 
-**GitHub Actions (canonical repo):** Configure secrets `SUPABASE_SERVICE_ROLE_KEY` and **`SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`** so the **economic quality gate** step runs on every merge. Fork PRs typically have no secrets — that step is **skipped** (see the `::notice` step in CI).
+**GitHub Actions (canonical repo):** Configure secrets `SUPABASE_SERVICE_ROLE_KEY` and **`SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL`** so the **economic quality gate** step runs on every merge. Fork PRs typically have no secrets — that step **exits 0 early** with a notice (no gate queries).
 
-**Strict mode:** When the gate step runs, `QUALITY_GATE_STRICT=1`: missing env, query errors, or **threshold breach** fail the job. Local runs without secrets still warn/skip via `model-quality-gate.mjs` when `STRICT` is unset.
+**CI vs strict:** The merge workflow sets **`QUALITY_GATE_STRICT=0`**: the gate still queries live metrics and prints results, but **threshold breaches** (MAE, fallback rate, attribution R²) emit **warnings** and do **not** fail the job — so flaky or evolving production data does not block every PR. **Query errors** also warn and exit 0 when non-strict.
+
+**Strict mode (`QUALITY_GATE_STRICT=1`):** Use locally, in `npm run trust:report` (when you override), or before release: missing env **or** threshold breach **or** query error **fails** the process. Use this when you need a hard bar.
 
 **Optional:** `.github/workflows/trust-report.yml` — `workflow_dispatch` or weekly schedule — uploads `trust-report.md` (requires the same Supabase secrets as the gate).
 
 - **Reconcile failure** → code/math regression; fix implementation or benchmarks.
-- **Gate failure** → live metrics breached thresholds or DB/query issue; investigate data and thresholds.
+- **Gate (strict)** → live metrics breached thresholds or DB/query issue; investigate data and thresholds.
 
 **Manual QA:** See [`docs/trader-trust-checklist.md`](./trader-trust-checklist.md).
 

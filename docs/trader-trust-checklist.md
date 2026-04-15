@@ -22,7 +22,7 @@ Use before shipping or when validating desk coherence. Goal: every primary surfa
 
 ## Automated checks
 
-- CI: lint, tests, `quality:reconcile`, strict `quality:gate` when Supabase secrets are configured (see [`self-improvement-assurance.md`](./self-improvement-assurance.md)).
+- CI: lint, tests, `quality:reconcile`, `quality:gate` (non-strict on merge; logs metrics) when Supabase secrets are configured — see [`self-improvement-assurance.md`](./self-improvement-assurance.md)).
 - Local / release: `npm run trust:report` (optional `--out path.md`).
 
 ## Known out-of-scope for this checklist

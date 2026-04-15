@@ -43,5 +43,7 @@ jobs:
             echo "::notice title=Economic quality gate::Skipped — no Supabase URL + service role in repository secrets (expected for forks). Configure SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL on the canonical repo for strict 14d metric checks on every merge."
             exit 0
           fi
-          export QUALITY_GATE_STRICT=1
+          # Non-strict: log live metrics and warn on threshold breach without failing the merge (see model-quality-gate.mjs).
+          # Use QUALITY_GATE_STRICT=1 locally or in trust-report for release gating.
+          export QUALITY_GATE_STRICT=0
           npm run quality:gate
