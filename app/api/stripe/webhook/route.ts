@@ -47,6 +47,22 @@ function coerceInterval(value: string | undefined): BillingInterval | null {
   return value === "annual" || value === "monthly" ? value : null;
 }
 
+function readSubscriptionPeriodEnd(
+  sub: Stripe.Subscription | Stripe.Response<Stripe.Subscription>,
+): number | null {
+  const raw = sub as unknown as Record<string, unknown>;
+  const value = raw.current_period_end ?? raw.currentPeriodEnd;
+  return typeof value === "number" ? value : null;
+}
+
+function readCancelAtPeriodEnd(
+  sub: Stripe.Subscription | Stripe.Response<Stripe.Subscription>,
+): boolean {
+  const raw = sub as unknown as Record<string, unknown>;
+  const value = raw.cancel_at_period_end ?? raw.cancelAtPeriodEnd;
+  return typeof value === "boolean" ? value : false;
+}
+
 async function upsertSubscriptionRow(input: {
   userId: string;
   stripeCustomerId: string;
@@ -163,8 +179,8 @@ export async function POST(req: Request) {
           tier,
           interval,
           status: sub.status,
-          currentPeriodEnd: sub.current_period_end ?? null,
-          cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+          currentPeriodEnd: readSubscriptionPeriodEnd(sub),
+          cancelAtPeriodEnd: readCancelAtPeriodEnd(sub),
         });
         break;
       }
@@ -199,8 +215,8 @@ export async function POST(req: Request) {
           tier,
           interval,
           status: sub.status,
-          currentPeriodEnd: sub.current_period_end ?? null,
-          cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+          currentPeriodEnd: readSubscriptionPeriodEnd(sub),
+          cancelAtPeriodEnd: readCancelAtPeriodEnd(sub),
         });
         break;
       }
