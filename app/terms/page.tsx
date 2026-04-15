@@ -193,8 +193,9 @@ export default function TermsPage() {
                 applicable to your use of the Services.
               </p>
               <p>
-                Payment processing is handled by Stripe Inc. By subscribing, you agree to
-                Stripe&apos;s terms of service. We do not store your payment card details.
+                When paid subscriptions are enabled, payment processing will be handled
+                by Stripe Inc. By subscribing, you agree to Stripe&apos;s terms of
+                service. We do not store your payment card details.
               </p>
               <p>
                 Subscriptions are billed monthly or annually in advance, as selected at the

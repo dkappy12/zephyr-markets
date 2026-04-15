@@ -54,7 +54,12 @@ export async function proxy(request: NextRequest) {
 
   if (pathname.startsWith("/dashboard")) {
     if (!user) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set(
+        "returnUrl",
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+      );
+      return NextResponse.redirect(loginUrl);
     }
     return response;
   }

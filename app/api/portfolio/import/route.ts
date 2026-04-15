@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   if (csrf) return csrf;
 
   const supabase = await createClient();
-  const auth = await requireUser(supabase);
+  const auth = await requireUser(supabase, { requireVerifiedEmail: true });
   if (auth.response) return auth.response;
   const user = auth.user!;
 

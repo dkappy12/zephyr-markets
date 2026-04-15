@@ -6,16 +6,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+function normaliseReturnUrl(input: string | null): string {
+  if (!input) return "/dashboard/overview";
+  if (!input.startsWith("/") || input.startsWith("//")) {
+    return "/dashboard/overview";
+  }
+  return input;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [returnUrl, setReturnUrl] = useState("/dashboard/overview");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    setReturnUrl(normaliseReturnUrl(params.get("returnUrl")));
     const errorCode = params.get("error");
     if (errorCode === "auth_unavailable") {
       setInfo("Authentication is temporarily unavailable. Please try again shortly.");
@@ -45,7 +55,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/dashboard/overview");
+      router.push(returnUrl);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");

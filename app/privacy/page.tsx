@@ -82,8 +82,8 @@ export default function PrivacyPage() {
               </p>
               <p>
                 We do not collect special category data as defined under Article 9 UK GDPR.
-                We do not collect payment card details directly - if and when payment
-                processing is activated, this will be handled entirely by Stripe and
+                We do not collect payment card details directly. Payment processing
+                will be handled by Stripe once paid billing is enabled and will be
                 subject to Stripe&apos;s own privacy policy.
               </p>
             </div>
@@ -180,6 +180,10 @@ export default function PrivacyPage() {
                 Usage and log data: retained for 12 months from the date of collection.
               </p>
               <p>
+                Security and API audit logs (`auth_audit_log`): retained for up to
+                12 months for abuse prevention, incident response, and legal defence.
+              </p>
+              <p>
                 Communication data: retained for 3 years from the date of last contact.
               </p>
               <p>
@@ -229,6 +233,8 @@ export default function PrivacyPage() {
               <p>
                 We do not use analytics cookies, advertising cookies, or any tracking
                 technologies that monitor your behaviour across third-party websites.
+                If this changes (for example, product analytics or session replay), this
+                Policy will be updated before those tools are enabled.
               </p>
               <p>
                 You can control cookies through your browser settings. Disabling session

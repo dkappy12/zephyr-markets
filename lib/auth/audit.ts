@@ -1,4 +1,6 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { sendOpsAlert } from "@/lib/ops/alerts";
+import { logEvent } from "@/lib/ops/logger";
 
 type AuthAuditInput = {
   event: string;
@@ -8,7 +10,7 @@ type AuthAuditInput = {
 };
 
 export async function logAuthAuditEvent(input: AuthAuditInput) {
-  const payload = {
+  const payload: Record<string, unknown> = {
     event: input.event,
     userId: input.userId ?? null,
     status: input.status,
@@ -16,7 +18,12 @@ export async function logAuthAuditEvent(input: AuthAuditInput) {
     timestamp: new Date().toISOString(),
   };
 
-  console.info("[auth_audit]", JSON.stringify(payload));
+  logEvent({
+    scope: "auth_audit",
+    event: input.event,
+    level: input.status === "failure" ? "warn" : "info",
+    data: payload,
+  });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,6 +42,14 @@ export async function logAuthAuditEvent(input: AuthAuditInput) {
       },
     });
   } catch {
+    await sendOpsAlert({
+      severity: "warning",
+      title: "auth_audit_log write failed",
+      details: {
+        event: input.event,
+        status: input.status,
+      },
+    });
     // Keep auth flow resilient even if audit write fails.
   }
 }

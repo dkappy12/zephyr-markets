@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -494,6 +495,9 @@ function MarketsAlertsPanel() {
 }
 
 function PlanApiPanel() {
+  const free = TIER_ENTITLEMENTS.free;
+  const pro = TIER_ENTITLEMENTS.pro;
+  const team = TIER_ENTITLEMENTS.team;
   const endpoints = [
     { method: "GET", path: "/api/v1/premium", desc: "Latest physical premium score" },
     { method: "GET", path: "/api/v1/signals", desc: "REMIT signal feed" },
@@ -527,8 +531,8 @@ function PlanApiPanel() {
           <div>
             <p className="font-serif text-2xl text-ink">Free</p>
             <p className="mt-1 text-sm text-ink-mid">
-              Physical premium score · Morning brief (06:00 GMT) · Signal feed ·
-              GB Power and NBP
+              Physical premium score · Morning brief ({free.morningBriefTimeGmt} GMT) ·
+              Signal feed · GB Power and NBP
             </p>
           </div>
           <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
@@ -547,13 +551,14 @@ function PlanApiPanel() {
               Pro
             </p>
             <p className="mt-2 font-serif text-3xl text-ink">
-              £39
+              £{pro.monthlyPriceGbp}
               <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
                 /month
               </span>
             </p>
             <p className="mt-2 text-sm text-ink-mid">
-              Live signals, 06:00 brief, five markets, portfolio tools.
+              Live signals, {pro.morningBriefTimeGmt} brief, five markets, portfolio
+              tools.
             </p>
             <a
               href="mailto:contact@zephyr.markets?subject=Pro%20plan%20upgrade"
@@ -567,7 +572,7 @@ function PlanApiPanel() {
               Team
             </p>
             <p className="mt-2 font-serif text-3xl text-ink">
-              £149
+              £{team.monthlyPriceGbp}
               <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
                 /month
               </span>
@@ -584,8 +589,8 @@ function PlanApiPanel() {
           </div>
         </div>
         <p className="mt-4 text-xs text-ink-light">
-          Stripe payment integration coming soon. Contact us to upgrade
-          manually.
+          Billing is being rolled out in phases. Entitlements are now defined in
+          platform policy and Stripe checkout will replace manual upgrades next.
         </p>
       </div>
 

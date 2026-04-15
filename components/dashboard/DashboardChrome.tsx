@@ -1,8 +1,10 @@
 "use client";
 
 import { TopoBackground } from "@/components/ui/TopoBackground";
+import { createBrowserClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 const primary = [
   { href: "/dashboard/overview", label: "Overview" },
@@ -40,9 +42,30 @@ function sectionActive(
 }
 
 export function DashboardChrome({ children }: { children: React.ReactNode }) {
+  const supabase = useMemo(() => createBrowserClient(), []);
   const pathname = usePathname();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const showIntel = sectionActive(pathname, "/dashboard/intelligence");
   const showPortfolio = sectionActive(pathname, "/dashboard/portfolio");
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      setUserEmail(data.user?.email ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    await supabase.auth.signOut();
+    window.location.assign("/login");
+  }
 
   return (
     <div className="min-h-screen bg-ivory">
@@ -78,13 +101,37 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="flex shrink-0 items-center gap-3">
-            <span
+          <div className="relative flex shrink-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
               className="flex size-9 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-card font-serif text-sm text-ink"
-              aria-hidden
+              aria-label="Account menu"
             >
-              DK
-            </span>
+              {(userEmail?.[0] ?? "U").toUpperCase()}
+            </button>
+            {menuOpen ? (
+              <div className="absolute right-0 top-11 z-20 w-64 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-2">
+                <p className="px-2 py-1 text-[11px] text-ink-mid">
+                  {userEmail ?? "Signed in"}
+                </p>
+                <Link
+                  href="/dashboard/settings"
+                  onClick={() => setMenuOpen(false)}
+                  className="mt-1 block rounded-[4px] px-2 py-2 text-xs text-ink hover:bg-ivory-dark/70"
+                >
+                  Account settings
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="mt-1 w-full rounded-[4px] px-2 py-2 text-left text-xs text-ink hover:bg-ivory-dark/70 disabled:opacity-60"
+                >
+                  {signingOut ? "Signing out..." : "Sign out"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
         {(showIntel || showPortfolio) && (

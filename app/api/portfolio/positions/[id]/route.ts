@@ -20,7 +20,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   const supabase = await createClient();
-  const auth = await requireUser(supabase);
+  const auth = await requireUser(supabase, { requireVerifiedEmail: true });
   if (auth.response) return auth.response;
   const user = auth.user!;
 
@@ -80,7 +80,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   }
 
   const supabase = await createClient();
-  const auth = await requireUser(supabase);
+  const auth = await requireUser(supabase, { requireVerifiedEmail: true });
   if (auth.response) return auth.response;
   const user = auth.user!;
 
