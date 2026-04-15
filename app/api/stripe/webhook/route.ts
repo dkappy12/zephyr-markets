@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { getStripe } from "@/lib/billing/stripe";
+import { logEvent } from "@/lib/ops/logger";
 
 export const runtime = "nodejs";
 
@@ -51,8 +52,22 @@ function readSubscriptionPeriodEnd(
   sub: Stripe.Subscription | Stripe.Response<Stripe.Subscription>,
 ): number | null {
   const raw = sub as unknown as Record<string, unknown>;
-  const value = raw.current_period_end ?? raw.currentPeriodEnd;
-  return typeof value === "number" ? value : null;
+  const primary = raw.current_period_end ?? raw.currentPeriodEnd;
+  if (typeof primary === "number") return primary;
+  if (typeof primary === "string") {
+    const parsed = Number(primary);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  const items = raw.items as { data?: Array<Record<string, unknown>> } | undefined;
+  const firstItem = items?.data?.[0];
+  const fallback = firstItem?.current_period_end ?? firstItem?.currentPeriodEnd;
+  if (typeof fallback === "number") return fallback;
+  if (typeof fallback === "string") {
+    const parsed = Number(fallback);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function readCancelAtPeriodEnd(
@@ -137,6 +152,14 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  logEvent({
+    scope: "billing_webhook",
+    event: "stripe_event_received",
+    data: {
+      eventId: event.id,
+      eventType: event.type,
+    },
+  });
 
   try {
     switch (event.type) {
@@ -182,6 +205,20 @@ export async function POST(req: Request) {
           currentPeriodEnd: readSubscriptionPeriodEnd(sub),
           cancelAtPeriodEnd: readCancelAtPeriodEnd(sub),
         });
+        logEvent({
+          scope: "billing_webhook",
+          event: "checkout_session_synced",
+          data: {
+            eventId: event.id,
+            stripeSubscriptionId,
+            stripeCustomerId,
+            userId,
+            tier,
+            interval,
+            status: sub.status,
+            currentPeriodEnd: readSubscriptionPeriodEnd(sub),
+          },
+        });
         break;
       }
 
@@ -218,6 +255,21 @@ export async function POST(req: Request) {
           currentPeriodEnd: readSubscriptionPeriodEnd(sub),
           cancelAtPeriodEnd: readCancelAtPeriodEnd(sub),
         });
+        logEvent({
+          scope: "billing_webhook",
+          event: "subscription_state_synced",
+          data: {
+            eventId: event.id,
+            eventType: event.type,
+            stripeSubscriptionId,
+            stripeCustomerId,
+            userId,
+            tier,
+            interval,
+            status: sub.status,
+            currentPeriodEnd: readSubscriptionPeriodEnd(sub),
+          },
+        });
         break;
       }
 
@@ -225,6 +277,16 @@ export async function POST(req: Request) {
         break;
     }
   } catch (e: unknown) {
+    logEvent({
+      scope: "billing_webhook",
+      event: "stripe_event_failed",
+      level: "error",
+      data: {
+        eventId: event.id,
+        eventType: event.type,
+        error: e instanceof Error ? e.message : "Webhook processing failed",
+      },
+    });
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Webhook processing failed" },
       { status: 500 },

@@ -495,9 +495,111 @@ function MarketsAlertsPanel() {
 }
 
 function PlanApiPanel() {
-  const free = TIER_ENTITLEMENTS.free;
   const pro = TIER_ENTITLEMENTS.pro;
   const team = TIER_ENTITLEMENTS.team;
+  const [billingStatus, setBillingStatus] = useState<{
+    effectiveTier: "free" | "pro" | "team" | "enterprise";
+    status: string;
+    interval: "monthly" | "annual" | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  } | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [startingCheckout, setStartingCheckout] = useState<string | null>(null);
+  const [openingPortal, setOpeningPortal] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBillingStatus() {
+      setLoadingStatus(true);
+      setStatusError(null);
+      try {
+        const res = await fetch("/api/billing/status", { method: "GET" });
+        if (!res.ok) {
+          const body: { error?: string } = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? "Failed to load billing status");
+        }
+        const body = (await res.json()) as {
+          effectiveTier: "free" | "pro" | "team" | "enterprise";
+          status: string;
+          interval: "monthly" | "annual" | null;
+          currentPeriodEnd: string | null;
+          cancelAtPeriodEnd: boolean;
+        };
+        if (!cancelled) setBillingStatus(body);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setStatusError(
+            err instanceof Error ? err.message : "Could not load billing status.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoadingStatus(false);
+      }
+    }
+    loadBillingStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const currentTierCode = billingStatus?.effectiveTier ?? "free";
+  const currentTier = TIER_ENTITLEMENTS[currentTierCode];
+  const statusLabel = billingStatus?.status
+    ? billingStatus.status.replace(/_/g, " ")
+    : "active";
+  const periodEndLabel =
+    billingStatus?.currentPeriodEnd != null
+      ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : null;
+
+  async function startCheckout(tier: "pro" | "team", interval: "monthly" | "annual") {
+    setStartingCheckout(`${tier}-${interval}`);
+    setStatusError(null);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tier, interval }),
+      });
+      const body: { url?: string; error?: string } = await res
+        .json()
+        .catch(() => ({}));
+      if (!res.ok || !body.url) {
+        throw new Error(body.error ?? "Could not start checkout.");
+      }
+      window.location.assign(body.url);
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Could not start checkout.");
+      setStartingCheckout(null);
+    }
+  }
+
+  async function openPortal() {
+    setOpeningPortal(true);
+    setStatusError(null);
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const body: { url?: string; error?: string } = await res
+        .json()
+        .catch(() => ({}));
+      if (!res.ok || !body.url) {
+        throw new Error(body.error ?? "Could not open billing portal.");
+      }
+      window.location.assign(body.url);
+    } catch (err: unknown) {
+      setStatusError(
+        err instanceof Error ? err.message : "Could not open billing portal.",
+      );
+      setOpeningPortal(false);
+    }
+  }
+
   const endpoints = [
     { method: "GET", path: "/api/v1/premium", desc: "Latest physical premium score" },
     { method: "GET", path: "/api/v1/signals", desc: "REMIT signal feed" },
@@ -529,16 +631,45 @@ function PlanApiPanel() {
         </p>
         <div className="mt-4 flex items-start justify-between">
           <div>
-            <p className="font-serif text-2xl text-ink">Free</p>
+            <p className="font-serif text-2xl text-ink">{currentTier.label}</p>
             <p className="mt-1 text-sm text-ink-mid">
-              Physical premium score · Morning brief ({free.morningBriefTimeGmt} GMT) ·
-              Signal feed · GB Power and NBP
+              Physical premium score · Morning brief ({currentTier.morningBriefTimeGmt} GMT)
+              · Signal feed
             </p>
+            {billingStatus?.interval ? (
+              <p className="mt-1 text-xs text-ink-light">
+                Billing interval:{" "}
+                {billingStatus.interval === "annual" ? "Annual" : "Monthly"}
+              </p>
+            ) : null}
+            {periodEndLabel ? (
+              <p className="mt-1 text-xs text-ink-light">
+                Current period end: {periodEndLabel}
+              </p>
+            ) : null}
+            {billingStatus?.cancelAtPeriodEnd ? (
+              <p className="mt-1 text-xs text-bear">
+                Subscription will cancel at period end.
+              </p>
+            ) : null}
           </div>
           <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
-            Active
+            {loadingStatus ? "Loading" : statusLabel}
           </span>
         </div>
+        {loadingStatus ? (
+          <p className="mt-3 text-xs text-ink-light">Loading billing status...</p>
+        ) : null}
+        {currentTierCode !== "free" ? (
+          <button
+            type="button"
+            disabled={openingPortal}
+            onClick={openPortal}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+          >
+            {openingPortal ? "Opening portal..." : "Manage in billing portal"}
+          </button>
+        ) : null}
       </div>
 
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
@@ -560,12 +691,24 @@ function PlanApiPanel() {
               Live signals, {pro.morningBriefTimeGmt} brief, five markets, portfolio
               tools.
             </p>
-            <a
-              href="mailto:contact@zephyr.markets?subject=Pro%20plan%20upgrade"
-              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] bg-gold text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a5f1a]"
+            <button
+              type="button"
+              onClick={() => startCheckout("pro", "monthly")}
+              disabled={startingCheckout != null}
+              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] bg-gold text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a5f1a] disabled:opacity-60"
             >
-              Get Pro
-            </a>
+              {startingCheckout === "pro-monthly" ? "Redirecting..." : "Get Pro"}
+            </button>
+            <button
+              type="button"
+              onClick={() => startCheckout("pro", "annual")}
+              disabled={startingCheckout != null}
+              className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-gold/45 bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+            >
+              {startingCheckout === "pro-annual"
+                ? "Redirecting..."
+                : "Get Pro Annual (£390/year)"}
+            </button>
           </div>
           <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-5">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
@@ -580,18 +723,17 @@ function PlanApiPanel() {
             <p className="mt-2 text-sm text-ink-mid">
               Five seats, unlimited positions, API access, all markets.
             </p>
-            <a
-              href="mailto:contact@zephyr.markets?subject=Team%20plan%20upgrade"
-              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark"
+            <button
+              type="button"
+              onClick={() => startCheckout("team", "monthly")}
+              disabled={startingCheckout != null}
+              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
             >
-              Get Team
-            </a>
+              {startingCheckout === "team-monthly" ? "Redirecting..." : "Get Team"}
+            </button>
           </div>
         </div>
-        <p className="mt-4 text-xs text-ink-light">
-          Billing is being rolled out in phases. Entitlements are now defined in
-          platform policy and Stripe checkout will replace manual upgrades next.
-        </p>
+        {statusError ? <p className="mt-4 text-xs text-bear">{statusError}</p> : null}
       </div>
 
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">

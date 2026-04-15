@@ -7,6 +7,7 @@ import {
 } from "@/lib/portfolio/optimise";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -139,6 +140,19 @@ export async function GET(req: Request) {
       return auth.response;
     }
     const user = auth.user!;
+    const entitlement = await requireEntitlement(supabase, user.id, {
+      feature: "portfolioEnabled",
+      minimumTier: "pro",
+    });
+    if (entitlement.response) {
+      await logAuthAuditEvent({
+        event: "optimise_recommendations_plan_required",
+        userId: user.id,
+        status: "failure",
+      });
+      return entitlement.response;
+    }
+
     const rateLimit = await checkRateLimit({
       key: user.id,
       bucket: "optimise_recommendations",

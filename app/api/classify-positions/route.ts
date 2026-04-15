@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
+import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
@@ -103,6 +104,19 @@ export async function POST(req: Request) {
       return auth.response;
     }
     const user = auth.user!;
+    const entitlement = await requireEntitlement(supabase, user.id, {
+      feature: "portfolioEnabled",
+      minimumTier: "pro",
+    });
+    if (entitlement.response) {
+      await logAuthAuditEvent({
+        event: "classify_positions_plan_required",
+        userId: user.id,
+        status: "failure",
+      });
+      return entitlement.response;
+    }
+
     const rateLimit = await checkRateLimit({
       key: user.id,
       bucket: "classify_positions",
