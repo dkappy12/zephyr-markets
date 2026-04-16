@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { getStripe } from "@/lib/billing/stripe";
+import { getAppBaseUrl } from "@/lib/team/invite-url";
 
 type BillingInterval = "monthly" | "annual";
 type Tier = "pro" | "team";
@@ -69,9 +70,7 @@ export async function POST(req: Request) {
     }
 
     const stripe = getStripe();
-    const rawBase =
-      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const baseUrl = rawBase.replace(/\/+$/, "");
+    const baseUrl = getAppBaseUrl(req);
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",

@@ -3,8 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { getStripe } from "@/lib/billing/stripe";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
+import { getAppBaseUrl } from "@/lib/team/invite-url";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     const supabase = await createClient();
     const auth = await requireUser(supabase);
@@ -12,9 +13,7 @@ export async function POST() {
     const user = auth.user!;
 
     const stripe = getStripe();
-    const rawBase =
-      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const baseUrl = rawBase.replace(/\/+$/, "");
+    const baseUrl = getAppBaseUrl(req);
 
     const billing = await getEffectiveBillingState(supabase, user.id);
     if (billing.teamMemberOfOwnerId) {
