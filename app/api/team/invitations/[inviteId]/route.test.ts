@@ -60,7 +60,7 @@ describe("DELETE /api/team/invitations/[inviteId]", () => {
                 })),
               })),
             })),
-            update: vi.fn(() => ({
+            delete: vi.fn(() => ({
               eq: vi.fn(async () => ({ error: null })),
             })),
           };

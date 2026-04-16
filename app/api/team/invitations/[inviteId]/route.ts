@@ -63,11 +63,11 @@ export async function DELETE(_req: Request, ctx: Ctx) {
       );
     }
 
-    const { error: updateError } = await admin
+    const { error: deleteError } = await admin
       .from("team_invitations")
-      .update({ status: "cancelled" })
+      .delete()
       .eq("id", invite.id);
-    if (updateError) throw new Error(updateError.message);
+    if (deleteError) throw new Error(deleteError.message);
 
     return NextResponse.json({ cancelled: true });
   } catch (e: unknown) {
