@@ -15,7 +15,6 @@ Zephyr is a portfolio intelligence platform focused on **GB and Northwest Europe
 - Database/Auth: Supabase (PostgreSQL, RLS, Realtime)
 - Backend: Python on Railway (4 agents)
 - AI: Claude API (Sonnet) for signal parsing, synthesis, morning brief
-- Mapping: Mapbox GL JS
 - Payments: Stripe
 - Email: Resend
 - Alerts: Slack webhooks
