@@ -837,6 +837,7 @@ function TeamPanel() {
   const seatLimit = data?.seatLimit ?? "—";
   const usedSeats = data?.usedSeats ?? "—";
   const isOwner = data?.isOwner !== false;
+  const viewerRole = data?.viewerRole ?? null;
 
   async function runConfirmedAction() {
     const action = confirmAction;
@@ -908,9 +909,11 @@ function TeamPanel() {
           Team workspace
         </p>
         <p className="mt-2 text-sm text-ink-mid">
-          {isOwner
+          {viewerRole === "member"
+            ? "You’re a member of this team. Invite links are managed by the team owner."
+            : viewerRole === "owner"
             ? "Create a team, invite colleagues by email, and share seats. Invitees open the link below (or paste it after signing in with the invited address)."
-            : "You’re a member of this team. Invite links are managed by the team owner."}
+            : "You’re not on a team right now. Create a team to invite colleagues and share seats."}
         </p>
         {loading ? (
           <p className="mt-3 text-xs text-ink-light">Loading team…</p>
