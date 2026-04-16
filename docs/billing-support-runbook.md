@@ -104,6 +104,53 @@ having count(*) > 1;
   - `unpaid`, `incomplete`, `incomplete_expired` -> premium blocked.
 - Ask user to open portal and update payment method for blocked delinquent states.
 
+### D) Team member appears on free vs team seat
+
+- Confirm whether user is team owner or team member:
+  - team owner rows are in `teams.owner_id`.
+  - team members are in `team_members` with `status = active`.
+- Current policy:
+  - team owners use their own subscription row.
+  - active team members inherit owner billing for entitlement checks.
+- If member appears free:
+  - verify membership row exists and is active.
+  - verify owner has active/grace subscription in `subscriptions`.
+  - check `GET /api/billing/status` for `teamMemberOfOwnerId`.
+
+### E) Invite not received / duplicate pending invite
+
+- Invite flow is idempotent for pending invites:
+  - re-inviting same email should reuse existing pending invite and resend email.
+- If invite fails to arrive:
+  - check Resend logs for outbound delivery errors.
+  - verify `RESEND_API_KEY` is present in runtime environment.
+  - verify sender domain and `noreply@zephyr.markets` are valid.
+- If seat cap is reached:
+  - cancel stale pending invites in Team Settings (Pending invitations) or remove member.
+  - retry invite after seat count drops.
+- If user reports duplicate/pending confusion:
+  - copy and share the existing invite link from Team Settings.
+  - cancel/reissue if necessary.
+
+## Webhook Monitoring Guidance
+
+- Primary alert conditions:
+  - Stripe webhook endpoint returns repeated `5xx`.
+  - Stripe dashboard shows automatic retries climbing for `invoice.*`/`customer.subscription.*`.
+  - App logs show repeated `stripe_event_failed` or processing errors by `eventId`.
+- Suggested thresholds (starting point):
+  - `>=3` webhook failures in 5 minutes: warn.
+  - `>=10` webhook failures in 10 minutes: page on-call.
+  - any sustained failure >15 minutes: incident.
+- First checks:
+  1. Stripe dashboard event delivery status for endpoint health.
+  2. Vercel/server logs for `/api/stripe/webhook` and `eventId`.
+  3. `subscription_events` inserts and status transitions.
+- Recovery posture:
+  - fix root cause.
+  - resend latest failed event from Stripe dashboard.
+  - confirm idempotent handling (`duplicate: true` path for replays).
+
 ## Escalation
 
 Escalate immediately when:

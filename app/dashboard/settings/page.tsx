@@ -569,6 +569,11 @@ type InvitationRow = {
   invite_url?: string | null;
 };
 
+type TeamConfirmAction =
+  | { kind: "remove-member"; userId: string; label: string }
+  | { kind: "leave-team" }
+  | { kind: "cancel-invite"; inviteId: string; invitedEmail: string };
+
 function TeamPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -581,8 +586,10 @@ function TeamPanel() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [leavingTeam, setLeavingTeam] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<TeamConfirmAction | null>(null);
   const [data, setData] = useState<{
     team: { id: string; name: string; owner_id?: string; created_at?: string } | null;
     members: TeamMemberRow[];
@@ -771,14 +778,7 @@ function TeamPanel() {
     setTimeout(() => setCopyMsg(null), 4000);
   }
 
-  async function removeMember(targetUserId: string, displayLabel: string) {
-    if (
-      !window.confirm(
-        `Remove ${displayLabel} from this team? They will lose access to team features.`,
-      )
-    ) {
-      return;
-    }
+  async function removeMember(targetUserId: string) {
     setRemovingUserId(targetUserId);
     setError(null);
     setCopyMsg(null);
@@ -799,18 +799,56 @@ function TeamPanel() {
     }
   }
 
+  async function cancelInvite(inviteId: string) {
+    setCancellingInviteId(inviteId);
+    setInviteError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch(
+        `/api/team/invitations/${encodeURIComponent(inviteId)}`,
+        { method: "DELETE" },
+      );
+      const body = (await res.json()) as { error?: string; code?: string };
+      if (!res.ok) {
+        if (res.status === 409 && body.code === "INVITE_NOT_PENDING") {
+          throw new Error(
+            body.error ?? "This invitation is no longer pending.",
+          );
+        }
+        throw new Error(body.error ?? "Could not cancel invitation");
+      }
+      setCopyMsg("Invitation cancelled.");
+      setTimeout(() => setCopyMsg(null), 5000);
+      await load();
+    } catch (e: unknown) {
+      setInviteError(
+        e instanceof Error ? e.message : "Could not cancel invitation",
+      );
+    } finally {
+      setCancellingInviteId(null);
+    }
+  }
+
   const seatLimit = data?.seatLimit ?? "—";
   const usedSeats = data?.usedSeats ?? "—";
   const isOwner = data?.isOwner !== false;
 
-  async function leaveTeamFromTeamTab() {
-    if (
-      !window.confirm(
-        "Leave this team? You will lose team features and return to the Free plan until you subscribe yourself.",
-      )
-    ) {
+  async function runConfirmedAction() {
+    const action = confirmAction;
+    if (!action) return;
+    setConfirmAction(null);
+    if (action.kind === "remove-member") {
+      await removeMember(action.userId);
       return;
     }
+    if (action.kind === "leave-team") {
+      await leaveTeamFromTeamTab();
+      return;
+    }
+    await cancelInvite(action.inviteId);
+  }
+
+  async function leaveTeamFromTeamTab() {
     setLeavingTeam(true);
     setError(null);
     setCopyMsg(null);
@@ -828,14 +866,15 @@ function TeamPanel() {
   }
 
   return (
-    <motion.div
-      key="team"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.2 }}
-      className="space-y-6"
-    >
+    <>
+      <motion.div
+        key="team"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.2 }}
+        className="space-y-6"
+      >
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
           Team workspace
@@ -923,7 +962,7 @@ function TeamPanel() {
               <button
                 type="button"
                 disabled={leavingTeam}
-                onClick={() => void leaveTeamFromTeamTab()}
+                onClick={() => setConfirmAction({ kind: "leave-team" })}
                 className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
               >
                 {leavingTeam ? "Leaving…" : "Leave team"}
@@ -989,13 +1028,29 @@ function TeamPanel() {
                       </p>
                     </div>
                     {inv.invite_url ? (
-                      <button
-                        type="button"
-                        onClick={() => copyInviteLink(inv.invite_url!)}
-                        className="shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
-                      >
-                        Copy invite link
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => copyInviteLink(inv.invite_url!)}
+                          className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
+                        >
+                          Copy invite link
+                        </button>
+                        <button
+                          type="button"
+                          disabled={cancellingInviteId === inv.id}
+                          onClick={() =>
+                            setConfirmAction({
+                              kind: "cancel-invite",
+                              inviteId: inv.id,
+                              invitedEmail: inv.invited_email,
+                            })
+                          }
+                          className="rounded-[4px] border-[0.5px] border-bear/40 bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
+                        >
+                          {cancellingInviteId === inv.id ? "Cancelling…" : "Cancel"}
+                        </button>
+                      </div>
                     ) : null}
                   </li>
                 ))}
@@ -1033,7 +1088,13 @@ function TeamPanel() {
                         <button
                           type="button"
                           disabled={removingUserId === m.user_id}
-                          onClick={() => void removeMember(m.user_id, label)}
+                          onClick={() =>
+                            setConfirmAction({
+                              kind: "remove-member",
+                              userId: m.user_id,
+                              label,
+                            })
+                          }
                           className="shrink-0 rounded-[4px] border-[0.5px] border-bear/40 bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
                         >
                           {removingUserId === m.user_id ? "Removing…" : "Remove"}
@@ -1047,7 +1108,40 @@ function TeamPanel() {
           </div>
         </>
       )}
-    </motion.div>
+      </motion.div>
+      {confirmAction ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+          <div className="w-full max-w-md rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+              Confirm action
+            </p>
+            <p className="mt-2 text-sm text-ink">
+              {confirmAction.kind === "remove-member"
+                ? `Remove ${confirmAction.label} from this team? They will lose access to team features.`
+                : confirmAction.kind === "leave-team"
+                  ? "Leave this team? You will lose team features and return to the Free plan until you subscribe yourself."
+                  : `Cancel the pending invite for ${confirmAction.invitedEmail}?`}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 text-xs font-semibold tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                onClick={() => void runConfirmedAction()}
+                className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10"
+              >
+                {confirmAction.kind === "cancel-invite" ? "Cancel invite" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
