@@ -1440,6 +1440,7 @@ function PlanApiPanel() {
             ? "Only the team owner can change payment method or subscription. Leave the team if you need your own billing."
             : isPaidTier
               ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. You will be sent back to Overview when you finish in Stripe."
+              + " If you decide not to continue, use the Return link in Stripe’s left sidebar."
               : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
         </p>
         {isPaidTier && !isTeamSeat ? (

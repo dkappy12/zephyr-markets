@@ -69,8 +69,22 @@ function OverviewPageInner() {
   const searchParams = useSearchParams();
   const [billingBannerDismissed, setBillingBannerDismissed] = useState(false);
   const billingParam = searchParams.get("billing");
+  const billingDismissKey = useMemo(() => {
+    if (!billingParam) return null;
+    const sessionId = searchParams.get("checkout_session_id") ?? "";
+    return `billing_banner_dismissed:${billingParam}:${sessionId}`;
+  }, [billingParam, searchParams]);
+  const billingBannerSessionDismissed = useMemo(() => {
+    if (!billingDismissKey || typeof window === "undefined") return false;
+    try {
+      return window.sessionStorage.getItem(billingDismissKey) === "1";
+    } catch {
+      return false;
+    }
+  }, [billingDismissKey]);
   const billingBanner =
     !billingBannerDismissed &&
+    !billingBannerSessionDismissed &&
     (billingParam === "success" ||
       billingParam === "cancelled" ||
       billingParam === "portal_return" ||
@@ -82,6 +96,9 @@ function OverviewPageInner() {
   function dismissBillingBanner() {
     setBillingBannerDismissed(true);
     try {
+      if (billingDismissKey) {
+        window.sessionStorage.setItem(billingDismissKey, "1");
+      }
       const url = new URL(window.location.href);
       url.searchParams.delete("billing");
       url.searchParams.delete("checkout_session_id");
