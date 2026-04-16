@@ -102,6 +102,9 @@ export async function POST(req: Request) {
       usedSeats: usedSeats + 1,
       inviteEmailSent: emailResult.sent,
       inviteEmailSkipped: emailResult.skipped === true,
+      ...(emailResult.error
+        ? { inviteEmailError: emailResult.error }
+        : {}),
     });
   } catch (e: unknown) {
     return NextResponse.json(

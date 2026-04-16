@@ -712,6 +712,7 @@ function TeamPanel() {
         invitation?: { token?: string };
         inviteEmailSent?: boolean;
         inviteEmailSkipped?: boolean;
+        inviteEmailError?: string;
       };
       if (!res.ok) {
         if (res.status === 409 && body.code === "SEAT_LIMIT_REACHED") {
@@ -726,8 +727,15 @@ function TeamPanel() {
         );
         setTimeout(() => setCopyMsg(null), 6000);
       } else if (body.inviteEmailSent) {
-        setCopyMsg("Invite email sent. You can still copy the link below if needed.");
+        setCopyMsg(
+          "Invite email sent from noreply@zephyr.markets. You can still copy the link below if needed.",
+        );
         setTimeout(() => setCopyMsg(null), 5000);
+      } else if (body.inviteEmailError) {
+        setCopyMsg(
+          `Invite saved, but email failed to send (${body.inviteEmailError}). Copy the link below or check Resend logs.`,
+        );
+        setTimeout(() => setCopyMsg(null), 10000);
       }
       await load();
     } catch (e: unknown) {
