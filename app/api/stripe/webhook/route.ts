@@ -2,12 +2,21 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { getStripe } from "@/lib/billing/stripe";
+import {
+  coerceInterval,
+  coerceTier,
+  mapStripeSubscriptionToBillingFields,
+  readCancelAtPeriodEnd,
+  readSubscriptionPeriodEnd,
+  tierFromPriceId,
+  toBillingInterval,
+  type BillingInterval,
+  type Tier,
+} from "@/lib/billing/stripe-subscription-mapper";
 import { logEvent } from "@/lib/ops/logger";
 
 export const runtime = "nodejs";
 
-type Tier = "pro" | "team";
-type BillingInterval = "monthly" | "annual";
 type LedgerContext = {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
@@ -16,26 +25,6 @@ type LedgerContext = {
   tier: Tier | null;
   interval: BillingInterval | null;
 };
-
-function toBillingInterval(
-  interval: Stripe.Price.Recurring.Interval | null | undefined,
-): BillingInterval {
-  return interval === "year" ? "annual" : "monthly";
-}
-
-function tierFromPriceId(priceId: string | null | undefined): Tier | null {
-  if (!priceId) return null;
-  if (
-    priceId === process.env.STRIPE_PRICE_PRO_MONTHLY ||
-    priceId === process.env.STRIPE_PRICE_PRO_ANNUAL
-  ) {
-    return "pro";
-  }
-  if (priceId === process.env.STRIPE_PRICE_TEAM_MONTHLY) {
-    return "team";
-  }
-  return null;
-}
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,45 +35,6 @@ function getAdminSupabase() {
   return createAdminClient(url, serviceRole);
 }
 
-function coerceTier(value: string | undefined): Tier | null {
-  if (!value) return null;
-  return value === "pro" || value === "team" ? value : null;
-}
-
-function coerceInterval(value: string | undefined): BillingInterval | null {
-  if (!value) return null;
-  return value === "annual" || value === "monthly" ? value : null;
-}
-
-function readSubscriptionPeriodEnd(
-  sub: Stripe.Subscription | Stripe.Response<Stripe.Subscription>,
-): number | null {
-  const raw = sub as unknown as Record<string, unknown>;
-  const primary = raw.current_period_end ?? raw.currentPeriodEnd;
-  if (typeof primary === "number") return primary;
-  if (typeof primary === "string") {
-    const parsed = Number(primary);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  const items = raw.items as { data?: Array<Record<string, unknown>> } | undefined;
-  const firstItem = items?.data?.[0];
-  const fallback = firstItem?.current_period_end ?? firstItem?.currentPeriodEnd;
-  if (typeof fallback === "number") return fallback;
-  if (typeof fallback === "string") {
-    const parsed = Number(fallback);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-function readCancelAtPeriodEnd(
-  sub: Stripe.Subscription | Stripe.Response<Stripe.Subscription>,
-): boolean {
-  const raw = sub as unknown as Record<string, unknown>;
-  const value = raw.cancel_at_period_end ?? raw.cancelAtPeriodEnd;
-  return typeof value === "boolean" ? value : false;
-}
 
 async function upsertSubscriptionRow(input: {
   userId: string;
@@ -219,6 +169,33 @@ async function persistWebhookEvent(
   return { shouldProcess: true };
 }
 
+async function markWebhookEventFailed(input: {
+  event: Stripe.Event;
+  context: LedgerContext;
+  error: string;
+}) {
+  try {
+    const admin = getAdminSupabase();
+    await admin
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("subscription_events" as any)
+      .update({
+        payload_json: {
+          ...(input.event as unknown as Record<string, unknown>),
+          _processing: {
+            state: "failed",
+            failed_at: new Date().toISOString(),
+            error: input.error,
+            context: input.context,
+          },
+        },
+      })
+      .eq("stripe_event_id", input.event.id);
+  } catch {
+    // Never block webhook response on failure instrumentation.
+  }
+}
+
 export async function POST(req: Request) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
@@ -267,6 +244,9 @@ export async function POST(req: Request) {
         data: {
           eventId: event.id,
           eventType: event.type,
+          stripeCustomerId: ledgerContext.stripeCustomerId,
+          stripeSubscriptionId: ledgerContext.stripeSubscriptionId,
+          userId: ledgerContext.userId,
         },
       });
       return NextResponse.json({
@@ -291,20 +271,18 @@ export async function POST(req: Request) {
         }
 
         const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-        const firstPrice = sub.items.data[0]?.price;
-        const tier =
-          coerceTier(sub.metadata?.tier) ??
-          coerceTier(session.metadata?.tier) ??
-          tierFromPriceId(firstPrice?.id);
-        const interval =
-          coerceInterval(sub.metadata?.interval) ??
-          coerceInterval(session.metadata?.interval) ??
-          toBillingInterval(firstPrice?.recurring?.interval);
-        const userId =
-          session.metadata?.user_id ??
-          session.client_reference_id ??
-          sub.metadata?.user_id ??
-          null;
+        const mapped = mapStripeSubscriptionToBillingFields(sub, {
+          tier: session.metadata?.tier ?? null,
+          interval: session.metadata?.interval ?? null,
+          userId:
+            session.metadata?.user_id ??
+            session.client_reference_id ??
+            sub.metadata?.user_id ??
+            null,
+        });
+        const tier = mapped.tier;
+        const interval = mapped.interval;
+        const userId = mapped.userId;
 
         if (!userId || !tier || !interval) {
           throw new Error("Unable to resolve user/tier/interval for checkout");
@@ -343,16 +321,13 @@ export async function POST(req: Request) {
         const stripeSubscriptionId = sub.id;
         const stripeCustomerId =
           typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-        const firstPrice = sub.items.data[0]?.price;
-
-        const tier =
-          coerceTier(sub.metadata?.tier) ?? tierFromPriceId(firstPrice?.id);
-        const interval =
-          coerceInterval(sub.metadata?.interval) ??
-          toBillingInterval(firstPrice?.recurring?.interval);
+        const mapped = mapStripeSubscriptionToBillingFields(sub, {
+          userId: sub.metadata?.user_id ?? null,
+        });
+        const tier = mapped.tier;
+        const interval = mapped.interval;
         const userId =
-          sub.metadata?.user_id ??
-          (await resolveUserIdFromCustomer(stripeCustomerId));
+          mapped.userId ?? (await resolveUserIdFromCustomer(stripeCustomerId));
 
         if (!userId || !tier || !interval) {
           throw new Error(
@@ -401,6 +376,8 @@ export async function POST(req: Request) {
         break;
     }
   } catch (e: unknown) {
+    const error = e instanceof Error ? e.message : "Webhook processing failed";
+    await markWebhookEventFailed({ event, context: ledgerContext, error });
     logEvent({
       scope: "billing_webhook",
       event: "stripe_event_failed",
@@ -408,11 +385,17 @@ export async function POST(req: Request) {
       data: {
         eventId: event.id,
         eventType: event.type,
-        error: e instanceof Error ? e.message : "Webhook processing failed",
+        error,
+        stripeCustomerId: ledgerContext.stripeCustomerId,
+        stripeSubscriptionId: ledgerContext.stripeSubscriptionId,
+        userId: ledgerContext.userId,
+        status: ledgerContext.status,
+        tier: ledgerContext.tier,
+        interval: ledgerContext.interval,
       },
     });
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Webhook processing failed" },
+      { error },
       { status: 500 },
     );
   }

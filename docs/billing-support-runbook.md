@@ -87,6 +87,14 @@ having count(*) > 1;
 - If Stripe says active but app says free:
   - verify `subscriptions` row exists for same `user_id`.
   - verify RLS select policy still exists for own row.
+- Admin recovery (no external tooling):
+  - use `POST /api/admin/billing/reconcile` with JSON `{ "userId": "..." }`
+  - expected outcome:
+    - `subscriptions` row is upserted for that `user_id` from Stripe’s latest active/trialing/past_due subscription
+    - an audit row is inserted into `subscription_events` with `event_type = manual.reconcile`
+  - re-check:
+    - `GET /api/billing/status` as the affected user
+    - and the SQL queries above for `subscriptions` + `subscription_events`
 
 ### B) Webhook delivery failures
 
@@ -133,6 +141,12 @@ having count(*) > 1;
   - cancel/reissue if necessary.
 
 ## Webhook Monitoring Guidance
+
+- Quick health snapshot (admin-only):
+  - `GET /api/admin/billing/health` returns a compact JSON summary of recent `subscription_events`:
+    - totals in the last 1h / 24h (based on `processed_at`)
+    - approximate duplicate rate in the sample window (based on repeated `stripe_event_id`)
+    - the most recent `manual.reconcile` runs
 
 - Primary alert conditions:
   - Stripe webhook endpoint returns repeated `5xx`.

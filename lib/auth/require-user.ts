@@ -8,6 +8,8 @@ type SupabaseAuthClient = {
           id: string;
           email?: string | null;
           email_confirmed_at?: string | null;
+          app_metadata?: Record<string, unknown> | null;
+          user_metadata?: Record<string, unknown> | null;
         } | null;
       };
       error: { message?: string } | null;

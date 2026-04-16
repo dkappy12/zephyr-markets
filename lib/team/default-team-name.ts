@@ -3,7 +3,7 @@
  */
 export function defaultTeamNameFromUser(user: {
   email?: string | null;
-  user_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown> | null;
 }): string {
   const full = String(user.user_metadata?.full_name ?? "").trim();
   if (full) {

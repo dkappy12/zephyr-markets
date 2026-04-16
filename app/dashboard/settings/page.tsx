@@ -5,7 +5,7 @@ import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 const baseTabs = ["Profile", "Markets & Alerts", "Plan & API"] as const;
 const teamTab = "Team" as const;
@@ -590,6 +590,11 @@ function TeamPanel() {
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [leavingTeam, setLeavingTeam] = useState(false);
   const [confirmAction, setConfirmAction] = useState<TeamConfirmAction | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
   const [data, setData] = useState<{
     team: { id: string; name: string; owner_id?: string; created_at?: string } | null;
     members: TeamMemberRow[];
@@ -836,16 +841,19 @@ function TeamPanel() {
   async function runConfirmedAction() {
     const action = confirmAction;
     if (!action) return;
-    setConfirmAction(null);
-    if (action.kind === "remove-member") {
-      await removeMember(action.userId);
-      return;
+    setConfirmBusy(true);
+    try {
+      if (action.kind === "remove-member") {
+        await removeMember(action.userId);
+      } else if (action.kind === "leave-team") {
+        await leaveTeamFromTeamTab();
+      } else {
+        await cancelInvite(action.inviteId);
+      }
+      setConfirmAction(null);
+    } finally {
+      setConfirmBusy(false);
     }
-    if (action.kind === "leave-team") {
-      await leaveTeamFromTeamTab();
-      return;
-    }
-    await cancelInvite(action.inviteId);
   }
 
   async function leaveTeamFromTeamTab() {
@@ -864,6 +872,26 @@ function TeamPanel() {
       setLeavingTeam(false);
     }
   }
+
+  function closeConfirm() {
+    if (confirmBusy) return;
+    setConfirmAction(null);
+  }
+
+  useEffect(() => {
+    if (!confirmAction) return;
+    lastFocusedRef.current = document.activeElement as HTMLElement | null;
+    const t = window.setTimeout(() => {
+      cancelBtnRef.current?.focus();
+      modalRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [confirmAction]);
+
+  useEffect(() => {
+    if (confirmAction) return;
+    lastFocusedRef.current?.focus?.();
+  }, [confirmAction]);
 
   return (
     <>
@@ -1110,8 +1138,31 @@ function TeamPanel() {
       )}
       </motion.div>
       {confirmAction ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
-          <div className="w-full max-w-md rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm action"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeConfirm();
+            }
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeConfirm();
+          }}
+        >
+          <span
+            tabIndex={0}
+            onFocus={() => confirmBtnRef.current?.focus()}
+            className="sr-only"
+          />
+          <div
+            ref={modalRef}
+            tabIndex={-1}
+            className="w-full max-w-md rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5 outline-none"
+          >
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
               Confirm action
             </p>
@@ -1125,20 +1176,33 @@ function TeamPanel() {
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmAction(null)}
+                ref={cancelBtnRef}
+                disabled={confirmBusy}
+                onClick={closeConfirm}
                 className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 text-xs font-semibold tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
               >
                 Keep
               </button>
               <button
                 type="button"
+                ref={confirmBtnRef}
+                disabled={confirmBusy}
                 onClick={() => void runConfirmedAction()}
                 className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10"
               >
-                {confirmAction.kind === "cancel-invite" ? "Cancel invite" : "Confirm"}
+                {confirmBusy
+                  ? "Working…"
+                  : confirmAction.kind === "cancel-invite"
+                    ? "Cancel invite"
+                    : "Confirm"}
               </button>
             </div>
           </div>
+          <span
+            tabIndex={0}
+            onFocus={() => cancelBtnRef.current?.focus()}
+            className="sr-only"
+          />
         </div>
       ) : null}
     </>
