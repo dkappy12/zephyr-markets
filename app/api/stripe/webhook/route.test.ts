@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCreateAdminClient, mockGetStripe, mockLogEvent } = vi.hoisted(() => ({
+const {
+  mockCreateAdminClient,
+  mockGetStripe,
+  mockLogEvent,
+  mockSendBillingLifecycleEmail,
+} = vi.hoisted(() => ({
   mockCreateAdminClient: vi.fn(),
   mockGetStripe: vi.fn(),
   mockLogEvent: vi.fn(),
+  mockSendBillingLifecycleEmail: vi.fn(async () => ({ sent: true })),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -16,6 +22,9 @@ vi.mock("@/lib/billing/stripe", () => ({
 
 vi.mock("@/lib/ops/logger", () => ({
   logEvent: mockLogEvent,
+}));
+vi.mock("@/lib/email/billing-lifecycle", () => ({
+  sendBillingLifecycleEmail: mockSendBillingLifecycleEmail,
 }));
 
 import { POST } from "@/app/api/stripe/webhook/route";
@@ -34,6 +43,14 @@ function makeAdminClient({
 
   return {
     client: {
+      auth: {
+        admin: {
+          getUserById: vi.fn(async () => ({
+            data: { user: { email: "u1@example.com", user_metadata: { full_name: "Dean Kaplan" } } },
+            error: null,
+          })),
+        },
+      },
       from: vi.fn((table: string) => {
         if (table === "subscription_events") {
           return {
@@ -217,6 +234,12 @@ describe("POST /api/stripe/webhook", () => {
     expect(body.eventId).toBe("evt_new");
     expect(admin.insertEvent).toHaveBeenCalled();
     expect(admin.upsertSubscription).toHaveBeenCalled();
+    expect(mockSendBillingLifecycleEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "u1@example.com",
+        kind: "subscription_started",
+      }),
+    );
   });
 
   it("treats duplicate-key insert race as duplicate event", async () => {
@@ -295,6 +318,9 @@ describe("POST /api/stripe/webhook", () => {
     const res = await POST(req);
     expect(res.status).toBe(200);
     expect(admin.upsertSubscription).toHaveBeenCalled();
+    expect(mockSendBillingLifecycleEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "subscription_updated" }),
+    );
   });
 
   it("processes customer.subscription.deleted event", async () => {
@@ -330,6 +356,9 @@ describe("POST /api/stripe/webhook", () => {
     const res = await POST(req);
     expect(res.status).toBe(200);
     expect(admin.upsertSubscription).toHaveBeenCalled();
+    expect(mockSendBillingLifecycleEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "subscription_cancelled" }),
+    );
   });
 
   it("returns 200 for unhandled webhook types without subscription mutation", async () => {

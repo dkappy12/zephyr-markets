@@ -3,6 +3,10 @@ import type Stripe from "stripe";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { getStripe } from "@/lib/billing/stripe";
 import {
+  sendBillingLifecycleEmail,
+  type BillingLifecycleEmailKind,
+} from "@/lib/email/billing-lifecycle";
+import {
   coerceInterval,
   coerceTier,
   mapStripeSubscriptionToBillingFields,
@@ -128,6 +132,71 @@ function deriveLedgerContext(event: Stripe.Event): LedgerContext {
     tier: null,
     interval: null,
   };
+}
+
+async function resolveUserEmailContext(userId: string): Promise<{
+  email: string | null;
+  firstName: string | null;
+}> {
+  try {
+    const admin = getAdminSupabase();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (admin as any).auth.admin.getUserById(userId);
+    if (error || !data?.user) return { email: null, firstName: null };
+    const email = String(data.user.email ?? "").trim() || null;
+    const full = String(data.user.user_metadata?.full_name ?? "").trim();
+    const firstName = full ? full.split(/\s+/)[0] ?? null : null;
+    return { email, firstName };
+  } catch {
+    return { email: null, firstName: null };
+  }
+}
+
+async function sendLifecycleEmailBestEffort(input: {
+  userId: string | null;
+  kind: BillingLifecycleEmailKind;
+  tier: Tier | null;
+  interval: BillingInterval | null;
+  status: string;
+  eventId: string;
+}) {
+  if (!input.userId || !input.tier || !input.interval) return;
+  const userCtx = await resolveUserEmailContext(input.userId);
+  if (!userCtx.email) return;
+  try {
+    const result = await sendBillingLifecycleEmail({
+      to: userCtx.email,
+      firstName: userCtx.firstName,
+      kind: input.kind,
+      tier: input.tier,
+      interval: input.interval,
+      status: input.status,
+    });
+    logEvent({
+      scope: "billing_webhook",
+      event: "billing_lifecycle_email_result",
+      data: {
+        eventId: input.eventId,
+        userId: input.userId,
+        kind: input.kind,
+        sent: result.sent,
+        skipped: "skipped" in result ? !!result.skipped : false,
+        error: "error" in result ? result.error : null,
+      },
+    });
+  } catch (e: unknown) {
+    logEvent({
+      scope: "billing_webhook",
+      event: "billing_lifecycle_email_failed",
+      level: "warn",
+      data: {
+        eventId: input.eventId,
+        userId: input.userId,
+        kind: input.kind,
+        error: e instanceof Error ? e.message : "Email send failed",
+      },
+    });
+  }
 }
 
 async function persistWebhookEvent(
@@ -312,6 +381,14 @@ export async function POST(req: Request) {
             currentPeriodEnd: readSubscriptionPeriodEnd(sub),
           },
         });
+        await sendLifecycleEmailBestEffort({
+          eventId: event.id,
+          userId,
+          kind: "subscription_started",
+          tier,
+          interval,
+          status: sub.status,
+        });
         break;
       }
 
@@ -359,6 +436,17 @@ export async function POST(req: Request) {
             status: sub.status,
             currentPeriodEnd: readSubscriptionPeriodEnd(sub),
           },
+        });
+        await sendLifecycleEmailBestEffort({
+          eventId: event.id,
+          userId,
+          kind:
+            event.type === "customer.subscription.deleted"
+              ? "subscription_cancelled"
+              : "subscription_updated",
+          tier,
+          interval,
+          status: sub.status,
         });
         break;
       }

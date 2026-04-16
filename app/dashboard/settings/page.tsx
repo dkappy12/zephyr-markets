@@ -933,7 +933,7 @@ function TeamPanel() {
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
                 placeholder={
-                  suggestedTeamName || "e.g. Dean's team"
+                  suggestedTeamName || "e.g. Dean's Team"
                 }
                 className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
               />
@@ -1432,7 +1432,7 @@ function PlanApiPanel() {
           {isTeamSeat
             ? "Only the team owner can change payment method or subscription. Leave the team if you need your own billing."
             : isPaidTier
-              ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. When Stripe shows a Return button, use it to come back here."
+              ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. You will be sent back to Overview when you finish in Stripe."
               : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
         </p>
         {isPaidTier && !isTeamSeat ? (
