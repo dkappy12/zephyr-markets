@@ -14,6 +14,8 @@ export async function POST(req: Request) {
 
     const stripe = getStripe();
     const baseUrl = getAppBaseUrl(req);
+    const body = (await req.json().catch(() => ({}))) as { mode?: "manage" | "update_subscription" };
+    const requestedMode = body.mode ?? "update_subscription";
 
     const billing = await getEffectiveBillingState(supabase, user.id);
     if (billing.teamMemberOfOwnerId) {
@@ -50,10 +52,23 @@ export async function POST(req: Request) {
     }
 
     const returnUrl = `${baseUrl}/dashboard/overview?billing=billing_updated`;
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: returnUrl,
-    });
+    const session =
+      requestedMode === "update_subscription"
+        ? await stripe.billingPortal.sessions.create({
+            customer: customerId,
+            return_url: returnUrl,
+            flow_data: {
+              type: "subscription_update",
+              after_completion: {
+                type: "redirect",
+                redirect: { return_url: returnUrl },
+              },
+            },
+          })
+        : await stripe.billingPortal.sessions.create({
+            customer: customerId,
+            return_url: returnUrl,
+          });
 
     return NextResponse.json({ url: session.url });
   } catch (e: unknown) {

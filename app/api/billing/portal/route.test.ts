@@ -61,6 +61,16 @@ describe("POST /api/billing/portal", () => {
     expect(createPortalSession).toHaveBeenCalledWith({
       customer: "cus_1",
       return_url: "https://zephyr.markets/dashboard/overview?billing=billing_updated",
+      flow_data: {
+        type: "subscription_update",
+        after_completion: {
+          type: "redirect",
+          redirect: {
+            return_url:
+              "https://zephyr.markets/dashboard/overview?billing=billing_updated",
+          },
+        },
+      },
     });
   });
 });

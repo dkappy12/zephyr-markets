@@ -1332,7 +1332,11 @@ function PlanApiPanel() {
     setOpeningPortal(true);
     setStatusError(null);
     try {
-      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const res = await fetch("/api/billing/portal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "update_subscription" }),
+      });
       const body: { url?: string; error?: string } = await res
         .json()
         .catch(() => ({}));
