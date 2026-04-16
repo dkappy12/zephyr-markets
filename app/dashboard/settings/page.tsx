@@ -1230,9 +1230,7 @@ function PlanApiPanel() {
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState<string | null>(null);
-  const [openingPortal, setOpeningPortal] = useState<
-    "manage" | "update_subscription" | "cancel_subscription" | null
-  >(null);
+  const [openingPortal, setOpeningPortal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1330,17 +1328,11 @@ function PlanApiPanel() {
     }
   }
 
-  async function openPortal(
-    mode: "manage" | "update_subscription" | "cancel_subscription" = "manage",
-  ) {
-    setOpeningPortal(mode);
+  async function openPortal() {
+    setOpeningPortal(true);
     setStatusError(null);
     try {
-      const res = await fetch("/api/billing/portal", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
+      const res = await fetch("/api/billing/portal", { method: "POST" });
       const body: { url?: string; error?: string } = await res
         .json()
         .catch(() => ({}));
@@ -1352,7 +1344,7 @@ function PlanApiPanel() {
       setStatusError(
         err instanceof Error ? err.message : "Could not open billing portal.",
       );
-      setOpeningPortal(null);
+      setOpeningPortal(false);
     }
   }
 
@@ -1449,47 +1441,23 @@ function PlanApiPanel() {
         {isPaidTier && !isTeamSeat ? (
           <button
             type="button"
-            disabled={openingPortal != null}
-            onClick={() => void openPortal("manage")}
+            disabled={openingPortal}
+            onClick={openPortal}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
-            {openingPortal === "manage" ? "Opening…" : "Manage billing"}
+            {openingPortal ? "Opening…" : "Manage billing"}
           </button>
-        ) : null}
-        {isPaidTier && !isTeamSeat ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={openingPortal != null}
-              onClick={() => void openPortal("update_subscription")}
-              className="inline-flex h-8 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink disabled:opacity-60"
-            >
-              {openingPortal === "update_subscription"
-                ? "Opening…"
-                : "Update subscription"}
-            </button>
-            <button
-              type="button"
-              disabled={openingPortal != null}
-              onClick={() => void openPortal("cancel_subscription")}
-              className="inline-flex h-8 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
-            >
-              {openingPortal === "cancel_subscription"
-                ? "Opening…"
-                : "Cancel subscription"}
-            </button>
-          </div>
         ) : null}
         {!isPaidTier &&
         !isTeamSeat &&
         billingStatus?.actionRequired === "payment_method" ? (
           <button
             type="button"
-            disabled={openingPortal != null}
-            onClick={() => void openPortal("manage")}
+            disabled={openingPortal}
+            onClick={openPortal}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
-            {openingPortal === "manage" ? "Opening…" : "Update payment method"}
+            {openingPortal ? "Opening…" : "Update payment method"}
           </button>
         ) : null}
       </div>

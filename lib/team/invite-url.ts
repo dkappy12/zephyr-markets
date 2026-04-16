@@ -14,12 +14,12 @@ function inferOriginFromRequest(req: Request): string | null {
 }
 
 export function getAppBaseUrl(req?: Request): string {
-  const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (envBase) return trimTrailingSlash(envBase);
   if (req) {
     const inferred = inferOriginFromRequest(req);
     if (inferred) return trimTrailingSlash(inferred);
   }
+  const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (envBase) return trimTrailingSlash(envBase);
   return "http://localhost:3000";
 }
 
