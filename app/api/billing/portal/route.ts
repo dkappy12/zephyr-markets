@@ -51,7 +51,7 @@ export async function POST(req: Request) {
         ).id;
     }
 
-    const returnUrl = `${baseUrl}/dashboard/overview?billing=billing_updated`;
+    const returnUrl = `${baseUrl}/dashboard/overview`;
     const session =
       requestedMode === "update_subscription" && billing.stripeSubscriptionId
         ? await stripe.billingPortal.sessions.create({

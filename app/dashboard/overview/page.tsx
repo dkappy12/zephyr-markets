@@ -85,11 +85,7 @@ function OverviewPageInner() {
   const billingBanner =
     !billingBannerDismissed &&
     !billingBannerSessionDismissed &&
-    (billingParam === "success" ||
-      billingParam === "cancelled" ||
-      billingParam === "portal_return" ||
-      billingParam === "billing_updated" ||
-      billingParam === "billing_cancelled")
+    (billingParam === "success" || billingParam === "cancelled")
       ? billingParam
       : null;
 
@@ -444,13 +440,7 @@ function OverviewPageInner() {
       ? "Thank you — your subscription is updated. Stripe will email your receipt to your account address. Your plan may take a moment to show everywhere."
       : billingBanner === "cancelled"
         ? "Checkout was cancelled. No changes were made to your plan."
-        : billingBanner === "billing_updated"
-          ? "Thank you — your billing settings were updated in Stripe. Stripe will email any receipt or invoice updates, and your plan may take a moment to sync."
-          : billingBanner === "billing_cancelled"
-            ? "Your subscription cancellation was recorded. You’ll keep access until the current period ends. Stripe will email confirmation details."
-        : billingBanner === "portal_return"
-          ? "You’re back from Stripe billing. Changes may take a moment to sync."
-          : null;
+        : null;
 
   return (
     <div className="space-y-10">

@@ -61,7 +61,7 @@ describe("POST /api/billing/portal", () => {
     expect(body.url).toBe("https://billing.stripe.test/session");
     expect(createPortalSession).toHaveBeenCalledWith({
       customer: "cus_1",
-      return_url: "https://zephyr.markets/dashboard/overview?billing=billing_updated",
+      return_url: "https://zephyr.markets/dashboard/overview",
       flow_data: {
         type: "subscription_update",
         subscription_update: {
@@ -70,8 +70,7 @@ describe("POST /api/billing/portal", () => {
         after_completion: {
           type: "redirect",
           redirect: {
-            return_url:
-              "https://zephyr.markets/dashboard/overview?billing=billing_updated",
+            return_url: "https://zephyr.markets/dashboard/overview",
           },
         },
       },
@@ -96,7 +95,7 @@ describe("POST /api/billing/portal", () => {
     expect(res.status).toBe(200);
     expect(createPortalSession).toHaveBeenCalledWith({
       customer: "cus_1",
-      return_url: "https://zephyr.markets/dashboard/overview?billing=billing_updated",
+      return_url: "https://zephyr.markets/dashboard/overview",
     });
   });
 });
