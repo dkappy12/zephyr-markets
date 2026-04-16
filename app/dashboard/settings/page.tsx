@@ -1021,6 +1021,10 @@ function PlanApiPanel() {
   const currentTierCode = billingStatus?.effectiveTier ?? "free";
   const currentTier = TIER_ENTITLEMENTS[currentTierCode];
   const statusLabel = billingStatus?.statusLabel ?? "active";
+  const isPaidTier =
+    currentTierCode === "pro" ||
+    currentTierCode === "team" ||
+    currentTierCode === "enterprise";
   const periodEndLabel =
     billingStatus?.currentPeriodEnd != null
       ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-GB", {
@@ -1164,76 +1168,117 @@ function PlanApiPanel() {
           </div>
         ) : null}
         <p className="mt-3 text-xs text-ink-light">
-          Plan changes and payment methods are completed in Stripe&apos;s secure
-          billing portal. You&apos;ll return to Zephyr on the Overview page when
-          finished.
+          {isPaidTier
+            ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. When Stripe shows a Return button, use it to come back here."
+            : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
         </p>
-        {currentTierCode !== "free" ? (
+        {isPaidTier ? (
           <button
             type="button"
             disabled={openingPortal}
             onClick={openPortal}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
-            {openingPortal ? "Opening portal..." : "Manage in billing portal"}
+            {openingPortal ? "Opening…" : "Manage billing"}
           </button>
         ) : null}
-        {billingStatus?.actionRequired === "payment_method" &&
-        currentTierCode === "free" ? (
+        {!isPaidTier && billingStatus?.actionRequired === "payment_method" ? (
           <button
             type="button"
             disabled={openingPortal}
             onClick={openPortal}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
-            {openingPortal ? "Opening portal..." : "Update payment method"}
+            {openingPortal ? "Opening…" : "Update payment method"}
           </button>
         ) : null}
       </div>
 
-      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-          Upgrade
-        </p>
-        <p className="mt-2 text-xs text-ink-light">
-          Checkout opens on Stripe. After a successful payment you&apos;ll land on
-          Overview with a confirmation banner.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-[4px] border-[0.5px] border-gold/45 bg-ivory p-5">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Pro
-            </p>
-            <p className="mt-2 font-serif text-3xl text-ink">
-              £{pro.monthlyPriceGbp}
-              <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
-                /month
-              </span>
-            </p>
-            <p className="mt-2 text-sm text-ink-mid">
-              Live signals, {pro.morningBriefTimeGmt} brief, five markets, portfolio
-              tools.
-            </p>
-            <button
-              type="button"
-              onClick={() => startCheckout("pro", "monthly")}
-              disabled={startingCheckout != null}
-              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] bg-gold text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a5f1a] disabled:opacity-60"
-            >
-              {startingCheckout === "pro-monthly" ? "Redirecting..." : "Get Pro"}
-            </button>
-            <button
-              type="button"
-              onClick={() => startCheckout("pro", "annual")}
-              disabled={startingCheckout != null}
-              className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-gold/45 bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
-            >
-              {startingCheckout === "pro-annual"
-                ? "Redirecting..."
-                : "Get Pro Annual (£390/year)"}
-            </button>
+      {currentTierCode === "free" ? (
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Choose a plan
+          </p>
+          <p className="mt-2 text-xs text-ink-light">
+            New subscriptions use Stripe Checkout. After payment you&apos;ll return
+            to Overview with a confirmation — Stripe also emails your receipt.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-[4px] border-[0.5px] border-gold/45 bg-ivory p-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                Pro
+              </p>
+              <p className="mt-2 font-serif text-3xl text-ink">
+                £{pro.monthlyPriceGbp}
+                <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
+                  /month
+                </span>
+              </p>
+              <p className="mt-2 text-sm text-ink-mid">
+                Live signals, {pro.morningBriefTimeGmt} brief, five markets,
+                portfolio tools.
+              </p>
+              <button
+                type="button"
+                onClick={() => startCheckout("pro", "monthly")}
+                disabled={startingCheckout != null}
+                className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] bg-gold text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#7a5f1a] disabled:opacity-60"
+              >
+                {startingCheckout === "pro-monthly"
+                  ? "Redirecting..."
+                  : "Subscribe to Pro"}
+              </button>
+              <button
+                type="button"
+                onClick={() => startCheckout("pro", "annual")}
+                disabled={startingCheckout != null}
+                className="mt-2 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-gold/45 bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+              >
+                {startingCheckout === "pro-annual"
+                  ? "Redirecting..."
+                  : "Pro annual (£390/year)"}
+              </button>
+            </div>
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                Team
+              </p>
+              <p className="mt-2 font-serif text-3xl text-ink">
+                £{team.monthlyPriceGbp}
+                <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
+                  /month
+                </span>
+              </p>
+              <p className="mt-2 text-sm text-ink-mid">
+                Five seats, unlimited positions, API access, all markets.
+              </p>
+              <button
+                type="button"
+                onClick={() => startCheckout("team", "monthly")}
+                disabled={startingCheckout != null}
+                className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+              >
+                {startingCheckout === "team-monthly"
+                  ? "Redirecting..."
+                  : "Subscribe to Team"}
+              </button>
+            </div>
           </div>
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-5">
+        </div>
+      ) : null}
+
+      {currentTierCode === "pro" ? (
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Upgrade to Team
+          </p>
+          <p className="mt-2 text-xs text-ink-light">
+            You&apos;re on Pro. For seats and Team features, start a Team
+            subscription below. To change Pro billing (e.g. annual) or cancel, use{" "}
+            <strong className="font-semibold text-ink">Manage billing</strong>{" "}
+            above — not this button.
+          </p>
+          <div className="mt-4 max-w-md rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-5">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Team
             </p>
@@ -1252,12 +1297,33 @@ function PlanApiPanel() {
               disabled={startingCheckout != null}
               className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
             >
-              {startingCheckout === "team-monthly" ? "Redirecting..." : "Get Team"}
+              {startingCheckout === "team-monthly"
+                ? "Redirecting..."
+                : "Upgrade to Team"}
             </button>
           </div>
         </div>
-        {statusError ? <p className="mt-4 text-xs text-bear">{statusError}</p> : null}
-      </div>
+      ) : null}
+
+      {currentTierCode === "team" || currentTierCode === "enterprise" ? (
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Plan changes
+          </p>
+          <p className="mt-2 text-xs text-ink-light">
+            You&apos;re on {currentTier.label}. Use{" "}
+            <strong className="font-semibold text-ink">Manage billing</strong>{" "}
+            above to update payment details, download invoices, or adjust what
+            Stripe allows for this subscription.
+          </p>
+        </div>
+      ) : null}
+
+      {statusError ? (
+        <div className="rounded-[4px] border-[0.5px] border-bear/25 bg-bear/5 px-4 py-3">
+          <p className="text-xs text-bear">{statusError}</p>
+        </div>
+      ) : null}
 
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">

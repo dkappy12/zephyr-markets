@@ -64,7 +64,8 @@ export async function POST(req: Request) {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${baseUrl}/dashboard/overview?billing=success`,
+      // Stripe replaces {CHECKOUT_SESSION_ID}; required for hosted Checkout to return reliably.
+      success_url: `${baseUrl}/dashboard/overview?billing=success&checkout_session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/dashboard/overview?billing=cancelled`,
       customer_email: user.email ?? undefined,
       client_reference_id: user.id,

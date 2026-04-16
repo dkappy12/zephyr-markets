@@ -82,6 +82,7 @@ function OverviewPageInner() {
     try {
       const url = new URL(window.location.href);
       url.searchParams.delete("billing");
+      url.searchParams.delete("checkout_session_id");
       window.history.replaceState({}, "", url.pathname + url.search);
     } catch {
       // ignore
@@ -421,11 +422,11 @@ function OverviewPageInner() {
 
   const billingBannerCopy =
     billingBanner === "success"
-      ? "Subscription updated. Your plan should reflect here within a few moments."
+      ? "Thank you — your subscription is updated. Stripe will email your receipt to your account address. Your plan may take a moment to show everywhere."
       : billingBanner === "cancelled"
         ? "Checkout was cancelled. No changes were made to your plan."
         : billingBanner === "portal_return"
-          ? "You’re back from the billing portal. Changes may take a moment to sync."
+          ? "You’re back from Stripe billing. Changes may take a moment to sync."
           : null;
 
   return (
