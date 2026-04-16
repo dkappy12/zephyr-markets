@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
+import { buildTeamInviteUrl } from "@/lib/team/invite-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const supabase = await createClient();
     const auth = await requireUser(supabase);
@@ -124,7 +125,12 @@ export async function GET() {
     }));
 
     const seats = billingState.entitlements.seats;
-    const invitations = canSeeInvites ? (invitationsRes.data ?? []) : [];
+    const invitations = canSeeInvites
+      ? (invitationsRes.data ?? []).map((inv) => ({
+          ...inv,
+          invite_url: inv.token ? buildTeamInviteUrl(inv.token, req) : null,
+        }))
+      : [];
     const pendingInvites = pendingCountRes.count ?? 0;
 
     return NextResponse.json({

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { sendTeamInviteEmail } from "@/lib/email/team-invite";
+import { buildTeamInviteUrl } from "@/lib/team/invite-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -86,10 +87,7 @@ export async function POST(req: Request) {
       .single();
     if (invitationError) throw new Error(invitationError.message);
 
-    const rawBase =
-      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const baseUrl = rawBase.replace(/\/+$/, "");
-    const inviteUrl = `${baseUrl}/dashboard/team/join?token=${encodeURIComponent(token)}`;
+    const inviteUrl = buildTeamInviteUrl(token, req);
     const emailResult = await sendTeamInviteEmail({
       to: invitedEmail,
       inviteUrl,

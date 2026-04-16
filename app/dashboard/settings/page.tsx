@@ -566,6 +566,7 @@ type InvitationRow = {
   expires_at: string | null;
   created_at: string;
   token?: string;
+  invite_url?: string | null;
 };
 
 function TeamPanel() {
@@ -745,8 +746,7 @@ function TeamPanel() {
     }
   }
 
-  function copyInviteLink(token: string) {
-    const url = `${window.location.origin}/dashboard/team/join?token=${encodeURIComponent(token)}`;
+  function copyInviteLink(url: string) {
     void navigator.clipboard.writeText(url);
     setCopyMsg("Invite link copied to clipboard.");
     setTimeout(() => setCopyMsg(null), 4000);
@@ -966,10 +966,10 @@ function TeamPanel() {
                           : "no expiry"}
                       </p>
                     </div>
-                    {inv.token ? (
+                    {inv.invite_url ? (
                       <button
                         type="button"
-                        onClick={() => copyInviteLink(inv.token!)}
+                        onClick={() => copyInviteLink(inv.invite_url!)}
                         className="shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
                       >
                         Copy invite link
@@ -1048,7 +1048,6 @@ function PlanApiPanel() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState<string | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
-  const [leavingTeam, setLeavingTeam] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1166,29 +1165,6 @@ function PlanApiPanel() {
     }
   }
 
-  async function leaveTeamFromPlan() {
-    if (
-      !window.confirm(
-        "Leave this team? You will lose team features and return to the Free plan until you subscribe yourself.",
-      )
-    ) {
-      return;
-    }
-    setLeavingTeam(true);
-    setStatusError(null);
-    try {
-      const res = await fetch("/api/team/leave", { method: "POST" });
-      const body = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        throw new Error(body.error ?? "Could not leave team.");
-      }
-      window.location.reload();
-    } catch (err: unknown) {
-      setStatusError(err instanceof Error ? err.message : "Could not leave team.");
-      setLeavingTeam(false);
-    }
-  }
-
   const endpoints = [
     {
       method: "GET",
@@ -1287,16 +1263,6 @@ function PlanApiPanel() {
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
             {openingPortal ? "Opening…" : "Manage billing"}
-          </button>
-        ) : null}
-        {isTeamSeat ? (
-          <button
-            type="button"
-            disabled={leavingTeam}
-            onClick={() => void leaveTeamFromPlan()}
-            className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
-          >
-            {leavingTeam ? "Leaving…" : "Leave team"}
           </button>
         ) : null}
         {!isPaidTier &&
