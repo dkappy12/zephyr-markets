@@ -12,6 +12,10 @@ function normaliseEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function isPendingInviteUniqueError(message: string): boolean {
+  return message.includes("team_invitations_team_pending_email_uniq");
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -73,8 +77,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const token = randomUUID();
-    const { data: invitation, error: invitationError } = await admin
+    const existingPendingRes = await admin
+      .from("team_invitations")
+      .select("id, team_id, invited_email, status, token, expires_at, created_at")
+      .eq("team_id", team.id)
+      .eq("invited_email", invitedEmail)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (existingPendingRes.error) throw new Error(existingPendingRes.error.message);
+
+    const alreadyPending = !!existingPendingRes.data;
+    let invitation = existingPendingRes.data;
+    let usedSeatsAfterInvite = usedSeats;
+
+    if (!invitation) {
+      const token = randomUUID();
+      const insertRes = await admin
       .from("team_invitations")
       .insert({
         team_id: team.id,
@@ -85,9 +103,34 @@ export async function POST(req: Request) {
       })
       .select("id, team_id, invited_email, status, token, expires_at, created_at")
       .single();
-    if (invitationError) throw new Error(invitationError.message);
+      if (insertRes.error) {
+        if (isPendingInviteUniqueError(insertRes.error.message ?? "")) {
+          const retry = await admin
+            .from("team_invitations")
+            .select("id, team_id, invited_email, status, token, expires_at, created_at")
+            .eq("team_id", team.id)
+            .eq("invited_email", invitedEmail)
+            .eq("status", "pending")
+            .maybeSingle();
+          if (retry.error) throw new Error(retry.error.message);
+          if (!retry.data) {
+            throw new Error("Could not load existing invitation.");
+          }
+          invitation = retry.data;
+        } else {
+          throw new Error(insertRes.error.message);
+        }
+      } else {
+        invitation = insertRes.data;
+        usedSeatsAfterInvite = usedSeats + 1;
+      }
+    }
 
-    const inviteUrl = buildTeamInviteUrl(token, req);
+    if (!invitation?.token) {
+      throw new Error("Invitation token missing.");
+    }
+
+    const inviteUrl = buildTeamInviteUrl(invitation.token, req);
     const emailResult = await sendTeamInviteEmail({
       to: invitedEmail,
       inviteUrl,
@@ -97,7 +140,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       invitation,
       seatLimit,
-      usedSeats: usedSeats + 1,
+      usedSeats: usedSeatsAfterInvite,
+      inviteAlreadyPending: alreadyPending,
       inviteEmailSent: emailResult.sent,
       inviteEmailSkipped: emailResult.skipped === true,
       ...(emailResult.error

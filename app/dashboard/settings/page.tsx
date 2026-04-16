@@ -580,6 +580,7 @@ function TeamPanel() {
   const [creating, setCreating] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [leavingTeam, setLeavingTeam] = useState(false);
   const [data, setData] = useState<{
@@ -699,7 +700,7 @@ function TeamPanel() {
 
   async function invite() {
     setInviting(true);
-    setError(null);
+    setInviteError(null);
     setCopyMsg(null);
     try {
       const res = await fetch("/api/team/invite", {
@@ -713,16 +714,30 @@ function TeamPanel() {
         invitation?: { token?: string };
         inviteEmailSent?: boolean;
         inviteEmailSkipped?: boolean;
+        inviteAlreadyPending?: boolean;
         inviteEmailError?: string;
       };
       if (!res.ok) {
         if (res.status === 409 && body.code === "SEAT_LIMIT_REACHED") {
-          throw new Error(body.error ?? "Seat limit reached for this plan.");
+          throw new Error(
+            body.error ??
+              "No seats left on this team plan. Remove a pending invite/member, then try again.",
+          );
+        }
+        if (res.status === 409 && body.code === "INVITE_ALREADY_PENDING") {
+          throw new Error(
+            "An invitation is already pending for this email. Use Copy invite link below or ask them to check their inbox.",
+          );
         }
         throw new Error(body.error ?? "Could not send invite");
       }
       setInviteEmail("");
-      if (body.inviteEmailSkipped) {
+      if (body.inviteAlreadyPending) {
+        setCopyMsg(
+          "An invite was already pending for this email. We reused it and resent the invite email.",
+        );
+        setTimeout(() => setCopyMsg(null), 7000);
+      } else if (body.inviteEmailSkipped) {
         setCopyMsg(
           "Invite created. Add RESEND_API_KEY to send email automatically, or copy the link below.",
         );
@@ -740,7 +755,11 @@ function TeamPanel() {
       }
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not send invite");
+      setInviteError(
+        e instanceof Error
+          ? e.message
+          : "Could not send invite. Please check the email and try again.",
+      );
     } finally {
       setInviting(false);
     }
@@ -940,6 +959,9 @@ function TeamPanel() {
                 {inviting ? "Sending…" : "Send invite"}
               </button>
             </div>
+            {inviteError ? (
+              <p className="mt-3 text-xs text-bear">{inviteError}</p>
+            ) : null}
           </div>
           ) : null}
 
