@@ -31,8 +31,10 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     expect(state.effectiveTier).toBe("pro");
+    expect(state.teamMemberOfOwnerId).toBeNull();
     expect(state.accessState).toBe("paid");
     expect(state.canUsePremiumNow).toBe(true);
   });
@@ -51,6 +53,7 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     expect(state.effectiveTier).toBe("pro");
     expect(state.accessState).toBe("grace");
@@ -71,6 +74,7 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     expect(state.accessState).toBe("free");
     expect(state.effectiveTier).toBe("free");
@@ -91,6 +95,7 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     expect(state.effectiveTier).toBe("free");
     expect(state.accessState).toBe("free");
@@ -110,6 +115,7 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     const incomplete = await getEffectiveBillingState(
       makeSupabaseClient({
@@ -123,6 +129,7 @@ describe("billing subscription state policy", () => {
         cancel_at_period_end: false,
       }),
       "u1",
+      { skipTeamInheritance: true },
     );
     expect(unpaid.effectiveTier).toBe("free");
     expect(unpaid.canUsePremiumNow).toBe(false);

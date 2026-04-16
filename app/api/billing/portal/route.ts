@@ -17,6 +17,15 @@ export async function POST() {
     const baseUrl = rawBase.replace(/\/+$/, "");
 
     const billing = await getEffectiveBillingState(supabase, user.id);
+    if (billing.teamMemberOfOwnerId) {
+      return NextResponse.json(
+        {
+          error:
+            "Billing is managed by your team owner. Leave the team in Settings → Team if you need your own subscription.",
+        },
+        { status: 403 },
+      );
+    }
     let customerId = billing.stripeCustomerId;
     if (!customerId) {
       const email = user.email ?? "";

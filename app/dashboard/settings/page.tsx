@@ -580,12 +580,15 @@ function TeamPanel() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [leavingTeam, setLeavingTeam] = useState(false);
   const [data, setData] = useState<{
     team: { id: string; name: string; owner_id?: string; created_at?: string } | null;
     members: TeamMemberRow[];
     invitations: Array<InvitationRow & { token?: string }>;
     seatLimit: number | "unlimited";
     usedSeats: number;
+    isOwner?: boolean;
+    viewerRole?: "owner" | "member" | null;
   } | null>(null);
 
   const load = useCallback(async () => {
@@ -600,6 +603,8 @@ function TeamPanel() {
         invitations?: Array<InvitationRow & { token?: string }>;
         seatLimit?: number | "unlimited";
         usedSeats?: number;
+        isOwner?: boolean;
+        viewerRole?: "owner" | "member" | null;
       };
       if (!res.ok) {
         throw new Error(body.error ?? "Failed to load team");
@@ -610,6 +615,8 @@ function TeamPanel() {
         invitations: body.invitations ?? [],
         seatLimit: body.seatLimit ?? 5,
         usedSeats: body.usedSeats ?? 0,
+        isOwner: body.isOwner ?? true,
+        viewerRole: body.viewerRole ?? null,
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load team");
@@ -703,6 +710,8 @@ function TeamPanel() {
         error?: string;
         code?: string;
         invitation?: { token?: string };
+        inviteEmailSent?: boolean;
+        inviteEmailSkipped?: boolean;
       };
       if (!res.ok) {
         if (res.status === 409 && body.code === "SEAT_LIMIT_REACHED") {
@@ -711,6 +720,15 @@ function TeamPanel() {
         throw new Error(body.error ?? "Could not send invite");
       }
       setInviteEmail("");
+      if (body.inviteEmailSkipped) {
+        setCopyMsg(
+          "Invite created. Add RESEND_API_KEY to send email automatically, or copy the link below.",
+        );
+        setTimeout(() => setCopyMsg(null), 6000);
+      } else if (body.inviteEmailSent) {
+        setCopyMsg("Invite email sent. You can still copy the link below if needed.");
+        setTimeout(() => setCopyMsg(null), 5000);
+      }
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not send invite");
@@ -756,6 +774,31 @@ function TeamPanel() {
 
   const seatLimit = data?.seatLimit ?? "—";
   const usedSeats = data?.usedSeats ?? "—";
+  const isOwner = data?.isOwner !== false;
+
+  async function leaveTeamFromTeamTab() {
+    if (
+      !window.confirm(
+        "Leave this team? You will lose team features and return to the Free plan until you subscribe yourself.",
+      )
+    ) {
+      return;
+    }
+    setLeavingTeam(true);
+    setError(null);
+    setCopyMsg(null);
+    try {
+      const res = await fetch("/api/team/leave", { method: "POST" });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not leave team.");
+      }
+      window.location.reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not leave team.");
+      setLeavingTeam(false);
+    }
+  }
 
   return (
     <motion.div
@@ -771,9 +814,9 @@ function TeamPanel() {
           Team workspace
         </p>
         <p className="mt-2 text-sm text-ink-mid">
-          Create a team, invite colleagues by email, and share seats. Invitees
-          open the link below (or paste it after signing in with the invited
-          address).
+          {isOwner
+            ? "Create a team, invite colleagues by email, and share seats. Invitees open the link below (or paste it after signing in with the invited address)."
+            : "You’re a member of this team. Invite links are managed by the team owner."}
         </p>
         {loading ? (
           <p className="mt-3 text-xs text-ink-light">Loading team…</p>
@@ -818,36 +861,51 @@ function TeamPanel() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Team name
             </p>
-            <div className="mt-4 flex flex-wrap items-end gap-3">
-              <label className="block min-w-[200px] flex-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-light">
-                  Name
-                </span>
-                <input
-                  type="text"
-                  value={nameEdit}
-                  onChange={(e) => setNameEdit(e.target.value)}
-                  className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
-                />
-              </label>
-              <button
-                type="button"
-                disabled={
-                  savingName ||
-                  !nameEdit.trim() ||
-                  nameEdit.trim() === data.team.name
-                }
-                onClick={() => void saveTeamName()}
-                className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
-              >
-                {savingName ? "Saving…" : "Save name"}
-              </button>
-            </div>
+            {isOwner ? (
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <label className="block min-w-[200px] flex-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-light">
+                    Name
+                  </span>
+                  <input
+                    type="text"
+                    value={nameEdit}
+                    onChange={(e) => setNameEdit(e.target.value)}
+                    className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm text-ink"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={
+                    savingName ||
+                    !nameEdit.trim() ||
+                    nameEdit.trim() === data.team.name
+                  }
+                  onClick={() => void saveTeamName()}
+                  className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+                >
+                  {savingName ? "Saving…" : "Save name"}
+                </button>
+              </div>
+            ) : (
+              <p className="mt-2 font-serif text-xl text-ink">{data.team.name}</p>
+            )}
             <p className="mt-3 font-mono text-[11px] text-ink-light">
               Seats: {String(usedSeats)} / {String(seatLimit)}
             </p>
+            {!isOwner ? (
+              <button
+                type="button"
+                disabled={leavingTeam}
+                onClick={() => void leaveTeamFromTeamTab()}
+                className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
+              >
+                {leavingTeam ? "Leaving…" : "Leave team"}
+              </button>
+            ) : null}
           </div>
 
+          {isOwner ? (
           <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Invite member
@@ -875,7 +933,9 @@ function TeamPanel() {
               </button>
             </div>
           </div>
+          ) : null}
 
+          {isOwner ? (
           <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Pending invitations
@@ -912,6 +972,7 @@ function TeamPanel() {
               </ul>
             )}
           </div>
+          ) : null}
 
           <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
@@ -938,7 +999,7 @@ function TeamPanel() {
                           {m.role} · {m.status}
                         </span>
                       </div>
-                      {!isOwnerRow ? (
+                      {isOwner && !isOwnerRow ? (
                         <button
                           type="button"
                           disabled={removingUserId === m.user_id}
@@ -973,11 +1034,13 @@ function PlanApiPanel() {
     accessState: "paid" | "grace" | "free";
     actionRequired: "none" | "payment_method" | "new_subscription";
     canUsePremiumNow: boolean;
+    teamMemberOfOwnerId: string | null;
   } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState<string | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
+  const [leavingTeam, setLeavingTeam] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1000,8 +1063,13 @@ function PlanApiPanel() {
           accessState: "paid" | "grace" | "free";
           actionRequired: "none" | "payment_method" | "new_subscription";
           canUsePremiumNow: boolean;
+          teamMemberOfOwnerId?: string | null;
         };
-        if (!cancelled) setBillingStatus(body);
+        if (!cancelled)
+          setBillingStatus({
+            ...body,
+            teamMemberOfOwnerId: body.teamMemberOfOwnerId ?? null,
+          });
       } catch (err: unknown) {
         if (!cancelled) {
           setStatusError(
@@ -1025,6 +1093,7 @@ function PlanApiPanel() {
     currentTierCode === "pro" ||
     currentTierCode === "team" ||
     currentTierCode === "enterprise";
+  const isTeamSeat = Boolean(billingStatus?.teamMemberOfOwnerId);
   const periodEndLabel =
     billingStatus?.currentPeriodEnd != null
       ? new Date(billingStatus.currentPeriodEnd).toLocaleDateString("en-GB", {
@@ -1089,6 +1158,29 @@ function PlanApiPanel() {
     }
   }
 
+  async function leaveTeamFromPlan() {
+    if (
+      !window.confirm(
+        "Leave this team? You will lose team features and return to the Free plan until you subscribe yourself.",
+      )
+    ) {
+      return;
+    }
+    setLeavingTeam(true);
+    setStatusError(null);
+    try {
+      const res = await fetch("/api/team/leave", { method: "POST" });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not leave team.");
+      }
+      window.location.reload();
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Could not leave team.");
+      setLeavingTeam(false);
+    }
+  }
+
   const endpoints = [
     {
       method: "GET",
@@ -1138,6 +1230,11 @@ function PlanApiPanel() {
         <div className="mt-4 flex items-start justify-between">
           <div>
             <p className="font-serif text-2xl text-ink">{currentTier.label}</p>
+            {isTeamSeat ? (
+              <p className="mt-1 text-xs text-ink-light">
+                Team seat — your access follows your team&apos;s subscription.
+              </p>
+            ) : null}
             {billingStatus?.interval ? (
               <p className="mt-1 text-xs text-ink-light">
                 Billing interval:{" "}
@@ -1168,11 +1265,13 @@ function PlanApiPanel() {
           </div>
         ) : null}
         <p className="mt-3 text-xs text-ink-light">
-          {isPaidTier
-            ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. When Stripe shows a Return button, use it to come back here."
-            : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
+          {isTeamSeat
+            ? "Only the team owner can change payment method or subscription. Leave the team if you need your own billing."
+            : isPaidTier
+              ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. When Stripe shows a Return button, use it to come back here."
+              : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
         </p>
-        {isPaidTier ? (
+        {isPaidTier && !isTeamSeat ? (
           <button
             type="button"
             disabled={openingPortal}
@@ -1182,7 +1281,19 @@ function PlanApiPanel() {
             {openingPortal ? "Opening…" : "Manage billing"}
           </button>
         ) : null}
-        {!isPaidTier && billingStatus?.actionRequired === "payment_method" ? (
+        {isTeamSeat ? (
+          <button
+            type="button"
+            disabled={leavingTeam}
+            onClick={() => void leaveTeamFromPlan()}
+            className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-bear/40 bg-card px-4 text-xs font-semibold tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
+          >
+            {leavingTeam ? "Leaving…" : "Leave team"}
+          </button>
+        ) : null}
+        {!isPaidTier &&
+        !isTeamSeat &&
+        billingStatus?.actionRequired === "payment_method" ? (
           <button
             type="button"
             disabled={openingPortal}
@@ -1267,45 +1378,8 @@ function PlanApiPanel() {
         </div>
       ) : null}
 
-      {currentTierCode === "pro" ? (
-        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Upgrade to Team
-          </p>
-          <p className="mt-2 text-xs text-ink-light">
-            You&apos;re on Pro. For seats and Team features, start a Team
-            subscription below. To change Pro billing (e.g. annual) or cancel, use{" "}
-            <strong className="font-semibold text-ink">Manage billing</strong>{" "}
-            above — not this button.
-          </p>
-          <div className="mt-4 max-w-md rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-5">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Team
-            </p>
-            <p className="mt-2 font-serif text-3xl text-ink">
-              £{team.monthlyPriceGbp}
-              <span className="ml-1 font-sans text-sm font-medium text-ink-mid">
-                /month
-              </span>
-            </p>
-            <p className="mt-2 text-sm text-ink-mid">
-              Five seats, unlimited positions, API access, all markets.
-            </p>
-            <button
-              type="button"
-              onClick={() => startCheckout("team", "monthly")}
-              disabled={startingCheckout != null}
-              className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
-            >
-              {startingCheckout === "team-monthly"
-                ? "Redirecting..."
-                : "Upgrade to Team"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {currentTierCode === "team" || currentTierCode === "enterprise" ? (
+      {(currentTierCode === "team" || currentTierCode === "enterprise") &&
+      !isTeamSeat ? (
         <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             Plan changes

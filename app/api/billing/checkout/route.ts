@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/require-user";
+import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { getStripe } from "@/lib/billing/stripe";
 
 type BillingInterval = "monthly" | "annual";
@@ -55,6 +56,17 @@ export async function POST(req: Request) {
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
     const user = auth.user!;
+
+    const billing = await getEffectiveBillingState(supabase, user.id);
+    if (billing.teamMemberOfOwnerId) {
+      return NextResponse.json(
+        {
+          error:
+            "You’re on a team seat. Leave the team in Settings if you want a personal subscription.",
+        },
+        { status: 403 },
+      );
+    }
 
     const stripe = getStripe();
     const rawBase =

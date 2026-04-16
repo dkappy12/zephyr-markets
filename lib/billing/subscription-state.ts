@@ -1,5 +1,6 @@
 import type { TierCode, TierEntitlement } from "@/lib/billing/entitlements";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type SubscriptionRow = {
   user_id: string;
@@ -42,6 +43,8 @@ export type EffectiveBillingState = {
   canUsePremiumNow: boolean;
   actionRequired: "none" | "payment_method" | "new_subscription";
   statusLabel: string;
+  /** When set, this user is a team member and billing follows the team owner's subscription. */
+  teamMemberOfOwnerId: string | null;
 };
 
 const PAID_STATUSES = new Set(["active", "trialing"]);
@@ -108,25 +111,10 @@ function toStatusLabel(status: string): string {
   return status.replace(/_/g, " ");
 }
 
-export async function getEffectiveBillingState(
-  supabase: unknown,
-  userId: string,
-): Promise<EffectiveBillingState> {
-  const client = supabase as SubscriptionStateClient;
-  const queryResult = await client
-    .from("subscriptions")
-    .select(
-      "user_id, stripe_customer_id, stripe_subscription_id, tier, interval, status, current_period_end, cancel_at_period_end",
-    )
-    .eq("user_id", userId)
-    .maybeSingle();
-  const data = queryResult.data as SubscriptionRow | null;
-  const error = queryResult.error;
-
-  if (error) {
-    throw new Error(error.message ?? "Failed to load subscription state");
-  }
-
+function subscriptionRowToState(data: SubscriptionRow | null): Omit<
+  EffectiveBillingState,
+  "teamMemberOfOwnerId"
+> {
   const status = data?.status ?? "none";
   const accessState = toBillingAccessState({
     status,
@@ -153,5 +141,82 @@ export async function getEffectiveBillingState(
     canUsePremiumNow,
     actionRequired,
     statusLabel: toStatusLabel(status),
+  };
+}
+
+async function tryInheritTeamOwnerBilling(
+  userId: string,
+): Promise<{ state: Omit<EffectiveBillingState, "teamMemberOfOwnerId">; ownerUserId: string } | null> {
+  const admin = createAdminClient();
+  const { data: membership, error: memErr } = await admin
+    .from("team_members")
+    .select("team_id, role")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (memErr || !membership) return null;
+
+  const { data: team, error: teamErr } = await admin
+    .from("teams")
+    .select("owner_id")
+    .eq("id", membership.team_id)
+    .maybeSingle();
+  if (teamErr || !team || team.owner_id === userId) return null;
+
+  const ownerState = await getEffectiveBillingState(admin, team.owner_id, {
+    skipTeamInheritance: true,
+  });
+
+  return { state: ownerState, ownerUserId: team.owner_id };
+}
+
+export type GetBillingStateOptions = {
+  /** Skip team-seat inheritance (e.g. when resolving the team owner's own row). */
+  skipTeamInheritance?: boolean;
+};
+
+export async function getEffectiveBillingState(
+  supabase: unknown,
+  userId: string,
+  options?: GetBillingStateOptions,
+): Promise<EffectiveBillingState> {
+  const client = supabase as SubscriptionStateClient;
+  const queryResult = await client
+    .from("subscriptions")
+    .select(
+      "user_id, stripe_customer_id, stripe_subscription_id, tier, interval, status, current_period_end, cancel_at_period_end",
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+  const data = queryResult.data as SubscriptionRow | null;
+  const error = queryResult.error;
+
+  if (error) {
+    throw new Error(error.message ?? "Failed to load subscription state");
+  }
+
+  const base = subscriptionRowToState(data);
+
+  if (options?.skipTeamInheritance) {
+    return { ...base, teamMemberOfOwnerId: null };
+  }
+
+  const ownSubscriptionGrantsPaidTier =
+    base.effectiveTier !== "free" || base.accessState === "grace";
+
+  if (ownSubscriptionGrantsPaidTier) {
+    return { ...base, teamMemberOfOwnerId: null };
+  }
+
+  const inherited = await tryInheritTeamOwnerBilling(userId);
+  if (!inherited) {
+    return { ...base, teamMemberOfOwnerId: null };
+  }
+
+  return {
+    ...inherited.state,
+    teamMemberOfOwnerId: inherited.ownerUserId,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
   };
 }

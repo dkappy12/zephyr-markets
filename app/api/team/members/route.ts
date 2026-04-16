@@ -17,33 +17,85 @@ export async function GET() {
     if (entitlement.response) return entitlement.response;
 
     const admin = createAdminClient();
-    const { data: team, error: teamError } = await admin
+
+    const { data: ownedTeam, error: ownedErr } = await admin
       .from("teams")
       .select("id, name, owner_id, created_at")
       .eq("owner_id", user.id)
       .maybeSingle();
-    if (teamError) throw new Error(teamError.message);
+    if (ownedErr) throw new Error(ownedErr.message);
+
+    let team = ownedTeam;
+    let isOwner = !!ownedTeam;
+    let viewerRole: "owner" | "member" = ownedTeam ? "owner" : "member";
+
     if (!team) {
-      return NextResponse.json({ team: null, members: [], invitations: [] });
+      const { data: membership, error: memErr } = await admin
+        .from("team_members")
+        .select("team_id, role")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .maybeSingle();
+      if (memErr) throw new Error(memErr.message);
+      if (!membership) {
+        return NextResponse.json({
+          team: null,
+          members: [],
+          invitations: [],
+          isOwner: false,
+          viewerRole: null,
+        });
+      }
+      const { data: joinedTeam, error: jErr } = await admin
+        .from("teams")
+        .select("id, name, owner_id, created_at")
+        .eq("id", membership.team_id)
+        .maybeSingle();
+      if (jErr) throw new Error(jErr.message);
+      if (!joinedTeam) {
+        return NextResponse.json({
+          team: null,
+          members: [],
+          invitations: [],
+          isOwner: false,
+          viewerRole: null,
+        });
+      }
+      team = joinedTeam;
+      isOwner = joinedTeam.owner_id === user.id;
+      viewerRole = membership.role === "owner" ? "owner" : "member";
     }
 
-    const [membersRes, invitationsRes, billingState] = await Promise.all([
-      admin
-        .from("team_members")
-        .select("id, user_id, role, status, created_at")
-        .eq("team_id", team.id)
-        .order("created_at", { ascending: true }),
-      admin
-        .from("team_invitations")
-        .select("id, invited_email, status, expires_at, created_at, token")
-        .eq("team_id", team.id)
-        .eq("status", "pending")
-        .order("created_at", { ascending: false }),
-      getEffectiveBillingState(supabase, user.id),
-    ]);
+    const canSeeInvites = isOwner;
+
+    const [membersRes, invitationsRes, pendingCountRes, billingState] =
+      await Promise.all([
+        admin
+          .from("team_members")
+          .select("id, user_id, role, status, created_at")
+          .eq("team_id", team.id)
+          .order("created_at", { ascending: true }),
+        canSeeInvites
+          ? admin
+              .from("team_invitations")
+              .select("id, invited_email, status, expires_at, created_at, token")
+              .eq("team_id", team.id)
+              .eq("status", "pending")
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        admin
+          .from("team_invitations")
+          .select("id", { count: "exact", head: true })
+          .eq("team_id", team.id)
+          .eq("status", "pending"),
+        getEffectiveBillingState(admin, team.owner_id, {
+          skipTeamInheritance: true,
+        }),
+      ]);
 
     if (membersRes.error) throw new Error(membersRes.error.message);
     if (invitationsRes.error) throw new Error(invitationsRes.error.message);
+    if (pendingCountRes.error) throw new Error(pendingCountRes.error.message);
 
     const rawMembers = membersRes.data ?? [];
     const userIds = [...new Set(rawMembers.map((m) => m.user_id))];
@@ -59,10 +111,7 @@ export async function GET() {
           }
           const full = String(data.user.user_metadata?.full_name ?? "").trim();
           const email = data.user.email?.trim() ?? "";
-          displayByUserId.set(
-            uid,
-            full || email || `${uid.slice(0, 8)}…`,
-          );
+          displayByUserId.set(uid, full || email || `${uid.slice(0, 8)}…`);
         } catch {
           displayByUserId.set(uid, `${uid.slice(0, 8)}…`);
         }
@@ -75,12 +124,17 @@ export async function GET() {
     }));
 
     const seats = billingState.entitlements.seats;
+    const invitations = canSeeInvites ? (invitationsRes.data ?? []) : [];
+    const pendingInvites = pendingCountRes.count ?? 0;
+
     return NextResponse.json({
       team,
       members,
-      invitations: invitationsRes.data ?? [],
+      invitations,
       seatLimit: seats,
-      usedSeats: members.length + (invitationsRes.data ?? []).length,
+      usedSeats: members.length + pendingInvites,
+      isOwner,
+      viewerRole,
     });
   } catch (e: unknown) {
     return NextResponse.json(

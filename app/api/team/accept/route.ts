@@ -51,7 +51,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ code: "TEAM_NOT_FOUND", error: "Team no longer exists." }, { status: 404 });
     }
 
-    const ownerBilling = await getEffectiveBillingState(admin, team.owner_id);
+    const ownerBilling = await getEffectiveBillingState(admin, team.owner_id, {
+      skipTeamInheritance: true,
+    });
     const seatLimit = ownerBilling.entitlements.seats;
     const { count: activeMembers, error: membersError } = await admin
       .from("team_members")

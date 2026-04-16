@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
+import { sendTeamInviteEmail } from "@/lib/email/team-invite";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
     const admin = createAdminClient();
     const { data: team, error: teamError } = await admin
       .from("teams")
-      .select("id, owner_id")
+      .select("id, owner_id, name")
       .eq("owner_id", user.id)
       .maybeSingle();
     if (teamError) throw new Error(teamError.message);
@@ -41,7 +42,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const billingState = await getEffectiveBillingState(supabase, user.id);
+    const billingState = await getEffectiveBillingState(supabase, user.id, {
+      skipTeamInheritance: true,
+    });
     const seatLimit = billingState.entitlements.seats;
     const { count: activeMembers, error: membersError } = await admin
       .from("team_members")
@@ -83,10 +86,22 @@ export async function POST(req: Request) {
       .single();
     if (invitationError) throw new Error(invitationError.message);
 
+    const rawBase =
+      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = rawBase.replace(/\/+$/, "");
+    const inviteUrl = `${baseUrl}/dashboard/team/join?token=${encodeURIComponent(token)}`;
+    const emailResult = await sendTeamInviteEmail({
+      to: invitedEmail,
+      inviteUrl,
+      teamName: String(team.name ?? "Team"),
+    });
+
     return NextResponse.json({
       invitation,
       seatLimit,
       usedSeats: usedSeats + 1,
+      inviteEmailSent: emailResult.sent,
+      inviteEmailSkipped: emailResult.skipped === true,
     });
   } catch (e: unknown) {
     return NextResponse.json(

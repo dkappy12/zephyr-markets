@@ -17,6 +17,7 @@ describe("requireEntitlement", () => {
       entitlements: { portfolioEnabled: false },
       canUsePremiumNow: false,
       status: "unpaid",
+      teamMemberOfOwnerId: null,
     });
     const result = await requireEntitlement({}, "u1", {
       feature: "portfolioEnabled",
@@ -36,6 +37,7 @@ describe("requireEntitlement", () => {
       entitlements: { portfolioEnabled: true },
       canUsePremiumNow: true,
       status: "past_due",
+      teamMemberOfOwnerId: null,
     });
     const result = await requireEntitlement({}, "u1", {
       feature: "portfolioEnabled",

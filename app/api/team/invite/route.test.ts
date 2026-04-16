@@ -29,6 +29,9 @@ vi.mock("@/lib/billing/subscription-state", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mockCreateAdminClient,
 }));
+vi.mock("@/lib/email/team-invite", () => ({
+  sendTeamInviteEmail: vi.fn().mockResolvedValue({ sent: false, skipped: true }),
+}));
 
 import { POST } from "@/app/api/team/invite/route";
 
@@ -52,7 +55,7 @@ describe("POST /api/team/invite", () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 maybeSingle: vi.fn(async () => ({
-                  data: { id: "team-1", owner_id: "owner-1" },
+                  data: { id: "team-1", owner_id: "owner-1", name: "Test team" },
                   error: null,
                 })),
               })),
