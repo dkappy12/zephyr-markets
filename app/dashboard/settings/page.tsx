@@ -849,7 +849,6 @@ function TeamPanel() {
           <p className="mt-3 text-xs text-ink-light">Loading team…</p>
         ) : null}
         {error ? <p className="mt-3 text-xs text-bear">{error}</p> : null}
-        {copyMsg ? <p className="mt-2 text-xs text-bull">{copyMsg}</p> : null}
       </div>
 
       {!data?.team ? (
@@ -962,6 +961,7 @@ function TeamPanel() {
             {inviteError ? (
               <p className="mt-3 text-xs text-bear">{inviteError}</p>
             ) : null}
+            {copyMsg ? <p className="mt-2 text-xs text-bull">{copyMsg}</p> : null}
           </div>
           ) : null}
 
