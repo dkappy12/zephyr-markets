@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type Ctx = { params: Promise<{ inviteId: string }> };
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const { inviteId } = await ctx.params;
     if (!inviteId?.trim()) {
       return NextResponse.json(

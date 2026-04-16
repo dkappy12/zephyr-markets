@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;

@@ -12,9 +12,9 @@ export async function requireAdminUser(
   const { user, response } = await requireUser(supabase);
   if (response || !user) return { user: null, response };
 
+  // Only `app_metadata` is server-controlled in Supabase; `user_metadata` is user-editable.
   const isAdmin =
-    (user?.app_metadata as { role?: string } | null | undefined)?.role === "admin" ||
-    (user?.user_metadata as { role?: string } | null | undefined)?.role === "admin";
+    (user?.app_metadata as { role?: string } | null | undefined)?.role === "admin";
   if (!isAdmin) {
     return {
       user: null,

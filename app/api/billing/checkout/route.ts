@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/require-user";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { getStripe } from "@/lib/billing/stripe";
 import { getAppBaseUrl } from "@/lib/team/invite-url";
@@ -23,6 +24,9 @@ function getPriceId(tier: Tier, interval: BillingInterval): string {
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const body = (await req.json()) as {
       tier?: Tier;
       interval?: BillingInterval;

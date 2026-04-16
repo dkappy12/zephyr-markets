@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
@@ -50,6 +54,7 @@ export async function POST(req: Request) {
       status: "active",
     });
     if (memberError) {
+      await admin.from("teams").delete().eq("id", team.id);
       throw new Error(memberError.message);
     }
 

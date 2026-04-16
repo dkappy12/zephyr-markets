@@ -24,7 +24,7 @@ export async function sendBillingLifecycleEmail(input: {
     /\/+$/,
     "",
   );
-  const manageUrl = `${appUrl}/dashboard/overview?billing=portal_return`;
+  const manageUrl = `${appUrl}/dashboard/overview`;
   const name = String(input.firstName ?? "").trim();
   const greet = name ? `Hi ${name},` : "Hi,";
   const plan = `${input.tier === "team" ? "Team" : "Pro"} (${input.interval})`;

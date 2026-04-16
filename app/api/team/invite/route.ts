@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { sendTeamInviteEmail } from "@/lib/email/team-invite";
 import { buildTeamInviteUrl } from "@/lib/team/invite-url";
@@ -18,6 +19,9 @@ function isPendingInviteUniqueError(message: string): boolean {
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;

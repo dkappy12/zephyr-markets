@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/require-user";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
@@ -20,24 +24,14 @@ export async function POST(req: Request) {
     const admin = createAdminClient();
     const { data: invitation, error: invitationError } = await admin
       .from("team_invitations")
-      .select("id, team_id, invited_email, status, expires_at")
+      .select("id, team_id, invited_email, status, expires_at, accepted_by")
       .eq("token", token)
-      .eq("status", "pending")
       .maybeSingle();
     if (invitationError) throw new Error(invitationError.message);
     if (!invitation) {
-      return NextResponse.json({ code: "INVITE_NOT_FOUND", error: "Invitation not found." }, { status: 404 });
-    }
-    if (String(invitation.invited_email).toLowerCase() !== userEmail) {
       return NextResponse.json(
-        { code: "INVITE_EMAIL_MISMATCH", error: "Invitation email does not match this account." },
-        { status: 403 },
-      );
-    }
-    if (new Date(invitation.expires_at).getTime() < Date.now()) {
-      return NextResponse.json(
-        { code: "INVITE_EXPIRED", error: "Invitation has expired." },
-        { status: 410 },
+        { code: "INVITE_NOT_FOUND", error: "Invitation not found." },
+        { status: 404 },
       );
     }
 
@@ -48,7 +42,68 @@ export async function POST(req: Request) {
       .maybeSingle();
     if (teamError) throw new Error(teamError.message);
     if (!team) {
-      return NextResponse.json({ code: "TEAM_NOT_FOUND", error: "Team no longer exists." }, { status: 404 });
+      return NextResponse.json(
+        { code: "TEAM_NOT_FOUND", error: "Team no longer exists." },
+        { status: 404 },
+      );
+    }
+
+    if (String(invitation.invited_email).toLowerCase() !== userEmail) {
+      return NextResponse.json(
+        {
+          code: "INVITE_EMAIL_MISMATCH",
+          error: "Invitation email does not match this account.",
+        },
+        { status: 403 },
+      );
+    }
+
+    if (invitation.status !== "pending") {
+      if (invitation.status === "accepted" && invitation.accepted_by === user.id) {
+        return NextResponse.json({
+          accepted: true,
+          teamId: team.id,
+          duplicate: true,
+        });
+      }
+      return NextResponse.json(
+        {
+          code: "INVITE_NOT_PENDING",
+          error: "This invitation is no longer available.",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (new Date(invitation.expires_at).getTime() < Date.now()) {
+      return NextResponse.json(
+        { code: "INVITE_EXPIRED", error: "Invitation has expired." },
+        { status: 410 },
+      );
+    }
+
+    const { data: existingMembership } = await admin
+      .from("team_members")
+      .select("id")
+      .eq("team_id", team.id)
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .maybeSingle();
+    if (existingMembership) {
+      await admin
+        .from("team_invitations")
+        .update({
+          status: "accepted",
+          accepted_by: user.id,
+          accepted_at: new Date().toISOString(),
+        })
+        .eq("id", invitation.id)
+        .eq("status", "pending");
+      return NextResponse.json({
+        accepted: true,
+        teamId: team.id,
+        duplicate: true,
+      });
     }
 
     const ownerBilling = await getEffectiveBillingState(admin, team.owner_id, {
@@ -73,6 +128,29 @@ export async function POST(req: Request) {
       );
     }
 
+    const acceptedAt = new Date().toISOString();
+    const { data: consumed, error: consumeError } = await admin
+      .from("team_invitations")
+      .update({
+        status: "accepted",
+        accepted_by: user.id,
+        accepted_at: acceptedAt,
+      })
+      .eq("id", invitation.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (consumeError) throw new Error(consumeError.message);
+    if (!consumed) {
+      return NextResponse.json(
+        {
+          code: "INVITE_NO_LONGER_VALID",
+          error: "This invitation changed while you were accepting it. Refresh and try again.",
+        },
+        { status: 409 },
+      );
+    }
+
     const { error: memberUpsertError } = await admin.from("team_members").upsert(
       {
         team_id: team.id,
@@ -82,17 +160,18 @@ export async function POST(req: Request) {
       },
       { onConflict: "team_id,user_id" },
     );
-    if (memberUpsertError) throw new Error(memberUpsertError.message);
-
-    const { error: invitationUpdateError } = await admin
-      .from("team_invitations")
-      .update({
-        status: "accepted",
-        accepted_by: user.id,
-        accepted_at: new Date().toISOString(),
-      })
-      .eq("id", invitation.id);
-    if (invitationUpdateError) throw new Error(invitationUpdateError.message);
+    if (memberUpsertError) {
+      await admin
+        .from("team_invitations")
+        .update({
+          status: "pending",
+          accepted_by: null,
+          accepted_at: null,
+        })
+        .eq("id", invitation.id)
+        .eq("accepted_by", user.id);
+      throw new Error(memberUpsertError.message);
+    }
 
     return NextResponse.json({ accepted: true, teamId: team.id });
   } catch (e: unknown) {

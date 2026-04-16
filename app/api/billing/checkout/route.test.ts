@@ -6,12 +6,14 @@ const {
   mockGetEffectiveBillingState,
   mockGetStripe,
   mockGetAppBaseUrl,
+  mockAssertSameOrigin,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
   mockGetEffectiveBillingState: vi.fn(),
   mockGetStripe: vi.fn(),
   mockGetAppBaseUrl: vi.fn(),
+  mockAssertSameOrigin: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -29,6 +31,9 @@ vi.mock("@/lib/billing/stripe", () => ({
 vi.mock("@/lib/team/invite-url", () => ({
   getAppBaseUrl: mockGetAppBaseUrl,
 }));
+vi.mock("@/lib/auth/request-security", () => ({
+  assertSameOrigin: mockAssertSameOrigin,
+}));
 
 import { POST } from "@/app/api/billing/checkout/route";
 
@@ -43,6 +48,21 @@ describe("POST /api/billing/checkout", () => {
     });
     mockGetEffectiveBillingState.mockResolvedValue({ teamMemberOfOwnerId: null });
     mockGetAppBaseUrl.mockReturnValue("https://zephyr.markets");
+    mockAssertSameOrigin.mockReturnValue(null);
+  });
+
+  it("blocks cross-site checkout requests", async () => {
+    const csrf = new Response(JSON.stringify({ code: "CSRF_BLOCKED" }), {
+      status: 403,
+    });
+    mockAssertSameOrigin.mockReturnValue(csrf);
+    const req = new Request("https://zephyr.markets/api/billing/checkout", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.test" },
+      body: JSON.stringify({ tier: "pro", interval: "monthly" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(403);
   });
 
   it("creates checkout session that always returns to overview", async () => {
@@ -53,7 +73,10 @@ describe("POST /api/billing/checkout", () => {
 
     const req = new Request("https://zephyr.markets/api/billing/checkout", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        origin: "https://zephyr.markets",
+      },
       body: JSON.stringify({ tier: "pro", interval: "monthly" }),
     });
     const res = await POST(req);

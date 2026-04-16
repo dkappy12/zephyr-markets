@@ -99,6 +99,7 @@ export async function GET(req: Request) {
     if (pendingCountRes.error) throw new Error(pendingCountRes.error.message);
 
     const rawMembers = membersRes.data ?? [];
+    const activeMembers = rawMembers.filter((m) => m.status === "active");
     const userIds = [...new Set(rawMembers.map((m) => m.user_id))];
     const displayByUserId = new Map<string, string>();
 
@@ -138,7 +139,7 @@ export async function GET(req: Request) {
       members,
       invitations,
       seatLimit: seats,
-      usedSeats: members.length + pendingInvites,
+      usedSeats: activeMembers.length + pendingInvites,
       isOwner,
       viewerRole,
     });

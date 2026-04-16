@@ -6,12 +6,14 @@ const {
   mockGetEffectiveBillingState,
   mockGetStripe,
   mockGetAppBaseUrl,
+  mockAssertSameOrigin,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
   mockGetEffectiveBillingState: vi.fn(),
   mockGetStripe: vi.fn(),
   mockGetAppBaseUrl: vi.fn(),
+  mockAssertSameOrigin: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -28,6 +30,9 @@ vi.mock("@/lib/billing/stripe", () => ({
 }));
 vi.mock("@/lib/team/invite-url", () => ({
   getAppBaseUrl: mockGetAppBaseUrl,
+}));
+vi.mock("@/lib/auth/request-security", () => ({
+  assertSameOrigin: mockAssertSameOrigin,
 }));
 
 import { POST } from "@/app/api/billing/portal/route";
@@ -46,6 +51,33 @@ describe("POST /api/billing/portal", () => {
       stripeSubscriptionId: "sub_1",
     });
     mockGetAppBaseUrl.mockReturnValue("https://zephyr.markets");
+    mockAssertSameOrigin.mockReturnValue(null);
+  });
+
+  const sameOriginPost = (body?: object) =>
+    new Request("https://zephyr.markets/api/billing/portal", {
+      method: "POST",
+      headers: {
+        origin: "https://zephyr.markets",
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+  it("returns 409 when no Stripe customer is linked", async () => {
+    mockGetEffectiveBillingState.mockResolvedValue({
+      teamMemberOfOwnerId: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    mockGetStripe.mockReturnValue({
+      billingPortal: { sessions: { create: vi.fn() } },
+    });
+
+    const res = await POST(sameOriginPost());
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("STRIPE_CUSTOMER_MISSING");
   });
 
   it("creates a Stripe portal session with overview return_url", async () => {
@@ -55,7 +87,7 @@ describe("POST /api/billing/portal", () => {
       billingPortal: { sessions: { create: createPortalSession } },
     });
 
-    const res = await POST(new Request("https://zephyr.markets/api/billing/portal", { method: "POST" }));
+    const res = await POST(sameOriginPost());
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.url).toBe("https://billing.stripe.test/session");
@@ -89,9 +121,7 @@ describe("POST /api/billing/portal", () => {
       billingPortal: { sessions: { create: createPortalSession } },
     });
 
-    const res = await POST(
-      new Request("https://zephyr.markets/api/billing/portal", { method: "POST" }),
-    );
+    const res = await POST(sameOriginPost());
     expect(res.status).toBe(200);
     expect(createPortalSession).toHaveBeenCalledWith({
       customer: "cus_1",

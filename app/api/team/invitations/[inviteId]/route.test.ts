@@ -5,11 +5,13 @@ const {
   mockRequireUser,
   mockRequireEntitlement,
   mockCreateAdminClient,
+  mockAssertSameOrigin,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
   mockRequireEntitlement: vi.fn(),
   mockCreateAdminClient: vi.fn(),
+  mockAssertSameOrigin: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -24,6 +26,9 @@ vi.mock("@/lib/auth/require-entitlement", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mockCreateAdminClient,
 }));
+vi.mock("@/lib/auth/request-security", () => ({
+  assertSameOrigin: mockAssertSameOrigin,
+}));
 
 import { DELETE } from "@/app/api/team/invitations/[inviteId]/route";
 
@@ -33,6 +38,7 @@ describe("DELETE /api/team/invitations/[inviteId]", () => {
     mockCreateClient.mockResolvedValue({});
     mockRequireUser.mockResolvedValue({ response: null, user: { id: "owner-1" } });
     mockRequireEntitlement.mockResolvedValue({ response: null });
+    mockAssertSameOrigin.mockReturnValue(null);
   });
 
   it("cancels a pending invite for the owner's team", async () => {
@@ -70,9 +76,12 @@ describe("DELETE /api/team/invitations/[inviteId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ inviteId: "inv-1" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ inviteId: "inv-1" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.cancelled).toBe(true);
@@ -110,9 +119,12 @@ describe("DELETE /api/team/invitations/[inviteId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ inviteId: "inv-1" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ inviteId: "inv-1" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(409);
     expect(body.code).toBe("INVITE_NOT_PENDING");
@@ -150,9 +162,12 @@ describe("DELETE /api/team/invitations/[inviteId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ inviteId: "inv-1" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ inviteId: "inv-1" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(404);
     expect(body.code).toBe("INVITE_NOT_FOUND");

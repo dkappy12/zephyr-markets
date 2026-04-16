@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth/require-user";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { getStripe } from "@/lib/billing/stripe";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { getAppBaseUrl } from "@/lib/team/invite-url";
 
 export async function POST(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
@@ -27,28 +31,16 @@ export async function POST(req: Request) {
         { status: 403 },
       );
     }
-    let customerId = billing.stripeCustomerId;
+    const customerId = billing.stripeCustomerId;
     if (!customerId) {
-      const email = user.email ?? "";
-      if (!email) {
-        return NextResponse.json(
-          { error: "No email on user account" },
-          { status: 400 },
-        );
-      }
-
-      const existing = await stripe.customers.list({
-        email,
-        limit: 1,
-      });
-      customerId =
-        existing.data[0]?.id ??
-        (
-          await stripe.customers.create({
-            email,
-            metadata: { user_id: user.id },
-          })
-        ).id;
+      return NextResponse.json(
+        {
+          code: "STRIPE_CUSTOMER_MISSING",
+          error:
+            "No Stripe customer is linked to your account yet. Complete checkout once so we can open the billing portal, or ask an admin to run billing reconcile if you already paid.",
+        },
+        { status: 409 },
+      );
     }
 
     const returnUrl = `${baseUrl}/dashboard/overview`;

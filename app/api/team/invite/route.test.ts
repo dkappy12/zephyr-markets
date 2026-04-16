@@ -6,12 +6,14 @@ const {
   mockRequireEntitlement,
   mockGetEffectiveBillingState,
   mockCreateAdminClient,
+  mockAssertSameOrigin,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
   mockRequireEntitlement: vi.fn(),
   mockGetEffectiveBillingState: vi.fn(),
   mockCreateAdminClient: vi.fn(),
+  mockAssertSameOrigin: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -45,6 +47,7 @@ describe("POST /api/team/invite", () => {
       effectiveTier: "team",
       entitlements: { seats: 5 },
     });
+    mockAssertSameOrigin.mockReturnValue(null);
   });
 
   it("returns SEAT_LIMIT_REACHED when active + pending reaches cap", async () => {
@@ -105,7 +108,10 @@ describe("POST /api/team/invite", () => {
 
     const req = new Request("http://localhost/api/team/invite", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost",
+      },
       body: JSON.stringify({ email: "member@example.com" }),
     });
     const res = await POST(req);

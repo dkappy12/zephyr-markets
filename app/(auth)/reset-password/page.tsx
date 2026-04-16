@@ -72,8 +72,10 @@ export default function ResetPasswordPage() {
         setError(friendlyResetPasswordError(updateError.message ?? ""));
         return;
       }
-      setInfo("Password updated.");
-      router.push("/login");
+      setInfo("Password updated. Redirecting to sign in…");
+      setTimeout(() => {
+        router.push("/login");
+      }, 1200);
     } catch {
       setError("Could not reset password.");
     } finally {

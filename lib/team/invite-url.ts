@@ -13,12 +13,24 @@ function inferOriginFromRequest(req: Request): string | null {
   }
 }
 
+/**
+ * Canonical app origin for redirects and emailed links.
+ *
+ * In production, prefer `NEXT_PUBLIC_APP_URL` so request Host / X-Forwarded-* headers
+ * cannot redirect users to an attacker-controlled origin.
+ *
+ * In development / tests, fall back to the incoming request origin when helpful.
+ */
 export function getAppBaseUrl(req?: Request): string {
+  const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd && envBase) {
+    return trimTrailingSlash(envBase);
+  }
   if (req) {
     const inferred = inferOriginFromRequest(req);
     if (inferred) return trimTrailingSlash(inferred);
   }
-  const envBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (envBase) return trimTrailingSlash(envBase);
   return "http://localhost:3000";
 }

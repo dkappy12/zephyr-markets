@@ -199,6 +199,38 @@ async function sendLifecycleEmailBestEffort(input: {
   }
 }
 
+function isFailedProcessingPayload(payloadJson: unknown): boolean {
+  if (!payloadJson || typeof payloadJson !== "object") return false;
+  const p = payloadJson as { _processing?: { state?: string } };
+  return p._processing?.state === "failed";
+}
+
+function isSuccessfullyProcessedRow(row: {
+  processed_at: string | null;
+  payload_json: unknown;
+}): boolean {
+  if (!row.processed_at) return false;
+  return !isFailedProcessingPayload(row.payload_json);
+}
+
+function shouldNotifySubscriptionUpdated(event: Stripe.Event): boolean {
+  if (event.type !== "customer.subscription.updated") return true;
+  const prev = (
+    event.data as { previous_attributes?: Record<string, unknown> }
+  ).previous_attributes;
+  if (!prev || Object.keys(prev).length === 0) return false;
+  const materialKeys = [
+    "status",
+    "cancel_at_period_end",
+    "items",
+    "metadata",
+    "quantity",
+  ];
+  return materialKeys.some((k) =>
+    Object.prototype.hasOwnProperty.call(prev, k),
+  );
+}
+
 async function persistWebhookEvent(
   event: Stripe.Event,
   context: LedgerContext,
@@ -206,12 +238,18 @@ async function persistWebhookEvent(
   const admin = getAdminSupabase();
   const { data: existing, error: selectError } = await admin
     .from("subscription_events")
-    .select("id")
+    .select("id, processed_at, payload_json")
     .eq("stripe_event_id", event.id)
-    .limit(1)
     .maybeSingle();
   if (selectError) throw new Error(selectError.message);
-  if (existing) return { shouldProcess: false };
+
+  if (existing) {
+    if (isSuccessfullyProcessedRow(existing)) {
+      return { shouldProcess: false };
+    }
+    // Failed or incomplete row: allow Stripe retries to reprocess safely.
+    return { shouldProcess: true };
+  }
 
   const { error: insertError } = await admin.from("subscription_events").insert({
     stripe_event_id: event.id,
@@ -223,7 +261,7 @@ async function persistWebhookEvent(
     tier: context.tier,
     interval: context.interval,
     payload_json: event,
-    processed_at: new Date().toISOString(),
+    processed_at: null,
   });
   if (insertError) {
     const message = insertError.message ?? "";
@@ -231,11 +269,36 @@ async function persistWebhookEvent(
       message.toLowerCase().includes("duplicate key") ||
       message.includes("stripe_event_id")
     ) {
-      return { shouldProcess: false };
+      const { data: raced, error: racedErr } = await admin
+        .from("subscription_events")
+        .select("id, processed_at, payload_json")
+        .eq("stripe_event_id", event.id)
+        .maybeSingle();
+      if (racedErr) throw new Error(racedErr.message);
+      if (raced && isSuccessfullyProcessedRow(raced)) {
+        return { shouldProcess: false };
+      }
+      return { shouldProcess: true };
     }
     throw new Error(message || "Failed to persist webhook event");
   }
   return { shouldProcess: true };
+}
+
+async function markWebhookEventSucceeded(event: Stripe.Event) {
+  try {
+    const admin = getAdminSupabase();
+    await admin
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("subscription_events" as any)
+      .update({
+        processed_at: new Date().toISOString(),
+        payload_json: event,
+      })
+      .eq("stripe_event_id", event.id);
+  } catch {
+    // Never block webhook response on instrumentation.
+  }
 }
 
 async function markWebhookEventFailed(input: {
@@ -437,17 +500,22 @@ export async function POST(req: Request) {
             currentPeriodEnd: readSubscriptionPeriodEnd(sub),
           },
         });
-        await sendLifecycleEmailBestEffort({
-          eventId: event.id,
-          userId,
-          kind:
-            event.type === "customer.subscription.deleted"
-              ? "subscription_cancelled"
-              : "subscription_updated",
-          tier,
-          interval,
-          status: sub.status,
-        });
+        if (
+          event.type === "customer.subscription.deleted" ||
+          shouldNotifySubscriptionUpdated(event)
+        ) {
+          await sendLifecycleEmailBestEffort({
+            eventId: event.id,
+            userId,
+            kind:
+              event.type === "customer.subscription.deleted"
+                ? "subscription_cancelled"
+                : "subscription_updated",
+            tier,
+            interval,
+            status: sub.status,
+          });
+        }
         break;
       }
 
@@ -463,6 +531,8 @@ export async function POST(req: Request) {
         });
         break;
     }
+
+    await markWebhookEventSucceeded(event);
   } catch (e: unknown) {
     const error = e instanceof Error ? e.message : "Webhook processing failed";
     await markWebhookEventFailed({ event, context: ledgerContext, error });

@@ -43,9 +43,8 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (pathname.startsWith("/admin")) {
-    const isAdmin =
-      user?.app_metadata?.role === "admin" ||
-      user?.user_metadata?.role === "admin";
+    // Only trust server-controlled app_metadata for admin (not user_metadata).
+    const isAdmin = user?.app_metadata?.role === "admin";
     if (!user || !isAdmin) {
       return NextResponse.redirect(new URL("/dashboard/overview", request.url));
     }
@@ -65,6 +64,13 @@ export async function proxy(request: NextRequest) {
   }
 
   if (pathname === "/login") {
+    if (user) {
+      return NextResponse.redirect(new URL("/dashboard/overview", request.url));
+    }
+    return response;
+  }
+
+  if (pathname === "/signup") {
     if (user) {
       return NextResponse.redirect(new URL("/dashboard/overview", request.url));
     }

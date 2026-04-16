@@ -99,7 +99,14 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
 
   async function handleSignOut() {
     setSigningOut(true);
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setSigningOut(false);
+      window.alert(
+        "Could not sign out completely. Try again, or clear site cookies for this domain.",
+      );
+      return;
+    }
     window.location.assign("/login");
   }
 

@@ -5,11 +5,13 @@ const {
   mockRequireUser,
   mockRequireEntitlement,
   mockCreateAdminClient,
+  mockAssertSameOrigin,
 } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
   mockRequireUser: vi.fn(),
   mockRequireEntitlement: vi.fn(),
   mockCreateAdminClient: vi.fn(),
+  mockAssertSameOrigin: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -24,6 +26,9 @@ vi.mock("@/lib/auth/require-entitlement", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mockCreateAdminClient,
 }));
+vi.mock("@/lib/auth/request-security", () => ({
+  assertSameOrigin: mockAssertSameOrigin,
+}));
 
 import { DELETE } from "@/app/api/team/members/[userId]/route";
 
@@ -33,6 +38,7 @@ describe("DELETE /api/team/members/[userId]", () => {
     mockCreateClient.mockResolvedValue({});
     mockRequireUser.mockResolvedValue({ response: null, user: { id: "owner-1" } });
     mockRequireEntitlement.mockResolvedValue({ response: null });
+    mockAssertSameOrigin.mockReturnValue(null);
   });
 
   it("allows owner to remove a member", async () => {
@@ -74,9 +80,12 @@ describe("DELETE /api/team/members/[userId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ userId: "member-1" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ userId: "member-1" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.removed).toBe(true);
@@ -102,9 +111,12 @@ describe("DELETE /api/team/members/[userId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ userId: "owner-1" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ userId: "owner-1" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(403);
     expect(body.code).toBe("CANNOT_REMOVE_OWNER");
@@ -144,9 +156,12 @@ describe("DELETE /api/team/members/[userId]", () => {
     };
     mockCreateAdminClient.mockReturnValue(admin);
 
-    const res = await DELETE(new Request("http://localhost"), {
-      params: Promise.resolve({ userId: "missing-user" }),
-    });
+    const res = await DELETE(
+      new Request("http://localhost", { headers: { origin: "http://localhost" } }),
+      {
+        params: Promise.resolve({ userId: "missing-user" }),
+      },
+    );
     const body = await res.json();
     expect(res.status).toBe(404);
     expect(body.code).toBe("MEMBER_NOT_FOUND");

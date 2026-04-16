@@ -29,24 +29,61 @@ vi.mock("@/lib/email/billing-lifecycle", () => ({
 
 import { POST } from "@/app/api/stripe/webhook/route";
 
+type ExistingEventRow =
+  | null
+  | {
+      id: string;
+      processed_at: string | null;
+      payload_json: unknown;
+    };
+
 function makeAdminClient({
-  existingEventId,
+  existingRow,
+  existingRowAfterInsertRace,
   insertEventError,
 }: {
-  existingEventId: string | null;
+  existingRow: ExistingEventRow;
+  /** Second select after a duplicate-key insert race (simulates another worker finishing first). */
+  existingRowAfterInsertRace?: ExistingEventRow;
   insertEventError?: { message?: string } | null;
 }) {
   const insertEvent = vi.fn(async () => ({ error: insertEventError ?? null }));
   const upsertSubscription = vi.fn(async () => ({ error: null }));
+  const updateEvent = vi.fn(() => ({
+    eq: vi.fn(async () => ({ error: null })),
+  }));
   const markFailedEq = vi.fn(async () => ({ error: null }));
   const markFailedUpdate = vi.fn(() => ({ eq: markFailedEq }));
+
+  let selectCalls = 0;
+  const selectMaybeSingle = vi.fn(async () => {
+    selectCalls += 1;
+    if (insertEventError && selectCalls === 2) {
+      return {
+        data:
+          existingRowAfterInsertRace ??
+          ({
+            id: "race",
+            processed_at: "2020-01-01T00:00:00.000Z",
+            payload_json: {},
+          } satisfies NonNullable<ExistingEventRow>),
+        error: null,
+      };
+    }
+    return {
+      data: existingRow,
+      error: null,
+    };
+  });
 
   return {
     client: {
       auth: {
         admin: {
           getUserById: vi.fn(async () => ({
-            data: { user: { email: "u1@example.com", user_metadata: { full_name: "Dean Kaplan" } } },
+            data: {
+              user: { email: "u1@example.com", user_metadata: { full_name: "Dean Kaplan" } },
+            },
             error: null,
           })),
         },
@@ -56,16 +93,22 @@ function makeAdminClient({
           return {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
-                limit: vi.fn(() => ({
-                  maybeSingle: vi.fn(async () => ({
-                    data: existingEventId ? { id: "row-1" } : null,
-                    error: null,
-                  })),
-                })),
+                maybeSingle: selectMaybeSingle,
               })),
             })),
             insert: insertEvent,
-            update: markFailedUpdate,
+            update: vi.fn(
+              (payload: { payload_json?: { _processing?: unknown } }) => {
+                if (
+                  payload.payload_json &&
+                  typeof payload.payload_json === "object" &&
+                  "_processing" in payload.payload_json
+                ) {
+                  return markFailedUpdate();
+                }
+                return updateEvent();
+              },
+            ),
           };
         }
         if (table === "subscriptions") {
@@ -88,7 +131,9 @@ function makeAdminClient({
     },
     insertEvent,
     upsertSubscription,
+    updateEvent,
     markFailedEq,
+    selectMaybeSingle,
   };
 }
 
@@ -141,8 +186,14 @@ describe("POST /api/stripe/webhook", () => {
     expect(res.status).toBe(400);
   });
 
-  it("skips duplicate webhook events by stripe_event_id", async () => {
-    const admin = makeAdminClient({ existingEventId: "evt_1" });
+  it("skips duplicate webhook events that already completed successfully", async () => {
+    const admin = makeAdminClient({
+      existingRow: {
+        id: "row-1",
+        processed_at: "2020-01-01T00:00:00.000Z",
+        payload_json: { id: "evt_1" },
+      },
+    });
     mockCreateAdminClient.mockReturnValue(admin.client);
 
     mockGetStripe.mockReturnValue({
@@ -186,8 +237,67 @@ describe("POST /api/stripe/webhook", () => {
     expect(admin.upsertSubscription).not.toHaveBeenCalled();
   });
 
+  it("reprocesses after a failed attempt (Stripe retry)", async () => {
+    const admin = makeAdminClient({
+      existingRow: {
+        id: "row-1",
+        processed_at: null,
+        payload_json: {
+          id: "evt_retry",
+          _processing: { state: "failed", error: "boom" },
+        },
+      },
+    });
+    mockCreateAdminClient.mockReturnValue(admin.client);
+
+    mockGetStripe.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_retry",
+          type: "checkout.session.completed",
+          data: {
+            object: {
+              subscription: "sub_new",
+              customer: "cus_new",
+              metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+              client_reference_id: "u1",
+            },
+          },
+        })),
+      },
+      subscriptions: {
+        retrieve: vi.fn(async () => ({
+          status: "active",
+          metadata: { user_id: "u1", tier: "pro", interval: "monthly" },
+          items: {
+            data: [
+              { price: { id: "price_pro_m", recurring: { interval: "month" } } },
+            ],
+          },
+          current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          cancel_at_period_end: false,
+        })),
+      },
+    });
+
+    const req = new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "sig" },
+      body: JSON.stringify({}),
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.duplicate).toBe(false);
+    expect(admin.insertEvent).not.toHaveBeenCalled();
+    expect(admin.upsertSubscription).toHaveBeenCalled();
+    expect(admin.updateEvent).toHaveBeenCalled();
+  });
+
   it("processes checkout.session.completed when event is new", async () => {
-    const admin = makeAdminClient({ existingEventId: null });
+    const admin = makeAdminClient({ existingRow: null });
     mockCreateAdminClient.mockReturnValue(admin.client);
 
     mockGetStripe.mockReturnValue({
@@ -242,10 +352,12 @@ describe("POST /api/stripe/webhook", () => {
     );
   });
 
-  it("treats duplicate-key insert race as duplicate event", async () => {
+  it("treats duplicate-key insert race as duplicate event when other worker succeeded", async () => {
     const admin = makeAdminClient({
-      existingEventId: null,
-      insertEventError: { message: "duplicate key value violates unique constraint stripe_event_id" },
+      existingRow: null,
+      insertEventError: {
+        message: "duplicate key value violates unique constraint stripe_event_id",
+      },
     });
     mockCreateAdminClient.mockReturnValue(admin.client);
     mockGetStripe.mockReturnValue({
@@ -286,7 +398,7 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("processes customer.subscription.updated event", async () => {
-    const admin = makeAdminClient({ existingEventId: null });
+    const admin = makeAdminClient({ existingRow: null });
     mockCreateAdminClient.mockReturnValue(admin.client);
 
     mockGetStripe.mockReturnValue({
@@ -295,6 +407,7 @@ describe("POST /api/stripe/webhook", () => {
           id: "evt_sub_updated",
           type: "customer.subscription.updated",
           data: {
+            previous_attributes: { status: "past_due" },
             object: {
               id: "sub_updated",
               customer: "cus_1",
@@ -324,7 +437,7 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("processes customer.subscription.deleted event", async () => {
-    const admin = makeAdminClient({ existingEventId: null });
+    const admin = makeAdminClient({ existingRow: null });
     mockCreateAdminClient.mockReturnValue(admin.client);
 
     mockGetStripe.mockReturnValue({
@@ -362,7 +475,7 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("returns 200 for unhandled webhook types without subscription mutation", async () => {
-    const admin = makeAdminClient({ existingEventId: null });
+    const admin = makeAdminClient({ existingRow: null });
     mockCreateAdminClient.mockReturnValue(admin.client);
     mockGetStripe.mockReturnValue({
       webhooks: {
@@ -389,7 +502,7 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("returns 500 on malformed checkout payload with missing ids", async () => {
-    const admin = makeAdminClient({ existingEventId: null });
+    const admin = makeAdminClient({ existingRow: null });
     mockCreateAdminClient.mockReturnValue(admin.client);
 
     mockGetStripe.mockReturnValue({
@@ -428,18 +541,21 @@ describe("POST /api/stripe/webhook", () => {
       error: { message: "upsert failed" },
     }));
 
+    const updateEvent = vi.fn(() => ({
+      eq: vi.fn(async () => ({ error: null })),
+    }));
+
     const client = {
       from: vi.fn((table: string) => {
         if (table === "subscription_events") {
           return {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
-                limit: vi.fn(() => ({
-                  maybeSingle: vi.fn(async () => ({ data: null, error: null })),
-                })),
+                maybeSingle: vi.fn(async () => ({ data: null, error: null })),
               })),
             })),
             insert: insertEvent,
+            update: updateEvent,
           };
         }
         if (table === "subscriptions") {

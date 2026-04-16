@@ -629,7 +629,7 @@ function TeamPanel() {
         invitations: body.invitations ?? [],
         seatLimit: body.seatLimit ?? 5,
         usedSeats: body.usedSeats ?? 0,
-        isOwner: body.isOwner ?? true,
+        isOwner: body.isOwner === true,
         viewerRole: body.viewerRole ?? null,
       });
     } catch (e: unknown) {
@@ -736,11 +736,6 @@ function TeamPanel() {
               "No seats left on this team plan. Remove a pending invite/member, then try again.",
           );
         }
-        if (res.status === 409 && body.code === "INVITE_ALREADY_PENDING") {
-          throw new Error(
-            "An invitation is already pending for this email. Use Copy invite link below or ask them to check their inbox.",
-          );
-        }
         throw new Error(body.error ?? "Could not send invite");
       }
       setInviteEmail("");
@@ -836,7 +831,7 @@ function TeamPanel() {
 
   const seatLimit = data?.seatLimit ?? "—";
   const usedSeats = data?.usedSeats ?? "—";
-  const isOwner = data?.isOwner !== false;
+  const isOwner = data?.isOwner === true;
   const viewerRole = data?.viewerRole ?? null;
 
   async function runConfirmedAction() {
