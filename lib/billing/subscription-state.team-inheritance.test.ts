@@ -101,5 +101,78 @@ describe("team-seat inheritance", () => {
     expect(state.teamMemberOfOwnerId).toBeNull();
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
   });
+
+  it("inherits owner team seat even if member has an active personal subscription", async () => {
+    const admin = {
+      from: vi.fn((table: string) => {
+        if (table === "team_members") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({
+                    data: { team_id: "t1", role: "member" },
+                    error: null,
+                  })),
+                })),
+              })),
+            })),
+          };
+        }
+        if (table === "teams") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: { owner_id: "owner-1" },
+                  error: null,
+                })),
+              })),
+            })),
+          };
+        }
+        if (table === "subscriptions") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    user_id: "owner-1",
+                    stripe_customer_id: "cus_owner",
+                    stripe_subscription_id: "sub_owner",
+                    tier: "team",
+                    interval: "monthly",
+                    status: "active",
+                    current_period_end: null,
+                    cancel_at_period_end: false,
+                  },
+                  error: null,
+                })),
+              })),
+            })),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      }),
+    };
+    mockCreateAdminClient.mockReturnValue(admin);
+
+    const memberClient = makeClientForUserSubscriptionRow({
+      user_id: "member-1",
+      stripe_customer_id: "cus_member",
+      stripe_subscription_id: "sub_member",
+      tier: "pro",
+      interval: "monthly",
+      status: "active",
+      current_period_end: null,
+      cancel_at_period_end: false,
+    });
+    const state = await getEffectiveBillingState(memberClient, "member-1");
+
+    expect(state.effectiveTier).toBe("team");
+    expect(state.teamMemberOfOwnerId).toBe("owner-1");
+    expect(state.stripeCustomerId).toBeNull();
+    expect(state.stripeSubscriptionId).toBeNull();
+  });
 });
 

@@ -201,13 +201,6 @@ export async function getEffectiveBillingState(
     return { ...base, teamMemberOfOwnerId: null };
   }
 
-  const ownSubscriptionGrantsPaidTier =
-    base.effectiveTier !== "free" || base.accessState === "grace";
-
-  if (ownSubscriptionGrantsPaidTier) {
-    return { ...base, teamMemberOfOwnerId: null };
-  }
-
   const inherited = await tryInheritTeamOwnerBilling(userId);
   if (!inherited) {
     return { ...base, teamMemberOfOwnerId: null };

@@ -15,6 +15,26 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  function friendlyResetPasswordError(message: string): string {
+    const m = message.toLowerCase();
+    if (
+      m.includes("different from the old password") ||
+      m.includes("same as the old password") ||
+      m.includes("new password should be different")
+    ) {
+      return "Choose a new password that is different from your current password.";
+    }
+    if (
+      m.includes("expired") ||
+      m.includes("invalid") ||
+      m.includes("token") ||
+      m.includes("session")
+    ) {
+      return "Reset link is invalid or expired. Request a new one.";
+    }
+    return "Could not reset password.";
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -49,7 +69,7 @@ export default function ResetPasswordPage() {
         password,
       });
       if (updateError) {
-        setError("Reset link is invalid or expired. Request a new one.");
+        setError(friendlyResetPasswordError(updateError.message ?? ""));
         return;
       }
       setInfo("Password updated.");
