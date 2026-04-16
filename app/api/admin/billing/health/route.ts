@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireAdminUser } from "@/lib/auth/require-admin-user";
+import { logEvent } from "@/lib/ops/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -24,10 +26,37 @@ function parseDate(value: string | null): Date | null {
 }
 
 export async function GET() {
+  let adminUserId: string | null = null;
   try {
     const supabase = await createClient();
     const auth = await requireAdminUser(supabase);
     if (auth.response) return auth.response;
+    adminUserId = auth.user!.id;
+
+    const rateLimit = await checkRateLimit({
+      key: adminUserId,
+      bucket: "admin_billing_health",
+      limit: 30,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      logEvent({
+        scope: "admin_billing",
+        event: "health_rate_limited",
+        level: "warn",
+        data: { adminUserId },
+      });
+      return NextResponse.json(
+        {
+          code: "RATE_LIMITED",
+          error: "Too many requests. Please wait before retrying.",
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rateLimit.retryAfterSec) },
+        },
+      );
+    }
 
     const admin = createAdminClient();
     const { data, error } = await admin
@@ -78,6 +107,18 @@ export async function GET() {
         interval: r.interval,
       }));
 
+    logEvent({
+      scope: "admin_billing",
+      event: "health_summary_loaded",
+      data: {
+        adminUserId,
+        sampleSize: rows.length,
+        last1h,
+        last24h,
+        duplicates,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       sampleSize: rows.length,
@@ -94,6 +135,15 @@ export async function GET() {
       manualReconciles,
     });
   } catch (e: unknown) {
+    logEvent({
+      scope: "admin_billing",
+      event: "health_summary_failed",
+      level: "error",
+      data: {
+        adminUserId,
+        error: e instanceof Error ? e.message : "Failed to load billing health",
+      },
+    });
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to load billing health" },
       { status: 500 },

@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockCreateClient, mockRequireAdminUser, mockCreateAdminClient } = vi.hoisted(
-  () => ({
-    mockCreateClient: vi.fn(),
-    mockRequireAdminUser: vi.fn(),
-    mockCreateAdminClient: vi.fn(),
-  }),
-);
+const {
+  mockCreateClient,
+  mockRequireAdminUser,
+  mockCreateAdminClient,
+  mockCheckRateLimit,
+  mockLogEvent,
+} = vi.hoisted(() => ({
+  mockCreateClient: vi.fn(),
+  mockRequireAdminUser: vi.fn(),
+  mockCreateAdminClient: vi.fn(),
+  mockCheckRateLimit: vi.fn(),
+  mockLogEvent: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: mockCreateClient,
@@ -17,6 +23,12 @@ vi.mock("@/lib/auth/require-admin-user", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mockCreateAdminClient,
 }));
+vi.mock("@/lib/auth/rate-limit", () => ({
+  checkRateLimit: mockCheckRateLimit,
+}));
+vi.mock("@/lib/ops/logger", () => ({
+  logEvent: mockLogEvent,
+}));
 
 import { GET } from "@/app/api/admin/billing/health/route";
 
@@ -25,6 +37,7 @@ describe("GET /api/admin/billing/health", () => {
     vi.clearAllMocks();
     mockCreateClient.mockResolvedValue({});
     mockRequireAdminUser.mockResolvedValue({ response: null, user: { id: "admin-1" } });
+    mockCheckRateLimit.mockResolvedValue({ allowed: true, retryAfterSec: 0 });
   });
 
   it("returns 403 when not admin", async () => {
@@ -36,6 +49,15 @@ describe("GET /api/admin/billing/health", () => {
 
     const res = await GET();
     expect(res.status).toBe(403);
+  });
+
+  it("returns 429 when health endpoint is rate limited", async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: false, retryAfterSec: 9 });
+    const res = await GET();
+    const body = await res.json();
+    expect(res.status).toBe(429);
+    expect(body.code).toBe("RATE_LIMITED");
+    expect(res.headers.get("Retry-After")).toBe("9");
   });
 
   it("summarizes recent subscription_events", async () => {

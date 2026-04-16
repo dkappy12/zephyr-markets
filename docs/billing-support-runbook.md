@@ -165,6 +165,27 @@ having count(*) > 1;
   - resend latest failed event from Stripe dashboard.
   - confirm idempotent handling (`duplicate: true` path for replays).
 
+## Break-Glass Procedure (admin-only)
+
+Use this when Stripe shows paid/trialing/past_due but the app still blocks the user.
+
+1. Confirm symptom:
+   - `GET /api/billing/status` as affected user shows `effectiveTier=free` or `canUsePremiumNow=false`.
+   - Stripe dashboard shows an active/trialing/past_due subscription for same user.
+2. Run reconcile as admin:
+   - `POST /api/admin/billing/reconcile`
+   - body: `{ "userId": "AFFECTED_USER_ID" }`
+3. Expected response:
+   - `ok: true`
+   - `stripeCustomerId`, `stripeSubscriptionId`
+   - `applied` payload with `tier`, `interval`, `status`, and `current_period_end`
+4. Validate recovery:
+   - `GET /api/billing/status` as affected user now reflects paid/grace state.
+   - `GET /api/admin/billing/health` shows latest `manual.reconcile` in `manualReconciles`.
+5. Stop/go criteria:
+   - stop and escalate if reconcile returns `404`, `409`, or repeated `500`.
+   - stop and escalate if user remains blocked after successful reconcile response.
+
 ## Escalation
 
 Escalate immediately when:

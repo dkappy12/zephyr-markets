@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireAdminUser } from "@/lib/auth/require-admin-user";
 import { mapStripeSubscriptionToBillingFields } from "@/lib/billing/stripe-subscription-mapper";
 import { getStripe } from "@/lib/billing/stripe";
+import { logEvent } from "@/lib/ops/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,10 +18,40 @@ function pickBestSubscription(subscriptions: Array<{ status: string; created: nu
 }
 
 export async function POST(req: Request) {
+  let adminUserId: string | null = null;
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireAdminUser(supabase);
     if (auth.response) return auth.response;
+    adminUserId = auth.user!.id;
+
+    const rateLimit = await checkRateLimit({
+      key: adminUserId,
+      bucket: "admin_billing_reconcile",
+      limit: 12,
+      windowMs: 60_000,
+    });
+    if (!rateLimit.allowed) {
+      logEvent({
+        scope: "admin_billing",
+        event: "reconcile_rate_limited",
+        level: "warn",
+        data: { adminUserId },
+      });
+      return NextResponse.json(
+        {
+          code: "RATE_LIMITED",
+          error: "Too many requests. Please wait before retrying.",
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rateLimit.retryAfterSec) },
+        },
+      );
+    }
 
     const body = (await req.json().catch(() => ({}))) as { userId?: string };
     const userId = String(body.userId ?? "").trim();
@@ -28,6 +61,11 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+    logEvent({
+      scope: "admin_billing",
+      event: "reconcile_started",
+      data: { adminUserId, targetUserId: userId },
+    });
 
     const admin = createAdminClient();
     const userRes = await admin.auth.admin.getUserById(userId);
@@ -168,6 +206,20 @@ export async function POST(req: Request) {
     });
     if (eventRes.error) throw new Error(eventRes.error.message);
 
+    logEvent({
+      scope: "admin_billing",
+      event: "reconcile_succeeded",
+      data: {
+        adminUserId,
+        targetUserId: userId,
+        stripeCustomerId,
+        stripeSubscriptionId: stripeSubscription.id,
+        tier: mapped.tier,
+        interval: mapped.interval,
+        status: mapped.status,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       userId,
@@ -176,6 +228,15 @@ export async function POST(req: Request) {
       applied,
     });
   } catch (e: unknown) {
+    logEvent({
+      scope: "admin_billing",
+      event: "reconcile_failed",
+      level: "error",
+      data: {
+        adminUserId,
+        error: e instanceof Error ? e.message : "Failed to reconcile billing",
+      },
+    });
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to reconcile billing" },
       { status: 500 },

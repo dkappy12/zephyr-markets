@@ -93,6 +93,7 @@ Hosted portal cannot be fully restyled like the Next.js app; in-app copy explain
   - `actionRequired`
   - `canUsePremiumNow`
 - [ ] Manual SQL checks from [docs/billing-support-runbook.md](billing-support-runbook.md) pass.
+- [ ] If paid users are blocked due to sync mismatch, execute the break-glass flow in [docs/billing-support-runbook.md](billing-support-runbook.md) (`POST /api/admin/billing/reconcile` then validate `GET /api/admin/billing/health` and user `/api/billing/status`).
 
 ## Rollback Preparedness
 
