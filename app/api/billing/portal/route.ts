@@ -53,12 +53,15 @@ export async function POST(req: Request) {
 
     const returnUrl = `${baseUrl}/dashboard/overview?billing=billing_updated`;
     const session =
-      requestedMode === "update_subscription"
+      requestedMode === "update_subscription" && billing.stripeSubscriptionId
         ? await stripe.billingPortal.sessions.create({
             customer: customerId,
             return_url: returnUrl,
             flow_data: {
               type: "subscription_update",
+              subscription_update: {
+                subscription: billing.stripeSubscriptionId,
+              },
               after_completion: {
                 type: "redirect",
                 redirect: { return_url: returnUrl },

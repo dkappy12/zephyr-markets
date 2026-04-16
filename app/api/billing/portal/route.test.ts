@@ -43,6 +43,7 @@ describe("POST /api/billing/portal", () => {
     mockGetEffectiveBillingState.mockResolvedValue({
       teamMemberOfOwnerId: null,
       stripeCustomerId: "cus_1",
+      stripeSubscriptionId: "sub_1",
     });
     mockGetAppBaseUrl.mockReturnValue("https://zephyr.markets");
   });
@@ -63,6 +64,9 @@ describe("POST /api/billing/portal", () => {
       return_url: "https://zephyr.markets/dashboard/overview?billing=billing_updated",
       flow_data: {
         type: "subscription_update",
+        subscription_update: {
+          subscription: "sub_1",
+        },
         after_completion: {
           type: "redirect",
           redirect: {
@@ -71,6 +75,28 @@ describe("POST /api/billing/portal", () => {
           },
         },
       },
+    });
+  });
+
+  it("falls back to generic portal when stripeSubscriptionId is missing", async () => {
+    mockGetEffectiveBillingState.mockResolvedValue({
+      teamMemberOfOwnerId: null,
+      stripeCustomerId: "cus_1",
+      stripeSubscriptionId: null,
+    });
+    const createPortalSession = vi.fn(async () => ({ url: "https://billing.stripe.test/session" }));
+    mockGetStripe.mockReturnValue({
+      customers: { list: vi.fn(), create: vi.fn() },
+      billingPortal: { sessions: { create: createPortalSession } },
+    });
+
+    const res = await POST(
+      new Request("https://zephyr.markets/api/billing/portal", { method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    expect(createPortalSession).toHaveBeenCalledWith({
+      customer: "cus_1",
+      return_url: "https://zephyr.markets/dashboard/overview?billing=billing_updated",
     });
   });
 });
