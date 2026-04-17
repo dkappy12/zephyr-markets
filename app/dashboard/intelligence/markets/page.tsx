@@ -126,6 +126,13 @@ type StorageRow = {
   report_date: string;
 };
 
+type CarbonHistoryRow = {
+  price_date: string;
+  hub: string;
+  price_gbp_per_t: number | null;
+  price_eur_per_t: number | null;
+};
+
 type IcFlowRow = {
   id: string;
   label: string;
@@ -324,6 +331,7 @@ export default function MarketsPage() {
   const [ukaPrice, setUkaPrice] = useState<number | null>(null);
   const [euaPrice, setEuaPrice] = useState<number | null>(null);
   const [carbonUpdated, setCarbonUpdated] = useState<string | null>(null);
+  const [carbonHistory, setCarbonHistory] = useState<CarbonHistoryRow[]>([]);
   const [marketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
   >("all_markets");
@@ -460,6 +468,25 @@ export default function MarketsPage() {
           euaRow?.price_eur_per_t ? Number(euaRow.price_eur_per_t) : null,
         );
         setCarbonUpdated(ukaRow?.price_date ?? null);
+
+        const carbonHistoryRes = await supabase
+          .from("carbon_prices")
+          .select("price_date, hub, price_gbp_per_t, price_eur_per_t")
+          .in("hub", ["UKA", "EUA"])
+          .order("price_date", { ascending: true })
+          .limit(60);
+
+        setCarbonHistory(
+          (carbonHistoryRes.data ?? []).map((r) => {
+            const row = r as Record<string, unknown>;
+            return {
+              price_date: String(row.price_date ?? ""),
+              hub: String(row.hub ?? ""),
+              price_gbp_per_t: parseNum(row.price_gbp_per_t),
+              price_eur_per_t: parseNum(row.price_eur_per_t),
+            };
+          }),
+        );
 
         if (ppRes.error) {
           setPhysicalPremium(null);
@@ -1016,6 +1043,44 @@ export default function MarketsPage() {
       return null;
     }
   }, [physicalPremium?.calculated_at]);
+
+  const carbonChartData = useMemo(() => {
+    const euaRows = carbonHistory.filter((r) => r.hub === "EUA");
+    const ukaRows = carbonHistory.filter((r) => r.hub === "UKA");
+    const dates = [...new Set(carbonHistory.map((r) => r.price_date))].sort();
+    return dates.map((date) => {
+      const eua = euaRows.find((r) => r.price_date === date);
+      const uka = ukaRows.find((r) => r.price_date === date);
+      const euaEur = eua?.price_eur_per_t ? Number(eua.price_eur_per_t) : null;
+      const ukaGbp = uka?.price_gbp_per_t ? Number(uka.price_gbp_per_t) : null;
+      const euaGbp = eua?.price_gbp_per_t ? Number(eua.price_gbp_per_t) : null;
+      const spread =
+        euaGbp != null && ukaGbp != null ? euaGbp - ukaGbp : null;
+      return { date, euaEur, ukaGbp, spread };
+    });
+  }, [carbonHistory]);
+
+  const euaCarbonLine30 = useMemo(() => {
+    return carbonChartData
+      .filter((d) => d.euaEur != null)
+      .slice(-30)
+      .map((d) => ({
+        date: d.date,
+        label: d.date.length >= 10 ? d.date.slice(5, 10) : d.date,
+        euaEur: d.euaEur as number,
+      }));
+  }, [carbonChartData]);
+
+  const carbonSpreadLine30 = useMemo(() => {
+    return carbonChartData
+      .filter((d) => d.spread != null)
+      .slice(-30)
+      .map((d) => ({
+        date: d.date,
+        label: d.date.length >= 10 ? d.date.slice(5, 10) : d.date,
+        spread: d.spread as number,
+      }));
+  }, [carbonChartData]);
 
   return (
     <div className="space-y-6">
@@ -1604,6 +1669,97 @@ export default function MarketsPage() {
               <p className="mt-1 text-[10px] text-ink-light">
                 European benchmark · OilPriceAPI
               </p>
+            </div>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+                EUA (€/t) · last 30 days
+              </p>
+              <div className="mt-3 h-[140px] w-full">
+                {euaCarbonLine30.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart
+                      data={euaCarbonLine30}
+                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: INK_MID, fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={{ fill: INK_MID, fontSize: 10 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={36}
+                        domain={["auto", "auto"]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="euaEur"
+                        stroke={BRAND_GREEN}
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-[140px] items-center text-xs text-ink-light">
+                    No EUA history in range
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+                UKA / EUA spread (£/t) · last 30 days
+              </p>
+              <p className="mt-0.5 text-[10px] text-ink-light">
+                EUA (£) − UKA (£) by date
+              </p>
+              <div className="mt-2 h-[140px] w-full">
+                {carbonSpreadLine30.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart
+                      data={carbonSpreadLine30}
+                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: INK_MID, fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={{ fill: INK_MID, fontSize: 10 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={36}
+                        domain={["auto", "auto"]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="spread"
+                        stroke={INK}
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-[140px] items-center text-xs text-ink-light">
+                    Need overlapping UKA &amp; EUA dates for spread
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <p className="text-[10px] text-ink-light">
