@@ -111,7 +111,8 @@ MARKET_INDEX_POLL_MINUTES = 30
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
-STOOQ_EUA_QUOTE_URL = "https://stooq.com/q/l/?s=co2.f&i=d"
+OILPRICE_API_URL = "https://api.oilpriceapi.com/v1/prices/latest"
+OILPRICE_API_KEY = os.environ.get("OILPRICE_API_KEY", "").strip()
 ELEXON_FUELINST_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELINST"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
@@ -3197,26 +3198,29 @@ async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
 
     eua_eur_per_t: float | None = None
 
-    # Fetch EUA from Stooq (co2.f = EUA futures, same source as NBP nf.f)
+    # Fetch EUA from OilPriceAPI (EU_CARBON_EUR)
     try:
-        resp = await http.get(STOOQ_EUA_QUOTE_URL, timeout=HTTP_TIMEOUT)
-        resp.raise_for_status()
-        text = resp.text.strip()
-        lines = text.splitlines()
-        # Stooq returns CSV: Symbol,Date,Open,High,Low,Close,Volume
-        if len(lines) >= 2:
-            fields = lines[1].split(",")
-            if len(fields) >= 6:
-                close_str = fields[5].strip()
-                if close_str and close_str != "N/D":
-                    eua_eur_per_t = float(close_str)
-                    logger.info("carbon_cycle: EUA = €%.2f/t from Stooq co2.f", eua_eur_per_t)
-                else:
-                    logger.debug("carbon_cycle: Stooq co2.f returned N/D (market closed or no data) — will use DB fallback")
+        if not OILPRICE_API_KEY:
+            logger.warning("carbon_cycle: OILPRICE_API_KEY not set, skipping fetch")
         else:
-            logger.warning("carbon_cycle: Stooq co2.f response too short: %s", text[:100])
+            resp = await http.get(
+                OILPRICE_API_URL,
+                params={"by_code": "EU_CARBON_EUR"},
+                headers={"Authorization": f"Token {OILPRICE_API_KEY}"},
+                timeout=HTTP_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                price = data.get("data", {}).get("price")
+                if price is not None:
+                    eua_eur_per_t = float(price)
+                    logger.info("carbon_cycle: EUA = €%.2f/t from OilPriceAPI", eua_eur_per_t)
+                else:
+                    logger.warning("carbon_cycle: OilPriceAPI returned 200 but no price. Response: %s", str(data)[:200])
+            else:
+                logger.warning("carbon_cycle: OilPriceAPI returned HTTP %s", resp.status_code)
     except Exception as e:
-        logger.warning("carbon_cycle: Stooq EUA fetch failed: %s", e)
+        logger.warning("carbon_cycle: OilPriceAPI fetch failed: %s", e)
 
     # If primary fetch failed, try fetching latest from our own DB (keeps last known value)
     if eua_eur_per_t is None:
