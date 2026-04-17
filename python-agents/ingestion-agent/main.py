@@ -2378,6 +2378,24 @@ def scheduled_accuracy_fill() -> None:
     asyncio.run(run_accuracy_fill_job())
 
 
+async def run_accuracy_backfill() -> None:
+    """
+    One-time backfill: fill predictions for dates that were missed due to
+    the price_time vs price_date bug. Run once on deployment then remove.
+    """
+    backfill_dates = ["2026-04-14", "2026-04-15", "2026-04-16"]
+    for date_str in backfill_dates:
+        logger.info("accuracy_backfill: processing %s", date_str)
+        await run_accuracy_fill_job(date_str)
+
+
+def scheduled_accuracy_backfill() -> None:
+    try:
+        asyncio.run(run_accuracy_backfill())
+    except Exception as e:
+        logger.error("Accuracy backfill aborted: %s", e, exc_info=True)
+
+
 # -----------------------------------------------------------------------------
 # Morning brief (Claude) → brief_entries (INSERT history)
 # -----------------------------------------------------------------------------
@@ -3784,6 +3802,9 @@ def main() -> None:
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
     schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
+    # One-time backfill for dates missed due to price_time bug — remove after first deploy
+    logger.info("accuracy_backfill: running one-time backfill on startup")
+    threading.Thread(target=scheduled_accuracy_backfill, daemon=True).start()
 
     while True:
         schedule.run_pending()
