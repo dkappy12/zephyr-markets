@@ -202,6 +202,18 @@ def _governance_coefficient_updates_url() -> str:
     return f"{SUPABASE_URL.rstrip('/')}/rest/v1/coefficient_updates"
 
 
+def _supabase_governance_headers() -> dict:
+    """Headers for PostgREST requests to the governance schema."""
+    return {
+        **_supabase_auth_headers(),
+        "Accept-Profile": "governance",
+        "Content-Profile": "governance",
+    }
+
+
+# Future: ops.pipeline_health lives in the ops schema — use Accept-Profile: ops for those requests.
+
+
 def demand_baseline_gw_utc(hour: int, month: int | None = None) -> float:
     """
     GB electricity demand baseline by UTC hour, seasonally adjusted.
@@ -904,7 +916,7 @@ async def _write_coefficient_update(
         "runtime_ms": runtime_ms,
     }
     headers = {
-        **_supabase_auth_headers(),
+        **_supabase_governance_headers(),
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
@@ -932,7 +944,7 @@ async def _promote_model_version(
 
     if parent_version_id:
         patch_headers = {
-            **_supabase_auth_headers(),
+            **_supabase_governance_headers(),
             "Content-Type": "application/json",
             "Prefer": "return=minimal",
         }
@@ -973,7 +985,7 @@ async def _promote_model_version(
     }
 
     headers = {
-        **_supabase_auth_headers(),
+        **_supabase_governance_headers(),
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
@@ -993,7 +1005,7 @@ async def _load_kalman_coefficients_on_startup(client: httpx.AsyncClient) -> Non
     try:
         resp = await client.get(
             _governance_model_versions_url(),
-            headers=_supabase_auth_headers(),
+            headers=_supabase_governance_headers(),
             params={
                 "is_current": "eq.true",
                 "select": "b1,b2,b3,b4,b5,w1,w2,w3",
@@ -1081,7 +1093,7 @@ async def run_kalman_calibration_job() -> None:
         try:
             resp = await client.get(
                 _governance_model_versions_url(),
-                headers=_supabase_auth_headers(),
+                headers=_supabase_governance_headers(),
                 params={
                     "is_current": "eq.true",
                     "select": "id,b1,b2,b3,b4,b5,w1,w2,w3,covariance",
@@ -1195,7 +1207,7 @@ async def run_kalman_calibration_job() -> None:
             try:
                 count_resp = await client.get(
                     _governance_model_versions_url(),
-                    headers=_supabase_auth_headers(),
+                    headers=_supabase_governance_headers(),
                     params={"select": "id", "limit": "1000"},
                 )
                 count_resp.raise_for_status()
