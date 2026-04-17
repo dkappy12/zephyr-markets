@@ -235,7 +235,6 @@ async def _update_pipeline_health(
     try:
         now = datetime.now(timezone.utc).isoformat()
         payload: dict[str, Any] = {
-            "feed_id": feed_id,
             "last_attempt_ts": now,
             "updated_at": now,
         }
@@ -250,16 +249,15 @@ async def _update_pipeline_health(
             payload["last_error"] = str(error)[:500] if error else "Unknown error"
             payload["staleness_status"] = "stale"
 
-        headers = {
-            **_supabase_ops_headers(),
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        }
-        resp = await client.post(
+        resp = await client.patch(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/pipeline_health",
-            headers=headers,
+            headers={
+                **_supabase_ops_headers(),
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
             json=payload,
-            params={"on_conflict": "feed_id"},
+            params={"feed_id": f"eq.{feed_id}"},
         )
         resp.raise_for_status()
     except Exception as e:
