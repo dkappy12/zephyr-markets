@@ -614,15 +614,29 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
   if (size == null) warnings.push("Missing size.");
   const tradePrice = parseLooseNumber(entry.trade_price);
   if (tradePrice == null) warnings.push("Missing trade price.");
-  const keep =
+  const UNSUPPORTED_INSTRUMENT_TYPES = new Set([
+    "power_option",
+    "gas_option",
+    "renewable_certificate",
+  ]);
+
+  const rawInstrumentType = normaliseInstrumentTypeValue(entry.instrument_type, market);
+  const isUnsupportedType = rawInstrumentType != null && UNSUPPORTED_INSTRUMENT_TYPES.has(rawInstrumentType);
+
+  const keepRaw =
     typeof entry.keep === "boolean"
       ? entry.keep
       : market != null || !!inferDirection(JSON.stringify(entry).toLowerCase());
+
+  const keep = keepRaw && !isUnsupportedType;
+
   const discardReason = keep
     ? null
-    : typeof entry.discard_reason === "string" && entry.discard_reason.trim()
-      ? entry.discard_reason.trim()
-      : "Non-energy instrument";
+    : isUnsupportedType
+      ? `${rawInstrumentType === "renewable_certificate" ? "Renewable certificates (GOO/REGO)" : rawInstrumentType === "power_option" ? "Power options" : "Gas options"} are not yet supported — P&L cannot be calculated`
+      : typeof entry.discard_reason === "string" && entry.discard_reason.trim()
+        ? entry.discard_reason.trim()
+        : "Non-energy instrument";
 
   return {
     keep,
