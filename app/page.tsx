@@ -52,22 +52,10 @@ const PLAN_COMPARISON_ROWS: {
     team: "Real-time",
   },
   {
-    feature: "Morning brief",
-    free: "Delayed 08:00",
-    pro: "06:00 live",
-    team: "06:00 live",
-  },
-  {
     feature: "Portfolio positions",
     free: "-",
     pro: "Unlimited",
     team: "Unlimited",
-  },
-  {
-    feature: "Signal history",
-    free: "7 days",
-    pro: "12 months",
-    team: "12 months",
   },
   {
     feature: "API access",
@@ -562,7 +550,7 @@ export default function Home() {
               name="Pro"
               price="£39"
               period="/month"
-              blurb="Real-time signals, 06:00 brief, all markets, unlimited portfolio positions."
+              blurb="Real-time signals and REMIT alerts, all markets, unlimited portfolio positions."
               cta="Get Pro"
               href="/signup?plan=pro"
               emphasis

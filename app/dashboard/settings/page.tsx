@@ -1488,8 +1488,7 @@ function PlanApiPanel() {
                 </span>
               </p>
               <p className="mt-2 text-sm text-ink-mid">
-                Live signals, {pro.morningBriefTimeGmt} brief, five markets,
-                portfolio tools.
+                Real-time signals, all markets, unlimited positions.
               </p>
               <button
                 type="button"
