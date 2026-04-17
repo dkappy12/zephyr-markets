@@ -1198,7 +1198,10 @@ export default function MarketsPage() {
         <code className="text-[9px]">storage_levels</code>).
       </p>
 
-      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+      {/* Two independent columns so row height isn’t locked to GB Power (avoids huge gap under TTF vs Spark). */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="flex min-w-0 flex-1 flex-col gap-4">
         {/* GB Power */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -1463,70 +1466,7 @@ export default function MarketsPage() {
           </div>
         </motion.div>
 
-        {/* TTF stack */}
-        {marketsScope !== "gb_nbp_only" ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
-        >
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            TTF gas · CCGT cost stack
-          </p>
-          <p className="mt-2 font-serif text-3xl tabular-nums text-ink">
-            {loading
-              ? "…"
-              : ttfEur == null
-                ? "—"
-              : `€${ttfEur.toFixed(2)}/MWh`}
-          </p>
-          {ttfEur == null ? (
-            <p className="mt-1 text-[11px] text-ink-light">TTF data unavailable</p>
-          ) : null}
-          <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
-          <p className="mt-1 text-[10px] text-ink-light">
-            &quot;Updated&quot; uses ingestion time from the database (
-            <code className="text-[9px]">fetched_at</code>
-            ), not the gas-day index hour.
-          </p>
-          <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">NBP equivalent</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">Gas-to-power (50% eff.)</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null
-                  ? "—"
-                  : `£${gasGbpPerMwhElectric(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">Carbon adder (UKA+CPS)</dt>
-              <dd className="tabular-nums text-ink">£{CARBON_ADDER.toFixed(2)}/MWh</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">VOM</dt>
-              <dd className="tabular-nums text-ink">£{VOM.toFixed(2)}/MWh</dd>
-            </div>
-            <div className="flex justify-between gap-4 border-t-[0.5px] border-ivory-border pt-2 font-medium">
-              <dt className="text-ink">Full SRMC</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null ? "—" : `£${srmcGbpMwh(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-[11px] text-ink-light">
-            {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
-          </p>
-        </motion.div>
-        ) : null}
-
-        {/* Spark */}
+        {/* Spark — same column as GB Power so it aligns with Carbon, not with TTF’s row */}
         {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -1651,6 +1591,71 @@ export default function MarketsPage() {
           </p>
           <p className="mt-1 text-[10px] text-ink-light">
             {sparkUpdated != null ? `Updated ${sparkUpdated}` : "Data unavailable"}
+          </p>
+        </motion.div>
+        ) : null}
+
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-4">
+        {/* TTF stack */}
+        {marketsScope !== "gb_nbp_only" ? (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            TTF gas · CCGT cost stack
+          </p>
+          <p className="mt-2 font-serif text-3xl tabular-nums text-ink">
+            {loading
+              ? "…"
+              : ttfEur == null
+                ? "—"
+              : `€${ttfEur.toFixed(2)}/MWh`}
+          </p>
+          {ttfEur == null ? (
+            <p className="mt-1 text-[11px] text-ink-light">TTF data unavailable</p>
+          ) : null}
+          <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
+          <p className="mt-1 text-[10px] text-ink-light">
+            &quot;Updated&quot; uses ingestion time from the database (
+            <code className="text-[9px]">fetched_at</code>
+            ), not the gas-day index hour.
+          </p>
+          <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink-mid">NBP equivalent</dt>
+              <dd className="tabular-nums text-ink">
+                {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink-mid">Gas-to-power (50% eff.)</dt>
+              <dd className="tabular-nums text-ink">
+                {ttfEur == null
+                  ? "—"
+                  : `£${gasGbpPerMwhElectric(ttfEur).toFixed(2)}/MWh`}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink-mid">Carbon adder (UKA+CPS)</dt>
+              <dd className="tabular-nums text-ink">£{CARBON_ADDER.toFixed(2)}/MWh</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink-mid">VOM</dt>
+              <dd className="tabular-nums text-ink">£{VOM.toFixed(2)}/MWh</dd>
+            </div>
+            <div className="flex justify-between gap-4 border-t-[0.5px] border-ivory-border pt-2 font-medium">
+              <dt className="text-ink">Full SRMC</dt>
+              <dd className="tabular-nums text-ink">
+                {ttfEur == null ? "—" : `£${srmcGbpMwh(ttfEur).toFixed(2)}/MWh`}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-4 text-[11px] text-ink-light">
+            {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
           </p>
         </motion.div>
         ) : null}
@@ -1839,14 +1844,16 @@ export default function MarketsPage() {
             Both are direct inputs to the CCGT SRMC stack.
           </p>
         </section>
+        </div>
+      </div>
 
-        {/* EU Storage — full width so the 2-col grid doesn’t leave an empty column */}
+        {/* EU Storage — full width below the two columns */}
         {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4 lg:col-span-2"
+          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
         >
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             EU storage
