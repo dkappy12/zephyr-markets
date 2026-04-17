@@ -193,6 +193,11 @@ export function AdminPanel() {
         const p = await pipelineRes.json();
         setPipelineFeeds(p.feeds ?? []);
       }
+      const usersRes = await fetch("/api/admin/users");
+      if (usersRes.ok) {
+        const u = await usersRes.json();
+        setProfiles(u.profiles ?? []);
+      }
 
       const { data: preds } = await supabase
         .from("premium_predictions")
@@ -203,12 +208,6 @@ export function AdminPanel() {
         .order("target_date", { ascending: false })
         .limit(1000);
       setPredictions((preds ?? []) as Prediction[]);
-
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("id, email, role, plan, created_at")
-        .order("created_at", { ascending: false });
-      setProfiles((profileData ?? []) as Profile[]);
 
       setLoading(false);
     }
@@ -639,13 +638,24 @@ export function AdminPanel() {
                       : "—"}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
-                    {u.role}
-                  </span>
-                  <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
-                    {u.plan}
-                  </span>
+                <div className="flex items-center">
+                  {u.role === "admin" ? (
+                    <span className="rounded-[3px] border-[0.5px] border-ink/30 bg-ink px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ivory">
+                      admin
+                    </span>
+                  ) : u.plan === "pro" ? (
+                    <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
+                      pro
+                    </span>
+                  ) : u.plan === "team" ? (
+                    <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
+                      team
+                    </span>
+                  ) : (
+                    <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-light">
+                      free
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
