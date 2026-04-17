@@ -1798,28 +1798,19 @@ async def fetch_actual_price_for_sp_http(
     client: httpx.AsyncClient, target_date: str, settlement_period: int
 ) -> float | None:
     """
-    Fetch the actual N2EX intraday price for a given date and settlement period
+    Fetch the actual N2EX/APX intraday price for a given date and settlement period
     from the market_prices table.
-    SP maps to startTime: SP1 = 00:00, SP2 = 00:30, etc.
-
-    Primary lookup: exact price_time match with price_gbp_mwh > 0.
-    Fallback: any row within the same date with the closest price_time.
-    The market column is not filtered — APXMIDP provider data is what
-    contains real prices, not "N2EX".
+    Queries by price_date + settlement_period (not price_time).
     """
     headers = _supabase_auth_headers()
-
-    # Convert SP to start time
-    sp_minutes = (settlement_period - 1) * 30
-    sp_hour = sp_minutes // 60
-    sp_min = sp_minutes % 60
-    price_time = f"{target_date}T{sp_hour:02d}:{sp_min:02d}:00+00:00"
-
-    # Primary: exact match on price_time with a valid price
     url = (
         f"{SUPABASE_URL.rstrip('/')}/rest/v1/market_prices"
-        f"?price_time=eq.{price_time}&price_gbp_mwh=gt.0&select=price_gbp_mwh"
-        f"&order=price_gbp_mwh.desc&limit=1"
+        f"?price_date=eq.{target_date}"
+        f"&settlement_period=eq.{settlement_period}"
+        f"&price_gbp_mwh=gt.0"
+        f"&select=price_gbp_mwh"
+        f"&order=price_gbp_mwh.desc"
+        f"&limit=1"
     )
     resp = await client.get(url, headers=headers)
     resp.raise_for_status()
@@ -1827,15 +1818,13 @@ async def fetch_actual_price_for_sp_http(
     if rows and float(rows[0]["price_gbp_mwh"]) > 0:
         return float(rows[0]["price_gbp_mwh"])
 
-    # Fallback: find any row for this date near this settlement period
-    # Fetch all rows for the target date and find the closest by time
+    # Fallback: find closest settlement period on the same date
     fallback_url = (
         f"{SUPABASE_URL.rstrip('/')}/rest/v1/market_prices"
-        f"?price_time=gte.{target_date}T00:00:00+00:00"
-        f"&price_time=lt.{target_date}T23:59:59+00:00"
+        f"?price_date=eq.{target_date}"
         f"&price_gbp_mwh=gt.0"
-        f"&select=price_gbp_mwh,price_time"
-        f"&order=price_time.asc"
+        f"&select=price_gbp_mwh,settlement_period"
+        f"&order=settlement_period.asc"
     )
     resp2 = await client.get(fallback_url, headers=headers)
     resp2.raise_for_status()
@@ -1844,39 +1833,19 @@ async def fetch_actual_price_for_sp_http(
     if not all_rows:
         return None
 
-    # Find the row whose price_time is closest to our target SP time
-    from datetime import datetime, timezone
-
-    target_dt = datetime(
-        int(target_date[:4]),
-        int(target_date[5:7]),
-        int(target_date[8:10]),
-        sp_hour,
-        sp_min,
-        0,
-        tzinfo=timezone.utc,
+    # Find closest settlement period
+    best_row = min(
+        all_rows,
+        key=lambda r: abs(int(r["settlement_period"]) - settlement_period)
     )
+    delta_sp = abs(int(best_row["settlement_period"]) - settlement_period)
 
-    best_row = None
-    best_delta = float("inf")
-    for r in all_rows:
-        try:
-            row_dt = datetime.fromisoformat(r["price_time"].replace("Z", "+00:00"))
-            delta = abs((row_dt - target_dt).total_seconds())
-            if delta < best_delta:
-                best_delta = delta
-                best_row = r
-        except Exception:
-            continue
-
-    # Only use fallback if within 45 minutes (one SP either side)
-    if best_row and best_delta <= 2700:
+    # Only use fallback if within 1 settlement period (30 min)
+    if delta_sp <= 1:
         logger.debug(
-            "accuracy_fill: used fallback price for sp=%d date=%s delta=%.0fs price=£%.2f",
-            settlement_period,
-            target_date,
-            best_delta,
-            float(best_row["price_gbp_mwh"]),
+            "accuracy_fill: used fallback sp=%d (delta=%d) for sp=%d date=%s price=£%.2f",
+            int(best_row["settlement_period"]), delta_sp, settlement_period,
+            target_date, float(best_row["price_gbp_mwh"])
         )
         return float(best_row["price_gbp_mwh"])
 
