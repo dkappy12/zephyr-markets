@@ -433,10 +433,24 @@ function classifyRowHeuristic(row: Record<string, unknown>) {
   const unit = inferUnit(row, text);
   const currency = inferCurrency(row, text, market);
 
+  const inferredType = inferInstrumentType(text, market);
+  const UNSUPPORTED = new Set(["power_option", "gas_option", "renewable_certificate"]);
+  const isUnsupported = inferredType != null && UNSUPPORTED.has(inferredType);
+  const keepFinal = isEnergy && !isUnsupported;
+  const discardReasonFinal = keepFinal
+    ? null
+    : isUnsupported
+      ? inferredType === "renewable_certificate"
+        ? "Renewable certificates (GOO/REGO) are not yet supported — P&L cannot be calculated"
+        : inferredType === "power_option"
+          ? "Power options are not yet supported — P&L cannot be calculated"
+          : "Gas options are not yet supported — P&L cannot be calculated"
+      : "Non-energy instrument";
+
   return {
-    keep: isEnergy,
-    discard_reason: isEnergy ? null : "Non-energy instrument",
-    instrument_type: inferInstrumentType(text, market),
+    keep: keepFinal,
+    discard_reason: discardReasonFinal,
+    instrument_type: inferredType,
     market,
     direction,
     size,
