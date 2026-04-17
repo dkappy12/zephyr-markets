@@ -139,9 +139,7 @@ function OverviewPageInner() {
   const [solarGw, setSolarGw] = useState<number | null>(null);
   const [solarDatetimeGmt, setSolarDatetimeGmt] = useState<string | null>(null);
   const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
-  const [marketsScope, setMarketsScope] = useState<
-    "gb_nbp_only" | "five_markets" | "all_markets"
-  >("gb_nbp_only");
+  const marketsScope = "all_markets" as const;
   const [hasPositions, setHasPositions] = useState<boolean>(false);
 
   useEffect(() => {
@@ -151,29 +149,24 @@ function OverviewPageInner() {
         if (!res.ok) {
           return {
             delay: 0,
-            scope: "gb_nbp_only" as const,
           };
         }
         const body = (await res.json()) as {
           entitlements?: {
             signalDelayMinutes?: number;
-            markets?: "gb_nbp_only" | "five_markets" | "all_markets";
           };
         };
         return {
           delay: Number(body.entitlements?.signalDelayMinutes ?? 0),
-          scope: body.entitlements?.markets ?? "gb_nbp_only",
         };
       })
-      .then(({ delay, scope }) => {
+      .then(({ delay }) => {
         if (!active) return;
         setSignalDelayMinutes(Number.isFinite(delay) ? Math.max(0, delay) : 0);
-        setMarketsScope(scope);
       })
       .catch(() => {
         if (!active) return;
         setSignalDelayMinutes(0);
-        setMarketsScope("gb_nbp_only");
       });
     return () => {
       active = false;
@@ -420,7 +413,7 @@ function OverviewPageInner() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [signalDelayMinutes, marketsScope]);
+  }, [signalDelayMinutes]);
 
   useEffect(() => {
     relTimeRef.current = setInterval(() => {
