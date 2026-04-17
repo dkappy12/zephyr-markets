@@ -640,7 +640,7 @@ export function AdminPanel() {
                 </div>
                 <div className="flex items-center">
                   {u.role === "admin" ? (
-                    <span className="rounded-[3px] border-[0.5px] border-ink/30 bg-ink px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ivory">
+                    <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
                       admin
                     </span>
                   ) : u.plan === "pro" ? (
