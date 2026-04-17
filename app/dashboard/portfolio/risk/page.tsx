@@ -602,7 +602,9 @@ export default function RiskPage() {
                   <span>Average daily P&amp;L: {formatGbp(avgDailyPnL)}</span>
                   <span>Daily volatility: {formatGbp(dailyVolatility)}</span>
                   <span>Annualised volatility: {formatGbp(annualisedVolatility)}</span>
-                  <span>Sharpe equivalent: {sharpe.toFixed(1)}</span>
+                  {dailyPnLSeries.length >= 20 && (
+                    <span>Sharpe equivalent: {sharpe.toFixed(1)}</span>
+                  )}
                 </div>
                 <p className="mt-2 text-xs italic text-ink-light">
                   Based on {dailyPnLSeries.length} days · VaR confidence improves significantly after 20 trading days
