@@ -481,6 +481,9 @@ function inferMarket(text: string) {
 }
 
 function inferInstrumentType(text: string, market: string | null) {
+  if (/\b(goo|rego|guarantee\s+of\s+origin|renewable\s+certificate)\b/i.test(text)) {
+    return "renewable_certificate";
+  }
   if (/\bspark\b/.test(text)) return "spark_spread";
   if (/\bdark\b/.test(text)) return "dark_spread";
   if (/\boption\b|\bcall\b|\bput\b/.test(text)) {
