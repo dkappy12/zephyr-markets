@@ -328,8 +328,6 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
-  const [ukaPrice, setUkaPrice] = useState<number | null>(null);
-  const [euaPrice, setEuaPrice] = useState<number | null>(null);
   const [carbonUpdated, setCarbonUpdated] = useState<string | null>(null);
   const [carbonHistory, setCarbonHistory] = useState<CarbonHistoryRow[]>([]);
   const [marketsScope] = useState<
@@ -460,13 +458,6 @@ export default function MarketsPage() {
 
         const carbonRows = carbonRes.data ?? [];
         const ukaRow = carbonRows.find((r: { hub?: string }) => r.hub === "UKA");
-        const euaRow = carbonRows.find((r: { hub?: string }) => r.hub === "EUA");
-        setUkaPrice(
-          ukaRow?.price_gbp_per_t ? Number(ukaRow.price_gbp_per_t) : null,
-        );
-        setEuaPrice(
-          euaRow?.price_eur_per_t ? Number(euaRow.price_eur_per_t) : null,
-        );
         setCarbonUpdated(ukaRow?.price_date ?? null);
 
         const carbonHistoryRes = await supabase
@@ -1176,7 +1167,7 @@ export default function MarketsPage() {
         <code className="text-[9px]">storage_levels</code>).
       </p>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         {/* GB Power */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -1646,32 +1637,6 @@ export default function MarketsPage() {
             )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                UKA · UK ETS
-              </p>
-              <p className="mt-2 font-serif text-3xl text-ink">
-                {ukaPrice != null ? `£${ukaPrice.toFixed(2)}` : "—"}
-                <span className="ml-1 font-sans text-sm font-normal text-ink-mid">/t</span>
-              </p>
-              <p className="mt-1 text-[10px] text-ink-light">
-                Derived: EUA (£) − CPS (£18/t) · SRMC input
-              </p>
-            </div>
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                EUA · EU ETS
-              </p>
-              <p className="mt-2 font-serif text-3xl text-ink">
-                {euaPrice != null ? `€${euaPrice.toFixed(2)}` : "—"}
-                <span className="ml-1 font-sans text-sm font-normal text-ink-mid">/t</span>
-              </p>
-              <p className="mt-1 text-[10px] text-ink-light">
-                European benchmark · OilPriceAPI
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
                 EUA (€/t) · last 30 days
@@ -1768,13 +1733,13 @@ export default function MarketsPage() {
           </p>
         </section>
 
-        {/* EU Storage */}
+        {/* EU Storage — full width so the 2-col grid doesn’t leave an empty column */}
         {marketsScope !== "gb_nbp_only" ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
+          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4 lg:col-span-2"
         >
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             EU storage
