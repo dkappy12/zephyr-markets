@@ -42,7 +42,7 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (pathname.startsWith("/admin")) {
+  if (pathname.startsWith("/admin") || pathname.startsWith("/dashboard/admin")) {
     // Only trust server-controlled app_metadata for admin (not user_metadata).
     const isAdmin = user?.app_metadata?.role === "admin";
     if (!user || !isAdmin) {

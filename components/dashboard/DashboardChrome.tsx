@@ -12,7 +12,6 @@ const primary = [
   { href: "/dashboard/intelligence/signals", label: "Intelligence" },
   { href: "/dashboard/portfolio/book", label: "Portfolio" },
   { href: "/dashboard/brief", label: "Brief" },
-  { href: "/dashboard/admin", label: "Admin" },
 ] as const;
 
 const intelligenceSecondary = [
@@ -68,6 +67,10 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const [signingOut, setSigningOut] = useState(false);
   const showIntel = sectionActive(pathname, "/dashboard/intelligence");
   const showPortfolio = sectionActive(pathname, "/dashboard/portfolio");
+  const canSeeAdmin = normalizeRole(profileRole) === "admin";
+  const primaryNav = canSeeAdmin
+    ? [...primary, { href: "/dashboard/admin", label: "Admin" as const }]
+    : primary;
   const badge =
     normalizeRole(profileRole) === "admin" ? "admin" : tierBadgeLabel(effectiveTier);
 
@@ -170,7 +173,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
             className="-mx-1 flex flex-1 items-center justify-start gap-0.5 overflow-x-auto px-1 md:justify-center"
             aria-label="Primary"
           >
-            {primary.map((item) => {
+            {primaryNav.map((item) => {
               const active = navActive(pathname, item.href);
               return (
                 <Link
