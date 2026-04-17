@@ -177,6 +177,21 @@ function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null
   return null;
 }
 
+function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
+  if (!lp) return false;
+  const market = normaliseMarket(p.market);
+  if (market === "GB_POWER" || market === "OTHER_POWER") return lp.gbPowerGbpMwh != null;
+  if (market === "TTF") return lp.ttfEurMwh != null;
+  if (market === "NBP") return lp.nbpPencePerTherm != null;
+  if (market === "UKA") return true;
+  if (market === "EUA") return true;
+  if (market === "OTHER_GAS") return lp.ttfEurMwh != null || lp.nbpPencePerTherm != null;
+  return false;
+}
+
+const NO_MARK_SOURCE_TITLE =
+  "No mark source available for this instrument — P&L cannot be calculated. Supported markets: GB Power, TTF, NBP, UKA, EUA.";
+
 export function BookPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null>(null);
@@ -713,12 +728,13 @@ export function BookPageClient() {
                         : null;
                   }
 
-                  const curCell = formatCurrentPrice(p, livePrices);
+                  const hasMark = hasMarkSource(p, livePrices);
+                  const curStr = formatCurrentPrice(p, livePrices);
                   const curReason = currentMarkReason(p, livePrices);
                   const tFmt =
-                    total != null ? formatGbpColored(total) : null;
+                    hasMark && total != null ? formatGbpColored(total) : null;
                   const tdFmt =
-                    today != null ? formatGbpColored(today) : null;
+                    hasMark && today != null ? formatGbpColored(today) : null;
                   return (
                     <tr
                       key={p.id}
@@ -753,18 +769,28 @@ export function BookPageClient() {
                       <td
                         className="px-3 py-3 tabular-nums"
                         title={
-                          curReason ??
-                          (curCell === "—" ? DASH_MISSING_MARK : undefined)
+                          !hasMark
+                            ? NO_MARK_SOURCE_TITLE
+                            : curReason ??
+                              (curStr === "—" ? DASH_MISSING_MARK : undefined)
                         }
                       >
-                        {curCell}
+                        {hasMark ? (
+                          curStr
+                        ) : (
+                          <span className="rounded-[3px] bg-[#92400E]/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#92400E]">
+                            No mark source
+                          </span>
+                        )}
                       </td>
                       <td
                         className={`px-3 py-3 tabular-nums ${tdFmt?.className ?? ""}`}
                         title={
-                          today == null
-                            ? curReason ?? DASH_MISSING_HISTORY
-                            : undefined
+                          !hasMark
+                            ? NO_MARK_SOURCE_TITLE
+                            : today == null
+                              ? curReason ?? DASH_MISSING_HISTORY
+                              : undefined
                         }
                       >
                         {tdFmt?.text ?? "—"}
@@ -772,7 +798,11 @@ export function BookPageClient() {
                       <td
                         className={`px-3 py-3 tabular-nums ${tFmt?.className ?? ""}`}
                         title={
-                          total == null ? curReason ?? DASH_MISSING_MARK : undefined
+                          !hasMark
+                            ? NO_MARK_SOURCE_TITLE
+                            : total == null
+                              ? curReason ?? DASH_MISSING_MARK
+                              : undefined
                         }
                       >
                         {tFmt?.text ?? "—"}
