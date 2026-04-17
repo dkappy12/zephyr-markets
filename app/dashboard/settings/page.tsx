@@ -1324,14 +1324,14 @@ function PlanApiPanel() {
     }
   }
 
-  async function openPortal() {
+  async function openPortal(mode: "manage" | "update_subscription" = "manage") {
     setOpeningPortal(true);
     setStatusError(null);
     try {
       const res = await fetch("/api/billing/portal", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "update_subscription" }),
+        body: JSON.stringify({ mode }),
       });
       const body: { url?: string; error?: string } = await res
         .json()
@@ -1443,7 +1443,9 @@ function PlanApiPanel() {
           <button
             type="button"
             disabled={openingPortal}
-            onClick={openPortal}
+            onClick={() => {
+              void openPortal("manage");
+            }}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
             {openingPortal ? "Opening…" : "Manage billing"}
@@ -1455,7 +1457,9 @@ function PlanApiPanel() {
           <button
             type="button"
             disabled={openingPortal}
-            onClick={openPortal}
+            onClick={() => {
+              void openPortal("manage");
+            }}
             className="mt-4 inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
           >
             {openingPortal ? "Opening…" : "Update payment method"}
