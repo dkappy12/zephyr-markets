@@ -621,6 +621,9 @@ export default function BriefPage() {
             ? `MORNING BRIEF · ${headerTime} GMT`
             : "MORNING BRIEF"}
         </p>
+        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-light/60">
+          Powered by Meridian
+        </p>
         <h1 className="mt-3 font-serif text-4xl text-ink">The session ahead</h1>
         <p className="mt-3 text-sm leading-relaxed text-ink-mid">
           Drivers first, curves second. Sized to your book.

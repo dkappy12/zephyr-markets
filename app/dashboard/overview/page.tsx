@@ -663,6 +663,9 @@ function OverviewPageInner() {
                 ? regime.replace(/-/g, " ")
                 : "—"}
             </p>
+            <p className="mt-1 font-mono text-[9px] text-ink-light/60 uppercase tracking-[0.12em]">
+              Powered by Meridian
+            </p>
           </div>
           <div className="space-y-4 border-gold/20 md:border-l md:pl-6">
             <div>

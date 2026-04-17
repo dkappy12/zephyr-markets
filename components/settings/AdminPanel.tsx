@@ -410,7 +410,7 @@ export function AdminPanel() {
         </div>
       </Section>
 
-      <Section id="sis" title="Self-improvement system (SIS)" defaultOpen={true}>
+      <Section id="sis" title="Meridian calibration engine" defaultOpen={true}>
         <div className="space-y-5">
           <div>
             <div className="mb-2 flex items-center justify-between">

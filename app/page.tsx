@@ -659,6 +659,9 @@ export default function Home() {
 
       <footer className="border-t-[0.5px] border-ivory-border py-10">
         <div className="mx-auto flex max-w-[1100px] flex-col items-center justify-center gap-3 px-4 text-center sm:px-6 lg:px-8">
+          <p className="mb-1 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-light/60">
+            Powered by Meridian
+          </p>
           <p className="text-xs text-ink-mid">
             Zephyr Markets © 2026 ·{" "}
             <a
