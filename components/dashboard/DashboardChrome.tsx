@@ -158,13 +158,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
               <span className="font-serif text-xl tracking-tight text-ink">Zephyr</span>
               <span className="inline-flex min-w-8">
                 {badge ? (
-                  <span
-                    className={
-                      badge === "admin"
-                        ? "rounded-[3px] border-[0.5px] border-ink/30 bg-ink px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ivory"
-                        : "rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
-                    }
-                  >
+                  <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
                     {badge}
                   </span>
                 ) : null}
