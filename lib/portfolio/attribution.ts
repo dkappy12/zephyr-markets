@@ -23,8 +23,8 @@ export function dirMult(direction: string | null): number {
 }
 
 export function isGbPowerMarket(p: PositionRow): boolean {
-  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-  return m === "gb_power" || m === "gbpower";
+  const m = (p.market ?? "").toLowerCase().replace(/[\s_]/g, "");
+  return m === "gbpower" || m === "n2ex" || m === "apx";
 }
 
 export function isGasMarket(p: PositionRow): boolean {
@@ -57,8 +57,9 @@ export function positionTodayPnlGbp(
       lp.gbpPerEur ?? GBP_PER_EUR,
     );
   }
-  const cur = mlow === "gb_power" ? lp.gbPowerGbpMwh : null;
-  const opn = mlow === "gb_power" ? lp.gbPowerOpenGbpMwh : null;
+  const isGbPwr = isGbPowerMarket(p);
+  const cur = isGbPwr ? lp.gbPowerGbpMwh : null;
+  const opn = isGbPwr ? lp.gbPowerOpenGbpMwh : null;
   if (cur == null || opn == null) return null;
   return linearPnl(p.direction, opn, cur, p.size);
 }

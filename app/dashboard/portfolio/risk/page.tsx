@@ -101,6 +101,11 @@ function formatDay(d: string): string {
   }
 }
 
+function isGbPowerMarket(market: string | null | undefined): boolean {
+  const m = (market ?? "").toLowerCase().replace(/[\s_]/g, "");
+  return m === "gbpower" || m === "n2ex" || m === "apx";
+}
+
 const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
@@ -126,7 +131,7 @@ const calculateDailyPnL = (
       const direction = pos.direction === "long" ? 1 : -1;
       const size = pos.size ?? 0;
 
-      if (pos.market === "GB_power" || pos.market === "GB POWER") {
+      if (isGbPowerMarket(pos.market)) {
         const prevPrice = powerPricesByDay[prevDate];
         const currPrice = powerPricesByDay[currDate];
         if (prevPrice == null || currPrice == null) continue;
@@ -178,7 +183,7 @@ const calculateScenarioImpact = (
     let positionImpact = 0;
     const market = (pos.market ?? "").toUpperCase().replace(" ", "_");
 
-    if (market.includes("GB_POWER") || market.includes("GB POWER")) {
+    if (isGbPowerMarket(pos.market)) {
       positionImpact = scenario.moves.GB_power * size * direction;
     } else if (market === "TTF") {
       positionImpact = scenario.moves.TTF * gbpEurRate * size * direction;
