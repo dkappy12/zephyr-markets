@@ -3212,7 +3212,7 @@ async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
                     eua_eur_per_t = float(close_str)
                     logger.info("carbon_cycle: EUA = €%.2f/t from Stooq co2.f", eua_eur_per_t)
                 else:
-                    logger.warning("carbon_cycle: Stooq co2.f returned N/D or empty close")
+                    logger.debug("carbon_cycle: Stooq co2.f returned N/D (market closed or no data) — will use DB fallback")
         else:
             logger.warning("carbon_cycle: Stooq co2.f response too short: %s", text[:100])
     except Exception as e:
