@@ -211,6 +211,60 @@ def _supabase_governance_headers() -> dict:
     }
 
 
+def _supabase_ops_headers() -> dict:
+    """Headers for PostgREST requests to the ops schema."""
+    return {
+        **_supabase_auth_headers(),
+        "Accept-Profile": "ops",
+        "Content-Profile": "ops",
+    }
+
+
+async def _update_pipeline_health(
+    client: httpx.AsyncClient,
+    feed_id: str,
+    success: bool,
+    last_value: dict | None = None,
+    error: str | None = None,
+) -> None:
+    """
+    Upsert a row into ops.pipeline_health to record the outcome of a feed cycle.
+    Called at the end of each scheduled feed function — success or failure.
+    Fails silently so pipeline health writes never break the actual feed cycle.
+    """
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        payload: dict[str, Any] = {
+            "feed_id": feed_id,
+            "last_attempt_ts": now,
+            "updated_at": now,
+        }
+        if success:
+            payload["last_success_ts"] = now
+            payload["last_error"] = None
+            payload["consecutive_failures"] = 0
+            if last_value is not None:
+                payload["last_value"] = last_value
+            payload["staleness_status"] = "fresh"
+        else:
+            payload["last_error"] = str(error)[:500] if error else "Unknown error"
+            payload["staleness_status"] = "stale"
+
+        headers = {
+            **_supabase_ops_headers(),
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        }
+        resp = await client.post(
+            f"{SUPABASE_URL.rstrip('/')}/rest/v1/pipeline_health",
+            headers=headers,
+            json=payload,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.debug("pipeline_health: write failed for %s: %s", feed_id, e)
+
+
 # Future: ops.pipeline_health lives in the ops schema — use Accept-Profile: ops for those requests.
 
 
@@ -1463,8 +1517,24 @@ async def run_weather_cycle() -> None:
 def scheduled_weather() -> None:
     try:
         asyncio.run(run_weather_cycle())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "open_meteo", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Weather cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "open_meteo", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 def _schedule_weather_with_startup_delay() -> None:
@@ -1722,8 +1792,24 @@ async def run_storage_cycle() -> None:
 def scheduled_storage() -> None:
     try:
         asyncio.run(run_storage_cycle())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "gie_agsi", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Storage cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "gie_agsi", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -1979,8 +2065,24 @@ async def fetch_market_prices() -> None:
 def scheduled_market_prices() -> None:
     try:
         asyncio.run(fetch_market_prices())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "elexon_bmrs", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Market prices cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "elexon_bmrs", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -2223,8 +2325,24 @@ async def fetch_ttf_price() -> None:
 def scheduled_ttf() -> None:
     try:
         asyncio.run(fetch_ttf_price())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "eex_ngp", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("TTF cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "eex_ngp", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 async def fetch_nbp_price() -> None:
@@ -2307,8 +2425,24 @@ async def fetch_nbp_price() -> None:
 def scheduled_nbp() -> None:
     try:
         asyncio.run(fetch_nbp_price())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "stooq_nbp", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("NBP cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "stooq_nbp", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 async def upsert_solar_outturn_http(
@@ -2453,6 +2587,16 @@ async def fetch_wind_outturn_gw(client: httpx.AsyncClient) -> float | None:
                 total_mw,
                 sp_time,
             )
+            # Report pipeline health inline — FUELINST has no dedicated scheduler
+            try:
+                await _update_pipeline_health(
+                    client,
+                    "elexon_fuelinst",
+                    True,
+                    last_value={"wind_mw": total_mw, "sp_time": sp_time},
+                )
+            except Exception:
+                pass
             return total_mw / 1000.0
         return None
     except Exception as e:
@@ -2463,8 +2607,24 @@ async def fetch_wind_outturn_gw(client: httpx.AsyncClient) -> float | None:
 def scheduled_solar() -> None:
     try:
         asyncio.run(fetch_solar_outturn())
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "sheffield_pvlive", True)
+
+        try:
+            asyncio.run(_report())
+        except Exception:
+            pass
     except Exception as e:
         logger.error("Solar cycle aborted: %s", e, exc_info=True)
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "sheffield_pvlive", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -2939,6 +3099,15 @@ async def upsert_daily_fx_rate(http: httpx.AsyncClient, rate: float) -> None:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
     await upsert_fx_rates_http(http, [row])
+    try:
+        await _update_pipeline_health(
+            http,
+            "frankfurter_fx",
+            True,
+            last_value={"rate": rate, "base": "EUR", "quote": "GBP"},
+        )
+    except Exception:
+        pass
     logger.info("fx_rate: upserted EUR/GBP %.4f for %s", rate, rate_date)
 
 
