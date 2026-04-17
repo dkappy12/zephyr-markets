@@ -156,7 +156,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-14 overflow-hidden">
           <TopoBackground className="h-full w-full" lineOpacity={0.25} />
         </div>
-        <div className="relative z-10 mx-auto flex h-14 max-w-[1536px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="relative z-20 mx-auto flex h-14 max-w-[1536px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link href="/dashboard/overview" className="shrink-0">
             <span className="flex items-baseline gap-2">
               <span className="font-serif text-xl tracking-tight text-ink">Zephyr</span>
