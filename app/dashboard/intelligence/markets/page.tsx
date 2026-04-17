@@ -1200,7 +1200,7 @@ export default function MarketsPage() {
 
       {/* Two independent columns so row height isn’t locked to GB Power (avoids huge gap under TTF vs Spark). */}
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
           <div className="flex min-w-0 flex-1 flex-col gap-4">
         {/* GB Power */}
         <motion.div
@@ -1596,7 +1596,7 @@ export default function MarketsPage() {
         ) : null}
 
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         {/* TTF stack */}
         {marketsScope !== "gb_nbp_only" ? (
         <motion.div
@@ -1660,9 +1660,9 @@ export default function MarketsPage() {
         </motion.div>
         ) : null}
 
-        {/* Carbon */}
-        <section className="space-y-4">
-          <div className="flex items-baseline gap-3">
+        {/* Carbon — flex-1 so the adder chart can grow to match the Spark card height */}
+        <section className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="flex shrink-0 items-baseline gap-3">
             <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
               Carbon
             </h2>
@@ -1672,7 +1672,7 @@ export default function MarketsPage() {
               </span>
             )}
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid shrink-0 gap-4 sm:grid-cols-2">
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
                 EUA (€/t) · last 30 days
@@ -1765,81 +1765,83 @@ export default function MarketsPage() {
           </div>
 
           {/* Carbon adder chart */}
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-            <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+          <div className="flex min-h-0 flex-1 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+            <p className="mb-1 shrink-0 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
               Carbon adder to SRMC (£/MWh)
             </p>
-            <p className="mb-3 text-[10px] text-ink-light">
+            <p className="mb-3 shrink-0 text-[10px] text-ink-light">
               (UKA + CPS £18/t) × 0.366 tCO₂/MWh · current:{" "}
               {carbonAdderGbpMwh != null
                 ? `£${carbonAdderGbpMwh.toFixed(2)}/MWh`
                 : "—"}
             </p>
             {carbonAdderChartData.length === 0 ? (
-              <p className="py-6 text-center text-[10px] text-ink-light">
+              <p className="flex flex-1 items-center justify-center py-6 text-center text-[10px] text-ink-light">
                 No UKA history yet — chart appears once carbon_prices has UKA rows.
               </p>
             ) : (
-              <ResponsiveContainer width="100%" height={120}>
-                <LineChart
-                  data={carbonAdderChartData}
-                  margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(44,42,38,0.08)"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 9, fill: "#888" }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(d) =>
-                      typeof d === "string" ? d.slice(5) : String(d)
-                    }
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 9, fill: "#888" }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v) => `£${v}`}
-                    domain={["auto", "auto"]}
-                    width={40}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--color-card)",
-                      border: "0.5px solid var(--color-ivory-border)",
-                      borderRadius: 4,
-                      fontSize: 11,
-                    }}
-                    formatter={(v) => [
-                      `£${Number(v ?? 0).toFixed(2)}/MWh`,
-                      "Carbon adder",
-                    ]}
-                    labelFormatter={(l) => `Date: ${l}`}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="adder"
-                    stroke="#5c6b2e"
-                    strokeWidth={1.5}
-                    dot={
-                      carbonAdderChartData.length < 3
-                        ? { r: 4, fill: "#5c6b2e", strokeWidth: 0 }
-                        : false
-                    }
-                    connectNulls
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="min-h-[200px] w-full flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={carbonAdderChartData}
+                    margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(44,42,38,0.08)"
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 9, fill: "#888" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(d) =>
+                        typeof d === "string" ? d.slice(5) : String(d)
+                      }
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 9, fill: "#888" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => `£${v}`}
+                      domain={["auto", "auto"]}
+                      width={40}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--color-card)",
+                        border: "0.5px solid var(--color-ivory-border)",
+                        borderRadius: 4,
+                        fontSize: 11,
+                      }}
+                      formatter={(v) => [
+                        `£${Number(v ?? 0).toFixed(2)}/MWh`,
+                        "Carbon adder",
+                      ]}
+                      labelFormatter={(l) => `Date: ${l}`}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="adder"
+                      stroke="#5c6b2e"
+                      strokeWidth={1.5}
+                      dot={
+                        carbonAdderChartData.length < 3
+                          ? { r: 4, fill: "#5c6b2e", strokeWidth: 0 }
+                          : false
+                      }
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             )}
           </div>
 
-          <p className="text-[10px] text-ink-light">
+          <p className="shrink-0 text-[10px] text-ink-light">
             UKA trades ~£18/t below EUA reflecting the Carbon Price Support mechanism.
             Both are direct inputs to the CCGT SRMC stack.
           </p>
