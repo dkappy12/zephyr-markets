@@ -692,7 +692,7 @@ function OverviewPageInner() {
                 {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
               </p>
               <p className="mt-1 text-[10px] leading-snug text-ink-light">
-                Gas leg · not the premium headline
+                European gas benchmark
               </p>
             </div>
           </div>
