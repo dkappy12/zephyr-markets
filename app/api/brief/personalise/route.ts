@@ -253,9 +253,9 @@ Example of the style and quality required:
 
       const rawText = await anthropicRes.text();
       if (!anthropicRes.ok) {
-        throw new Error(
-          `Anthropic error: ${anthropicRes.status} ${rawText.slice(0, 300)}`,
-        );
+        // Log the full error server-side but never expose raw API response to frontend
+        console.error(`Anthropic API error ${anthropicRes.status}:`, rawText.slice(0, 500));
+        throw new Error("Touchpoints are temporarily unavailable.");
       }
       return extractAnthropicText(rawText);
     }
