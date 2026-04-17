@@ -58,12 +58,6 @@ const PLAN_COMPARISON_ROWS: {
     team: "06:00 live",
   },
   {
-    feature: "Markets covered",
-    free: "GB Power, NBP",
-    pro: "All markets",
-    team: "All markets",
-  },
-  {
     feature: "Portfolio positions",
     free: "-",
     pro: "Unlimited",
