@@ -273,7 +273,8 @@ export function AttributionPageClient() {
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
-    const [mpLatest, mpOpen, gasLatest, gasOpen, fxLatest] = await Promise.all([
+    const [mpLatest, mpOpen, gasLatest, gasOpen, fxLatest, ukaLatest, euaLatest] =
+      await Promise.all([
       supabase
         .from("market_prices")
         .select("price_gbp_mwh, price_date, settlement_period, market")
@@ -313,6 +314,20 @@ export function AttributionPageClient() {
         .order("rate_date", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_eur_per_t, price_date")
+        .eq("hub", "UKA")
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_eur_per_t, price_date")
+        .eq("hub", "EUA")
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const gbp =
@@ -347,6 +362,16 @@ export function AttributionPageClient() {
       ? ttfEurOpen * gbpPerEur
       : null;
 
+    const ukaGbp = ukaLatest.data
+      ? Number((ukaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+    const euaEur = euaLatest.data
+      ? Number((euaLatest.data as { price_eur_per_t?: unknown }).price_eur_per_t)
+      : NaN;
+    const euaGbp = euaLatest.data
+      ? Number((euaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+
     setLivePrices({
       gbPowerGbpMwh: Number.isFinite(gbp) ? gbp : null,
       gbPowerOpenGbpMwh: Number.isFinite(gbpOpen) ? gbpOpen : null,
@@ -361,6 +386,9 @@ export function AttributionPageClient() {
           ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
           : null,
       gbpPerEur,
+      ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
+      euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
+      euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
     });
   }, [supabase]);
 
