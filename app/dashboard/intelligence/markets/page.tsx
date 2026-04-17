@@ -321,6 +321,9 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
+  const [ukaPrice, setUkaPrice] = useState<number | null>(null);
+  const [euaPrice, setEuaPrice] = useState<number | null>(null);
+  const [carbonUpdated, setCarbonUpdated] = useState<string | null>(null);
   const [marketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
   >("all_markets");
@@ -365,6 +368,7 @@ export default function MarketsPage() {
           tapeRes,
           wxRes,
           mp7dRes,
+          carbonRes,
         ] = await Promise.all([
           supabase
             .from("market_prices")
@@ -438,7 +442,24 @@ export default function MarketsPage() {
             .order("price_date", { ascending: true })
             .order("settlement_period", { ascending: true })
             .limit(2500),
+          supabase
+            .from("carbon_prices")
+            .select("price_gbp_per_t, price_eur_per_t, price_date, hub")
+            .in("hub", ["UKA", "EUA"])
+            .order("price_date", { ascending: false })
+            .limit(2),
         ]);
+
+        const carbonRows = carbonRes.data ?? [];
+        const ukaRow = carbonRows.find((r: { hub?: string }) => r.hub === "UKA");
+        const euaRow = carbonRows.find((r: { hub?: string }) => r.hub === "EUA");
+        setUkaPrice(
+          ukaRow?.price_gbp_per_t ? Number(ukaRow.price_gbp_per_t) : null,
+        );
+        setEuaPrice(
+          euaRow?.price_eur_per_t ? Number(euaRow.price_eur_per_t) : null,
+        );
+        setCarbonUpdated(ukaRow?.price_date ?? null);
 
         if (ppRes.error) {
           setPhysicalPremium(null);
@@ -1546,6 +1567,50 @@ export default function MarketsPage() {
           </p>
         </motion.div>
         ) : null}
+
+        {/* Carbon */}
+        <section className="space-y-4">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
+              Carbon
+            </h2>
+            {carbonUpdated && (
+              <span className="font-mono text-[10px] text-ink-light">
+                {carbonUpdated}
+              </span>
+            )}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                UKA · UK ETS
+              </p>
+              <p className="mt-2 font-serif text-3xl text-ink">
+                {ukaPrice != null ? `£${ukaPrice.toFixed(2)}` : "—"}
+                <span className="ml-1 font-sans text-sm font-normal text-ink-mid">/t</span>
+              </p>
+              <p className="mt-1 text-[10px] text-ink-light">
+                Derived: EUA (£) − CPS (£18/t) · SRMC input
+              </p>
+            </div>
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                EUA · EU ETS
+              </p>
+              <p className="mt-2 font-serif text-3xl text-ink">
+                {euaPrice != null ? `€${euaPrice.toFixed(2)}` : "—"}
+                <span className="ml-1 font-sans text-sm font-normal text-ink-mid">/t</span>
+              </p>
+              <p className="mt-1 text-[10px] text-ink-light">
+                European benchmark · OilPriceAPI
+              </p>
+            </div>
+          </div>
+          <p className="text-[10px] text-ink-light">
+            UKA trades ~£18/t below EUA reflecting the Carbon Price Support mechanism.
+            Both are direct inputs to the CCGT SRMC stack.
+          </p>
+        </section>
 
         {/* EU Storage */}
         {marketsScope !== "gb_nbp_only" ? (

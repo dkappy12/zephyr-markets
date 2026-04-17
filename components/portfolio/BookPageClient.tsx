@@ -186,8 +186,8 @@ function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
   if (market === "GB_POWER" || market === "OTHER_POWER") return lp.gbPowerGbpMwh != null;
   if (market === "TTF") return lp.ttfEurMwh != null;
   if (market === "NBP") return lp.nbpPencePerTherm != null;
-  if (market === "UKA") return true;
-  if (market === "EUA") return true;
+  if (market === "UKA") return lp.ukaGbpPerT != null;
+  if (market === "EUA") return lp.euaGbpPerT != null;
   if (market === "OTHER_GAS") return lp.ttfEurMwh != null || lp.nbpPencePerTherm != null;
   return false;
 }
