@@ -12,6 +12,7 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   `market_prices` (upsert by price_date + settlement_period + market).
 - TTF/NBP gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - FX rates: Frankfurter EUR/GBP daily fix → Supabase `fx_rates` (upsert on rate_date + base + quote).
+- Carbon: Ember EUA + derived UKA → Supabase `carbon_prices` (upsert on price_date + hub).
 - Solar: Sheffield Solar PV_Live API → Supabase `solar_outturn` (upsert on datetime_gmt).
 - Physical premium: CCGT SRMC model → Supabase `physical_premium` (append-only history).
 - Morning brief: Claude → Supabase `brief_entries` (append-only).
@@ -24,6 +25,7 @@ Required Supabase:
   - market_prices: see market_prices.sql
   - gas_prices: see gas_prices.sql
   - fx_rates: see fx_rates.sql
+  - carbon_prices: price_date, hub, price_gbp_per_t, price_eur_per_t, source, fetched_at
   - solar_outturn: see solar_outturn.sql
   - physical_premium: see physical_premium.sql
   - brief_entries: see brief_entries.sql
@@ -115,6 +117,13 @@ GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
 HUB_TTF = "TTF"
 HUB_NBP = "NBP"
+HUB_EUA = "EUA"
+HUB_UKA = "UKA"
+# Reference URL for EUA market context (ingestion uses Ember API + DB fallback).
+EEX_CARBON_CSV_URL = (
+    "https://www.eex.com/en/market-data/environmental-markets/"
+    "spot-market/european-emission-allowances"
+)
 TTF_POLL_MINUTES = 15
 GAS_BACKFILL_DAYS = 180
 SOLAR_POLL_MINUTES = 5
@@ -476,6 +485,11 @@ def _solar_outturn_rest_url() -> str:
 def _fx_rates_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/fx_rates"
+
+
+def _carbon_prices_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/carbon_prices"
 
 
 def _physical_premium_rest_url() -> str:
@@ -2231,6 +2245,25 @@ async def upsert_fx_rates_http(
     resp.raise_for_status()
 
 
+async def upsert_carbon_prices_http(
+    client: httpx.AsyncClient, rows: list[dict[str, Any]]
+) -> None:
+    if not rows:
+        return
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    resp = await client.post(
+        _carbon_prices_rest_url(),
+        headers=headers,
+        json=rows,
+        params={"on_conflict": "price_date,hub"},
+    )
+    resp.raise_for_status()
+
+
 async def fetch_ttf_price() -> None:
     """Fetch EEX TTF NGP CSV; upsert today's UTC gas day if present, else latest Gasday."""
     _require_supabase_env()
@@ -3120,6 +3153,171 @@ async def upsert_daily_fx_rate(http: httpx.AsyncClient, rate: float) -> None:
     logger.info("fx_rate: upserted EUR/GBP %.4f for %s", rate, rate_date)
 
 
+def _parse_ember_eua_eur_per_t(data: Any) -> float | None:
+    """Best-effort parse for Ember Climate carbon-price JSON (shape may vary by version)."""
+    if isinstance(data, dict):
+        inner = data.get("data")
+        if inner is not None:
+            return _parse_ember_eua_eur_per_t(inner)
+    if isinstance(data, list) and data:
+        rows = [x for x in data if isinstance(x, dict)]
+        if not rows:
+            return None
+
+        def _sort_key(r: dict) -> str:
+            return str(r.get("date") or r.get("Date") or r.get("time") or "")
+
+        try:
+            rows = sorted(rows, key=_sort_key)
+        except Exception:
+            pass
+        latest = rows[-1]
+        for key in ("price", "value", "eua", "close"):
+            v = latest.get(key)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+
+async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
+    """
+    Fetch EUA price from Ember Climate API and derive UKA.
+    EUA source: https://api.ember-climate.org/v2/carbon-price
+    UKA = EUA_GBP - CPS_GBP_PER_T (academically correct: UKA ≈ EUA - £18/t CPS)
+
+    Falls back to last EUA row in carbon_prices if Ember unavailable.
+    Stores both EUA and UKA in carbon_prices table.
+    """
+    logger.debug("carbon_cycle: EEX market page reference %s", EEX_CARBON_CSV_URL)
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    eua_eur_per_t: float | None = None
+
+    # Try Ember Climate API (free, no auth required for basic endpoint)
+    try:
+        resp = await http.get(
+            "https://api.ember-climate.org/v2/carbon-price",
+            params={"period": "day", "series": "EUA"},
+            timeout=15.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            eua_eur_per_t = _parse_ember_eua_eur_per_t(data)
+            if eua_eur_per_t is not None:
+                logger.info("carbon_cycle: EUA = €%.2f/t from Ember", eua_eur_per_t)
+    except Exception as e:
+        logger.warning("carbon_cycle: Ember API failed: %s", e)
+
+    # If Ember failed, try fetching latest from our own DB (keeps last known value)
+    if eua_eur_per_t is None:
+        try:
+            resp = await http.get(
+                _carbon_prices_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "hub": "eq.EUA",
+                    "select": "price_eur_per_t,price_date",
+                    "order": "price_date.desc",
+                    "limit": "1",
+                },
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                rows = resp.json()
+                if rows and rows[0].get("price_eur_per_t") is not None:
+                    eua_eur_per_t = float(rows[0]["price_eur_per_t"])
+                    logger.info(
+                        "carbon_cycle: using cached EUA = €%.2f/t from DB",
+                        eua_eur_per_t,
+                    )
+        except Exception as e:
+            logger.warning("carbon_cycle: DB fallback failed: %s", e)
+
+    if eua_eur_per_t is None:
+        logger.warning("carbon_cycle: no EUA price available, skipping upsert")
+        return
+
+    # Get FX rate
+    try:
+        fx_resp = await http.get(
+            _fx_rates_rest_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "base": "eq.EUR",
+                "quote": "eq.GBP",
+                "select": "rate",
+                "order": "rate_date.desc",
+                "limit": "1",
+            },
+            timeout=10.0,
+        )
+        fx_rows = fx_resp.json() if fx_resp.status_code == 200 else []
+        gbp_per_eur = float(fx_rows[0]["rate"]) if fx_rows else 0.86
+    except Exception:
+        gbp_per_eur = 0.86
+
+    eua_gbp_per_t = eua_eur_per_t * gbp_per_eur
+    uka_gbp_per_t = max(0.0, eua_gbp_per_t - CPS_GBP_PER_T)
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {
+            "price_date": today,
+            "hub": HUB_EUA,
+            "price_eur_per_t": round(eua_eur_per_t, 4),
+            "price_gbp_per_t": round(eua_gbp_per_t, 4),
+            "source": "Ember Climate / EEX",
+            "fetched_at": fetched_at,
+        },
+        {
+            "price_date": today,
+            "hub": HUB_UKA,
+            "price_eur_per_t": None,
+            "price_gbp_per_t": round(uka_gbp_per_t, 4),
+            "source": "Derived: EUA_GBP - CPS (£18/t)",
+            "fetched_at": fetched_at,
+        },
+    ]
+
+    await upsert_carbon_prices_http(http, rows)
+    logger.info(
+        "carbon_cycle: upserted EUA=€%.2f/t (£%.2f/t) UKA=£%.2f/t",
+        eua_eur_per_t,
+        eua_gbp_per_t,
+        uka_gbp_per_t,
+    )
+
+
+def scheduled_carbon() -> None:
+    try:
+
+        async def _run() -> None:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                await fetch_carbon_prices(http)
+
+        asyncio.run(_run())
+
+        async def _report() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "carbon_eua_uka", True)
+
+        asyncio.run(_report())
+    except Exception as e:
+        logger.error("Carbon price cycle aborted: %s", e, exc_info=True)
+
+        async def _report_fail() -> None:
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                await _update_pipeline_health(c, "carbon_eua_uka", False, error=str(e))
+
+        try:
+            asyncio.run(_report_fail())
+        except Exception:
+            pass
+
+
 async def calculate_physical_premium() -> None:
     """CCGT-anchored SRMC implied price vs market; append to physical_premium."""
     _require_supabase_env()
@@ -3270,7 +3468,31 @@ async def calculate_physical_premium() -> None:
         baseline_demand_gw = demand_baseline_gw_utc(now_utc.hour, now_utc.month)
         residual_demand_gw = max(baseline_demand_gw - wg - sg, 0.0)
 
-        total_carbon_cost = UKA_PRICE_GBP_PER_T + CPS_GBP_PER_T
+        # Try to get live UKA price from carbon_prices table
+        live_uka_gbp_per_t: float | None = None
+        try:
+            carbon_resp = await http.get(
+                _carbon_prices_rest_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "hub": "eq.UKA",
+                    "select": "price_gbp_per_t,price_date",
+                    "order": "price_date.desc",
+                    "limit": "1",
+                },
+                timeout=8.0,
+            )
+            if carbon_resp.status_code == 200:
+                carbon_rows = carbon_resp.json()
+                if carbon_rows and carbon_rows[0].get("price_gbp_per_t") is not None:
+                    live_uka_gbp_per_t = float(carbon_rows[0]["price_gbp_per_t"])
+        except Exception as e:
+            logger.debug("premium_cycle: could not fetch live UKA price: %s", e)
+
+        uka_price = (
+            live_uka_gbp_per_t if live_uka_gbp_per_t is not None else UKA_PRICE_GBP_PER_T
+        )
+        total_carbon_cost = uka_price + CPS_GBP_PER_T
         srmc_gbp_mwh: float | None = None
         if ttf_eur_mwh is not None:
             ttf_gbp_mwh = ttf_eur_mwh * gbp_eur_rate
@@ -4890,6 +5112,7 @@ def main() -> None:
     scheduled_ttf()
     scheduled_nbp()
     scheduled_solar()
+    scheduled_carbon()
     scheduled_physical_premium()
     scheduled_morning_brief()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
@@ -4898,6 +5121,7 @@ def main() -> None:
     schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_ttf)
     schedule.every(TTF_POLL_MINUTES).minutes.do(scheduled_nbp)
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
+    schedule.every(1).hours.do(scheduled_carbon)
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
