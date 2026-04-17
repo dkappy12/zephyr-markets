@@ -12,6 +12,7 @@ const primary = [
   { href: "/dashboard/intelligence/signals", label: "Intelligence" },
   { href: "/dashboard/portfolio/book", label: "Portfolio" },
   { href: "/dashboard/brief", label: "Brief" },
+  { href: "/dashboard/admin", label: "Admin" },
 ] as const;
 
 const intelligenceSecondary = [

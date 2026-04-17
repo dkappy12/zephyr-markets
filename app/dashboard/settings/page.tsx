@@ -1,7 +1,6 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { AdminPanel } from "@/components/settings/AdminPanel";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 import { motion, AnimatePresence } from "framer-motion";
@@ -16,7 +15,6 @@ function SettingsPageInner() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<string>("Profile");
   const [showTeamTab, setShowTeamTab] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,26 +30,6 @@ function SettingsPageInner() {
       .catch(() => {});
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    async function check() {
-      const supabase = createClient();
-      const { data: userData } = await supabase.auth.getUser();
-      if (!active || !userData.user) return;
-      const { data } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userData.user.id)
-        .single();
-      if (!active) return;
-      setIsAdmin(data?.role === "admin");
-    }
-    void check();
-    return () => {
-      active = false;
     };
   }, []);
 
@@ -72,7 +50,6 @@ function SettingsPageInner() {
   const visibleTabs = [
     ...baseTabs,
     ...(showTeamTab ? [teamTab] : []),
-    ...(isAdmin ? ["Admin"] : []),
   ];
 
   return (
@@ -124,8 +101,6 @@ function SettingsPageInner() {
           <PlanApiPanel key="plan" />
         ) : activeTab === "Team" ? (
           <TeamPanel key="team" />
-        ) : activeTab === "Admin" ? (
-          <AdminPanel key="admin" />
         ) : null}
       </AnimatePresence>
     </div>
