@@ -259,6 +259,7 @@ async def _update_pipeline_health(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/pipeline_health",
             headers=headers,
             json=payload,
+            params={"on_conflict": "feed_id"},
         )
         resp.raise_for_status()
     except Exception as e:
