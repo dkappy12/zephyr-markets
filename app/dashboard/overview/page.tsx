@@ -139,7 +139,6 @@ function OverviewPageInner() {
   const [solarGw, setSolarGw] = useState<number | null>(null);
   const [solarDatetimeGmt, setSolarDatetimeGmt] = useState<string | null>(null);
   const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
-  const marketsScope = "all_markets" as const;
   const [hasPositions, setHasPositions] = useState<boolean>(false);
 
   useEffect(() => {
@@ -250,15 +249,13 @@ function OverviewPageInner() {
           .order("settlement_period", { ascending: false })
           .limit(1)
           .maybeSingle(),
-        marketsScope === "gb_nbp_only"
-          ? Promise.resolve({ data: null, error: null })
-          : supabase
-              .from("gas_prices")
-              .select("price_eur_mwh, price_time")
-              .eq("hub", "TTF")
-              .order("price_time", { ascending: false })
-              .limit(1)
-              .maybeSingle(),
+        supabase
+          .from("gas_prices")
+          .select("price_eur_mwh, price_time")
+          .eq("hub", "TTF")
+          .order("price_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
         supabase
           .from("solar_outturn")
           .select("solar_mw, datetime_gmt")
@@ -560,15 +557,13 @@ function OverviewPageInner() {
           }
           footnote="REMIT-type signals in rolling 24h window"
         />
-        {marketsScope !== "gb_nbp_only" ? (
-          <MetricCard
-            label="TTF (GAS CONTEXT)"
-            value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
-            unit="/MWh"
-            footnote={ttfTapeFootnote ?? "—"}
-            hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
-          />
-        ) : null}
+        <MetricCard
+          label="TTF (GAS CONTEXT)"
+          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
+          unit="/MWh"
+          footnote={ttfTapeFootnote ?? "—"}
+          hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
+        />
         <MetricCard
           label="GB SOLAR (OUTTURN)"
           value={solarGw === null ? "—" : solarGw.toFixed(2)}
