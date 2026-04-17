@@ -73,21 +73,28 @@ function normalizeRole(value: string | null | undefined): string {
 }
 
 async function isAdminUser(userId: string): Promise<boolean> {
-  const admin = createAdminClient();
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return false;
+  }
+  try {
+    const admin = createAdminClient();
+    const authRes = await admin.auth.admin.getUserById(userId);
+    const appRole = normalizeRole(
+      (authRes.data?.user?.app_metadata as { role?: string } | null | undefined)?.role,
+    );
+    if (appRole === "admin") return true;
 
-  const authRes = await admin.auth.admin.getUserById(userId);
-  const appRole = normalizeRole(
-    (authRes.data?.user?.app_metadata as { role?: string } | null | undefined)?.role,
-  );
-  if (appRole === "admin") return true;
-
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .maybeSingle();
-  const profileRole = normalizeRole((profile as { role?: string } | null)?.role);
-  return profileRole === "admin";
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+    const profileRole = normalizeRole((profile as { role?: string } | null)?.role);
+    return profileRole === "admin";
+  } catch {
+    /* No service role in CI/tests, or admin API unavailable — not an admin override. */
+    return false;
+  }
 }
 
 function adminOverrideState(): EffectiveBillingState {
