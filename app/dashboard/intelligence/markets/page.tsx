@@ -1810,8 +1810,8 @@ export default function MarketsPage() {
                       borderRadius: 4,
                       fontSize: 11,
                     }}
-                    formatter={(v: number) => [
-                      `£${Number(v).toFixed(2)}/MWh`,
+                    formatter={(v) => [
+                      `£${Number(v ?? 0).toFixed(2)}/MWh`,
                       "Carbon adder",
                     ]}
                     labelFormatter={(l) => `Date: ${l}`}
