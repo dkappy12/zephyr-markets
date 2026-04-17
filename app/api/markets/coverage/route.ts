@@ -3,13 +3,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { createClient } from "@/lib/supabase/server";
 
-function coveredMarkets(markets: "gb_nbp_only" | "five_markets" | "all_markets") {
-  if (markets === "gb_nbp_only") {
-    return ["GB Power", "NBP"];
-  }
-  if (markets === "five_markets") {
-    return ["GB Power", "NBP", "TTF", "EUA", "UKA"];
-  }
+function coveredMarkets() {
   return ["GB Power", "NBP", "TTF", "EUA", "UKA", "EU Gas Storage", "Weather"];
 }
 
@@ -19,10 +13,11 @@ export async function GET() {
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
     const state = await getEffectiveBillingState(supabase, auth.user!.id);
+    const marketsScope = "all_markets" as const;
     return NextResponse.json({
       tier: state.effectiveTier,
-      marketsScope: state.entitlements.markets,
-      coveredMarkets: coveredMarkets(state.entitlements.markets),
+      marketsScope,
+      coveredMarkets: coveredMarkets(),
     });
   } catch (e: unknown) {
     return NextResponse.json(
