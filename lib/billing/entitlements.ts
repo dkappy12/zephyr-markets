@@ -10,7 +10,9 @@ export type TierEntitlement = {
   portfolioEnabled: boolean;
   maxPositions: number | "unlimited";
   seats: number | "unlimited";
-  markets: "gb_nbp_only" | "five_markets" | "all_markets";
+  markets: "gb_nbp_only" | "all_markets";
+  signalHistoryMonths: number | "unlimited";
+  dataExport: boolean;
   apiAccess: boolean;
 };
 
@@ -26,6 +28,8 @@ export const TIER_ENTITLEMENTS: Record<TierCode, TierEntitlement> = {
     maxPositions: 0,
     seats: 1,
     markets: "gb_nbp_only",
+    signalHistoryMonths: 0,
+    dataExport: false,
     apiAccess: false,
   },
   pro: {
@@ -36,9 +40,11 @@ export const TIER_ENTITLEMENTS: Record<TierCode, TierEntitlement> = {
     signalDelayMinutes: 0,
     morningBriefTimeGmt: "06:00",
     portfolioEnabled: true,
-    maxPositions: 30,
+    maxPositions: "unlimited",
     seats: 1,
-    markets: "five_markets",
+    markets: "all_markets",
+    signalHistoryMonths: 12,
+    dataExport: false,
     apiAccess: false,
   },
   team: {
@@ -52,6 +58,8 @@ export const TIER_ENTITLEMENTS: Record<TierCode, TierEntitlement> = {
     maxPositions: "unlimited",
     seats: 5,
     markets: "all_markets",
+    signalHistoryMonths: 12,
+    dataExport: true,
     apiAccess: true,
   },
   enterprise: {
@@ -65,6 +73,8 @@ export const TIER_ENTITLEMENTS: Record<TierCode, TierEntitlement> = {
     maxPositions: "unlimited",
     seats: "unlimited",
     markets: "all_markets",
+    signalHistoryMonths: "unlimited",
+    dataExport: true,
     apiAccess: true,
   },
 };

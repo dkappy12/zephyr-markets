@@ -53,33 +53,33 @@ const PLAN_COMPARISON_ROWS: {
   },
   {
     feature: "Morning brief",
-    free: "08:00 delayed",
+    free: "Delayed 08:00",
     pro: "06:00 live",
-    team: "06:00 live per seat",
+    team: "06:00 live",
   },
   {
     feature: "Markets covered",
     free: "GB Power, NBP",
-    pro: "5 markets",
+    pro: "All markets",
     team: "All markets",
   },
   {
     feature: "Portfolio positions",
     free: "-",
-    pro: "30 positions",
+    pro: "Unlimited",
     team: "Unlimited",
   },
   {
     feature: "Signal history",
     free: "7 days",
-    pro: "6 months",
-    team: "24 months",
+    pro: "12 months",
+    team: "12 months",
   },
   {
     feature: "API access",
     free: "-",
     pro: "-",
-    team: "Full REST API",
+    team: "✓",
   },
   {
     feature: "Data export",
@@ -568,7 +568,7 @@ export default function Home() {
               name="Pro"
               price="£39"
               period="/month"
-              blurb="Live signals, 06:00 brief, five markets, portfolio tools."
+              blurb="Real-time signals, 06:00 brief, all markets, unlimited portfolio positions."
               cta="Get Pro"
               href="/signup?plan=pro"
               emphasis
@@ -578,7 +578,7 @@ export default function Home() {
               name="Team"
               price="£149"
               period="/month"
-              blurb="Five seats, unlimited positions, API access, all markets."
+              blurb="Everything in Pro across five seats, plus API access, data export, and team management."
               cta="Get Team"
               href="/signup?plan=team"
               emphasis={false}
