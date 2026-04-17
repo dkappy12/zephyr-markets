@@ -41,6 +41,12 @@ function sectionActive(
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
+function normalizeRole(role: string | null | undefined): string | null {
+  if (!role) return null;
+  const normalized = role.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
 export function tierBadgeLabel(
   tier: "free" | "pro" | "team" | "enterprise" | null,
 ): "pro" | "team" | null {
@@ -53,6 +59,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [avatarInitials, setAvatarInitials] = useState("U");
+  const [profileRole, setProfileRole] = useState<string | null>(null);
   const [effectiveTier, setEffectiveTier] = useState<
     "free" | "pro" | "team" | "enterprise" | null
   >(null);
@@ -60,7 +67,8 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const [signingOut, setSigningOut] = useState(false);
   const showIntel = sectionActive(pathname, "/dashboard/intelligence");
   const showPortfolio = sectionActive(pathname, "/dashboard/portfolio");
-  const badge = tierBadgeLabel(effectiveTier);
+  const badge =
+    normalizeRole(profileRole) === "admin" ? "admin" : tierBadgeLabel(effectiveTier);
 
   useEffect(() => {
     let active = true;
@@ -97,6 +105,34 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!active || !userData.user) return;
+      const appRole = normalizeRole(
+        (userData.user.app_metadata as { role?: string } | undefined)?.role ?? null,
+      );
+      if (appRole === "admin") {
+        setProfileRole("admin");
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userData.user.id)
+        .single();
+      if (!active) return;
+      setProfileRole(normalizeRole(data?.role));
+    }
+    void load().catch(() => {
+      if (!active) return;
+      setProfileRole(null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [supabase]);
+
   async function handleSignOut() {
     setSigningOut(true);
     const { error } = await supabase.auth.signOut();
@@ -122,7 +158,13 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
               <span className="font-serif text-xl tracking-tight text-ink">Zephyr</span>
               <span className="inline-flex min-w-8">
                 {badge ? (
-                  <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  <span
+                    className={
+                      badge === "admin"
+                        ? "rounded-[3px] border-[0.5px] border-ink/30 bg-ink px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ivory"
+                        : "rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                    }
+                  >
                     {badge}
                   </span>
                 ) : null}
