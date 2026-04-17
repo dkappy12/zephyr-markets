@@ -142,6 +142,7 @@ function OverviewPageInner() {
   const [marketsScope, setMarketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
   >("gb_nbp_only");
+  const [hasPositions, setHasPositions] = useState<boolean>(false);
 
   useEffect(() => {
     let active = true;
@@ -174,6 +175,26 @@ function OverviewPageInner() {
         setSignalDelayMinutes(0);
         setMarketsScope("gb_nbp_only");
       });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function checkPositions() {
+      const supabase = createBrowserClient();
+      const { data: userData } = await supabase.auth.getUser();
+      if (!active || !userData.user) return;
+      const { count } = await supabase
+        .from("positions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userData.user.id)
+        .eq("is_closed", false);
+      if (!active) return;
+      setHasPositions((count ?? 0) > 0);
+    }
+    void checkPositions();
     return () => {
       active = false;
     };
@@ -731,29 +752,31 @@ function OverviewPageInner() {
         </div>
       </section>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="rounded-[4px] border-[0.5px] border-gold/45 bg-card px-5 py-4"
-      >
-        <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-gold">
-          Portfolio
-        </p>
-        <p className="mt-2 font-serif text-lg text-ink">
-          Import positions for book-native scoring.
-        </p>
-        <p className="mt-1 text-sm text-ink-mid">
-          Upload a curve snapshot or positions file. Zephyr maps signals to
-          your exposures.
-        </p>
-        <Link
-          href="/dashboard/portfolio/book"
-          className="mt-4 inline-flex h-9 items-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark"
+      {!hasPositions && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="rounded-[4px] border-[0.5px] border-gold/45 bg-card px-5 py-4"
         >
-          Import portfolio
-        </Link>
-      </motion.div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-gold">
+            Portfolio
+          </p>
+          <p className="mt-2 font-serif text-lg text-ink">
+            Import positions for book-native scoring.
+          </p>
+          <p className="mt-1 text-sm text-ink-mid">
+            Upload a curve snapshot or positions file. Zephyr maps signals to
+            your exposures.
+          </p>
+          <Link
+            href="/dashboard/portfolio/book"
+            className="mt-4 inline-flex h-9 items-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark"
+          >
+            Import portfolio
+          </Link>
+        </motion.div>
+      )}
     </div>
   );
 }
