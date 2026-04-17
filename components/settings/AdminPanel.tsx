@@ -354,7 +354,12 @@ export function AdminPanel() {
                     width={36}
                   />
                   <Tooltip
-                    formatter={(v: number) => [`£${v.toFixed(2)}/MWh`, "MAE"]}
+                    formatter={(value) => {
+                      const raw = Array.isArray(value) ? value[0] : value;
+                      const numeric = typeof raw === "number" ? raw : Number(raw ?? 0);
+                      const safe = Number.isFinite(numeric) ? numeric : 0;
+                      return [`£${safe.toFixed(2)}/MWh`, "MAE"];
+                    }}
                     contentStyle={{
                       fontSize: 11,
                       border: "0.5px solid #D4CCBB",
