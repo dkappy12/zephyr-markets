@@ -1549,7 +1549,17 @@ def _schedule_weather_with_startup_delay() -> None:
             logger.info(
                 "weather_cycle: startup delayed 60s to avoid rate limit",
             )
-            await run_weather_cycle()
+            try:
+                await run_weather_cycle()
+                async with httpx.AsyncClient(timeout=10.0) as c:
+                    await _update_pipeline_health(c, "open_meteo", True)
+            except Exception as e:
+                logger.error("Weather cycle (delayed first) aborted: %s", e, exc_info=True)
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as c:
+                        await _update_pipeline_health(c, "open_meteo", False, error=str(e))
+                except Exception:
+                    pass
 
         asyncio.run(_delayed_first())
         schedule.every(WEATHER_POLL_MINUTES).minutes.do(scheduled_weather)
@@ -3286,16 +3296,11 @@ async def calculate_physical_premium() -> None:
         wind_suppression_mwh = _wind_price_suppression_gbp_mwh(wg)
         if rd < 15.0:
             premium_regime = "renewable"
-            # Renewable regime: price suppressed below SRMC by renewable surplus.
-            # At rd = 15 GW (boundary), implied = SRMC (no discount).
-            # At rd = 0 GW, implied = SRMC - 30 (maximum renewable discount ~£30/MWh).
-            # Linear interpolation: each GW of surplus below 15 GW reduces price by £2/MWh.
-            # Wind suppression is also applied to avoid double-counting.
-            renewable_surplus_gw = 15.0 - rd
+            # Renewable regime: wind_suppression_mwh is the sole below-SRMC mechanism.
+            # Do not apply an additional surplus-GW discount, which double-counts
+            # renewable-driven price suppression already encoded by wind_suppression_mwh.
             srmc_anchor = srmc_gbp_mwh if srmc_gbp_mwh is not None else 70.0
-            implied = (
-                srmc_anchor - (renewable_surplus_gw * 2.0) - wind_suppression_mwh
-            )
+            implied = srmc_anchor - wind_suppression_mwh
             logger.debug(
                 "premium_cycle model: rd=%.1fGW unplanned_remit=%.1fGW effective_rd=%.1fGW "
                 "wind_suppression=£%.2f/MWh rd_premium=£%.2f/MWh",
@@ -3311,12 +3316,7 @@ async def calculate_physical_premium() -> None:
             if srmc_gbp_mwh is not None:
                 transition_factor = (rd - 15.0) / 7.0
                 srmc_anchor = srmc_gbp_mwh if srmc_gbp_mwh is not None else 70.0
-                renewable_surplus_gw = max(0.0, 15.0 - rd)
-                renewable_price = (
-                    srmc_anchor
-                    - (renewable_surplus_gw * 2.0)
-                    - wind_suppression_mwh
-                )
+                renewable_price = srmc_anchor - wind_suppression_mwh
                 gas_price = (
                     srmc_gbp_mwh
                     + rd_premium_mwh
@@ -3486,24 +3486,6 @@ def scheduled_accuracy_fill() -> None:
     """Nightly accuracy fill — runs at 02:00 UTC."""
     logger.info("accuracy_fill: nightly job triggered")
     asyncio.run(run_accuracy_fill_job())
-
-
-async def run_accuracy_backfill() -> None:
-    """
-    One-time backfill: fill predictions for dates that were missed due to
-    the price_time vs price_date bug. Run once on deployment then remove.
-    """
-    backfill_dates = ["2026-04-14", "2026-04-15", "2026-04-16"]
-    for date_str in backfill_dates:
-        logger.info("accuracy_backfill: processing %s", date_str)
-        await run_accuracy_fill_job(date_str)
-
-
-def scheduled_accuracy_backfill() -> None:
-    try:
-        asyncio.run(run_accuracy_backfill())
-    except Exception as e:
-        logger.error("Accuracy backfill aborted: %s", e, exc_info=True)
 
 
 # -----------------------------------------------------------------------------
@@ -4921,9 +4903,6 @@ def main() -> None:
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
     schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
     schedule.every().day.at("02:05").do(scheduled_kalman_calibration)
-    # One-time backfill for dates missed due to price_time bug — remove after first deploy
-    logger.info("accuracy_backfill: running one-time backfill on startup")
-    threading.Thread(target=scheduled_accuracy_backfill, daemon=True).start()
 
     while True:
         schedule.run_pending()
