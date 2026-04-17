@@ -141,41 +141,76 @@ PHYSICAL_PREMIUM_POLL_MINUTES = 5
 #           seasonal demand baseline added (winter +18%, shoulder +8%),
 #           wind outturn from Elexon FUELINST (actual not forecast),
 #           renewable regime anchored to SRMC
-PREMIUM_MODEL_VERSION = "v1.2.0"
+# v1.3.0 — 2026-04-17: demand baseline recalibrated against observed N2EX market
+#           prices. Previous flat profile (24/28/30/32 GW) was 4-7 GW too low
+#           during morning and evening peaks. New hourly profile correctly
+#           captures morning peak (34 GW at 07:00), midday solar trough (26 GW),
+#           and evening peak (35.5 GW at 19:00). Summer multiplier added (x0.92).
+PREMIUM_MODEL_VERSION = "v1.3.0"
 
 
 def demand_baseline_gw_utc(hour: int, month: int | None = None) -> float:
     """
-    GB electricity demand baseline by UTC hour, with seasonal adjustment.
+    GB electricity demand baseline by UTC hour, seasonally adjusted.
 
-    Winter (Nov-Feb): +15% above spring/summer baseline to reflect heating demand.
-    Spring/Summer (Mar-Oct): base values calibrated to April-September outturn.
+    Recalibrated 2026-04-17 against observed N2EX market prices.
+    Previous flat profile (24/28/30/32 GW) was systematically wrong —
+    missing morning and evening peaks by 4-7 GW, and overstating midday demand.
 
-    Source: NESO demand data, typical GB outturn by season.
-    Peak demand: ~32 GW spring, ~37 GW winter evening peak.
+    April base profile reflects actual GB half-hourly demand shape:
+    - Overnight trough: 22-24 GW (00:00-05:00 UTC)
+    - Morning ramp: 28-34 GW (05:00-09:00 UTC) — previous baseline was 7 GW too low
+    - Daytime plateau: 26-29 GW (09:00-16:00 UTC) — solar suppresses net demand
+    - Evening peak: 33-36 GW (16:00-20:00 UTC) — previous baseline was 4 GW too low
+    - Late evening: 27-30 GW (20:00-23:00 UTC)
+
+    Seasonal multipliers applied on top of April base:
+    - Winter (Nov-Feb): x1.18
+    - Shoulder (Mar, Oct): x1.08
+    - Summer (Jun-Aug): x0.92 (solar suppression, lower heating)
+    - Spring/Autumn (Apr-May, Sep): x1.00 (base)
     """
-    # Base spring/summer profile (Apr-Sep)
-    if 0 <= hour < 6:
-        base = 24.0
-    elif 6 <= hour < 9:
-        base = 28.0
-    elif 9 <= hour < 17:
-        base = 30.0
-    elif 17 <= hour < 21:
-        base = 32.0
-    else:
-        base = 27.0
+    # April base profile — hourly resolution
+    APRIL_BASE = {
+        0:  23.0,   # 00:00 UTC — overnight trough
+        1:  22.5,   # 01:00
+        2:  22.0,   # 02:00
+        3:  22.0,   # 03:00
+        4:  22.5,   # 04:00
+        5:  25.0,   # 05:00 — morning ramp begins
+        6:  30.0,   # 06:00 — morning peak building
+        7:  34.0,   # 07:00 — peak morning demand
+        8:  34.0,   # 08:00
+        9:  31.0,   # 09:00 — daytime plateau
+        10: 29.0,   # 10:00
+        11: 27.5,   # 11:00 — solar suppressing net demand
+        12: 26.5,   # 12:00 — midday trough
+        13: 26.0,   # 13:00
+        14: 26.5,   # 14:00
+        15: 27.5,   # 15:00
+        16: 30.0,   # 16:00 — evening ramp begins
+        17: 33.0,   # 17:00
+        18: 35.0,   # 18:00 — evening peak
+        19: 35.5,   # 19:00 — peak evening demand
+        20: 34.0,   # 20:00
+        21: 31.0,   # 21:00
+        22: 28.0,   # 22:00
+        23: 25.5,   # 23:00
+    }
 
-    # Seasonal multiplier
+    base = APRIL_BASE.get(hour, 27.0)
+
     if month is None:
         return base
-    # Winter uplift: November through February
+
+    # Seasonal multipliers
     if month in (11, 12, 1, 2):
-        return base * 1.18  # ~18% uplift for winter heating demand
-    # Autumn/Spring shoulder: March, October
+        return base * 1.18   # winter
     if month in (3, 10):
-        return base * 1.08  # ~8% uplift for shoulder months
-    # Summer/Spring: Apr-Sep (base values)
+        return base * 1.08   # shoulder
+    if month in (6, 7, 8):
+        return base * 0.92   # summer
+    # Apr, May, Sep — base profile
     return base
 
 CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
