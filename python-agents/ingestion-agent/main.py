@@ -148,6 +148,59 @@ PHYSICAL_PREMIUM_POLL_MINUTES = 5
 #           and evening peak (35.5 GW at 19:00). Summer multiplier added (x0.92).
 PREMIUM_MODEL_VERSION = "v1.3.0"
 
+# Kalman filter — initial coefficient state (matches v1.3.0 hand-calibrated values)
+KF_INITIAL_COEFFS = [0.00, 0.50, 1.50, 5.00, 20.00, 2.50, 1.80, 3.50]  # [b1,b2,b3,b4,b5,w1,w2,w3]
+
+# Live coefficient state — updated by Kalman job when a promotion occurs
+# None means use the hardcoded constants in _residual_demand_premium_gbp_mwh
+# and _wind_price_suppression_gbp_mwh
+_KALMAN_LIVE_COEFFS: list[float] | None = None
+
+# Kalman filter — process noise Q (diagonal variances per day, from research paper)
+KF_Q_DIAG = [3e-8, 1.7e-6, 1.5e-5, 4.4e-4, 5e-4, 1.1e-4, 5.7e-5, 2.6e-4]
+
+# Kalman filter — initial covariance P0 (diagonal, moderate confidence in hand-tuned priors)
+KF_P0_DIAG = [0.0025, 0.0225, 0.20, 4.00, 100.0, 0.39, 0.20, 1.96]
+
+# Kalman filter — observation noise variance R
+KF_R = 36.0  # (6 £/MWh)^2
+
+# Kalman filter — RD piecewise breakpoints [GW]
+KF_RD_BREAKPOINTS = [0.0, 20.0, 28.0, 32.0, 35.0]
+
+# Kalman filter — wind piecewise breakpoints [GW]
+KF_WIND_BREAKPOINTS = [0.0, 5.0, 15.0]
+
+# Kalman filter — minimum filled days before trusting posterior
+KF_MIN_FILLED_DAYS = 10
+
+# Kalman filter — per-segment minimum observation counts (last 30 days)
+KF_MIN_OBS_PER_SEGMENT = {"b2": 50, "b3": 30, "b4": 20, "b5": 10, "w1": 40, "w2": 30, "w3": 15}
+
+# Kalman filter — physical plausibility bounds for each coefficient
+KF_BOUNDS = {
+    "b1": (0.0, 0.01),
+    "b2": (0.0, 3.0),
+    "b3": (0.0, 6.0),
+    "b4": (1.0, 15.0),
+    "b5": (5.0, 50.0),
+    "w1": (0.5, 5.0),
+    "w2": (0.5, 5.0),
+    "w3": (0.5, 8.0),
+}
+
+
+# Governance REST: tables may live in `governance` schema — expose them in PostgREST or use
+# Accept-Profile as needed. Writes require SUPABASE_SERVICE_ROLE_KEY (see _supabase_auth_headers()).
+
+
+def _governance_model_versions_url() -> str:
+    return f"{SUPABASE_URL.rstrip('/')}/rest/v1/model_versions"
+
+
+def _governance_coefficient_updates_url() -> str:
+    return f"{SUPABASE_URL.rstrip('/')}/rest/v1/coefficient_updates"
+
 
 def demand_baseline_gw_utc(hour: int, month: int | None = None) -> float:
     """
@@ -389,6 +442,838 @@ def _supabase_auth_headers() -> dict[str, str]:
         "apikey": key,
         "Authorization": f"Bearer {key}",
     }
+
+
+# -----------------------------------------------------------------------------
+# Kalman self-improvement (piecewise RD + wind coefficients)
+# -----------------------------------------------------------------------------
+
+
+def _build_kalman_observation_vector(effective_rd: float, wind_gw: float) -> list[float]:
+    """
+    Build the F_t observation row vector for the Kalman filter.
+
+    State vector x = [b1, b2, b3, b4, b5, w1, w2, w3]
+    Observation equation: y_t - SRMC_t = F_t @ x_t + v_t
+
+    F_t contains saturated segment widths:
+    - RD segments (positive): how much of each RD segment is activated
+    - Wind segments (negative): how much of each wind segment is activated
+
+    Example: effective_rd=30, wind=8
+    F_t = [20, 8, 2, 0, 0, -5, -3, 0]
+    RD: seg1=min(30,20)=20, seg2=min(30-20,8)=8, seg3=min(30-28,4)=2, seg4=0, seg5=0
+    Wind: seg1=-min(8,5)=-5, seg2=-min(8-5,10)=-3, seg3=0
+    """
+    rd_bp = KF_RD_BREAKPOINTS  # [0, 20, 28, 32, 35]
+    w_bp = KF_WIND_BREAKPOINTS  # [0, 5, 15]
+
+    # RD segments (5 segments, positive contribution)
+    rd_segs = []
+    for i in range(len(rd_bp) - 1):
+        lo, hi = rd_bp[i], rd_bp[i + 1]
+        seg = max(0.0, min(effective_rd, hi) - lo)
+        rd_segs.append(seg)
+    # Segment 5: above 35 GW
+    rd_segs.append(max(0.0, effective_rd - rd_bp[-1]))
+
+    # Wind segments (3 segments, negative contribution)
+    w_segs = []
+    for i in range(len(w_bp) - 1):
+        lo, hi = w_bp[i], w_bp[i + 1]
+        seg = max(0.0, min(wind_gw, hi) - lo)
+        w_segs.append(-seg)  # negative — wind suppresses price
+    # Segment 3: above 15 GW
+    w_segs.append(-max(0.0, wind_gw - w_bp[-1]))
+
+    return rd_segs + w_segs  # 8 elements: [b1_act, b2_act, ...]
+
+
+def _run_kalman_filter(
+    observations: list[dict],
+    prior_coeffs: list[float],
+    prior_cov: list[list[float]],
+) -> dict:
+    """
+    Run standard linear Kalman filter over a set of filled prediction observations.
+
+    Each observation dict must have:
+      - effective_rd_gw: float
+      - wind_gw: float
+      - actual_price_gbp_mwh: float
+      - srmc_gbp_mwh: float
+      - prediction_timestamp: str (ISO)
+
+    Returns dict with:
+      - posterior_coeffs: list[float] (8 values)
+      - posterior_cov: list[list[float]] (8x8)
+      - innovations: list[float]
+      - log_likelihood: float
+      - n_processed: int
+      - kalman_gain_summary: dict
+    """
+    import numpy as np
+
+    n = len(prior_coeffs)  # 8
+    x = np.array(prior_coeffs, dtype=float)
+    P = np.array(prior_cov, dtype=float)
+    Q = np.diag(KF_Q_DIAG)
+    R = KF_R
+
+    innovations = []
+    log_likelihood = 0.0
+    n_processed = 0
+    last_K = None
+
+    sorted_obs = sorted(observations, key=lambda r: r.get("prediction_timestamp", ""))
+
+    for obs in sorted_obs:
+        try:
+            rd = float(obs["effective_rd_gw"] or 0)
+            wind = float(obs["wind_gw"] or 0)
+            actual = float(obs["actual_price_gbp_mwh"])
+            srmc = float(obs["srmc_gbp_mwh"] or 90.0)
+        except (TypeError, ValueError, KeyError):
+            continue
+
+        y = actual - srmc
+        F = np.array(_build_kalman_observation_vector(rd, wind), dtype=float)
+
+        P_pred = P + Q
+
+        y_hat = float(F @ x)
+        innovation = y - y_hat
+
+        S = float(F @ P_pred @ F) + R
+        if S <= 0:
+            continue
+        if abs(innovation) > 3.0 * (S**0.5):
+            logger.debug("kalman: outlier skipped innovation=%.2f S=%.2f", innovation, S)
+            continue
+
+        K = (P_pred @ F) / S
+
+        x = x + K * innovation
+        P = P_pred - np.outer(K, F) @ P_pred
+
+        log_likelihood += -0.5 * (np.log(2 * np.pi * S) + (innovation**2) / S)
+
+        innovations.append(float(innovation))
+        last_K = K
+        n_processed += 1
+
+    # Apply monotonicity projection: b1 <= b2 <= b3 <= b4 <= b5, all >= 0
+    b = list(x[:5])
+    b[0] = max(0.0, b[0])
+    for i in range(1, 5):
+        b[i] = max(b[i], b[i - 1])
+    x[:5] = b
+
+    bounds_list = [
+        KF_BOUNDS["b1"],
+        KF_BOUNDS["b2"],
+        KF_BOUNDS["b3"],
+        KF_BOUNDS["b4"],
+        KF_BOUNDS["b5"],
+        KF_BOUNDS["w1"],
+        KF_BOUNDS["w2"],
+        KF_BOUNDS["w3"],
+    ]
+    for i, (lo, hi) in enumerate(bounds_list):
+        x[i] = max(lo, min(hi, x[i]))
+
+    kalman_gain_summary: dict[str, float] = {}
+    if last_K is not None:
+        names = ["b1", "b2", "b3", "b4", "b5", "w1", "w2", "w3"]
+        kalman_gain_summary = {names[i]: round(float(last_K[i]), 6) for i in range(n)}
+
+    return {
+        "posterior_coeffs": x.tolist(),
+        "posterior_cov": P.tolist(),
+        "innovations": innovations,
+        "log_likelihood": float(log_likelihood),
+        "n_processed": n_processed,
+        "kalman_gain_summary": kalman_gain_summary,
+    }
+
+
+def _run_promotion_gates(
+    challenger_coeffs: list[float],
+    prior_coeffs: list[float],
+    champion_errors: list[float],
+    challenger_errors: list[float],
+    n_filled_days: int,
+    regime_errors: dict,
+) -> dict:
+    """
+    Run 6 promotion gates. Returns dict with gate results and overall decision.
+
+    Gates (evaluated in order, hard fail stops evaluation):
+    1. Sample size: n_paired >= 288
+    2. MAE improvement: >= 2%
+    3. HLN-DM significance: p < 0.05 (relaxed from 0.01 for warm-up period)
+    4. Coefficient stability: max relative change < 50%
+    5. Regime balance: improvement in >= 2 of 3 regimes
+    6. Economic plausibility: all coefficients within KF_BOUNDS
+    """
+    import numpy as np
+    from scipy import stats as scipy_stats
+
+    gates = {}
+    soft_fails = 0
+
+    n = len(champion_errors)
+
+    gate1_pass = n >= 288
+    gates["g1_sample"] = {
+        "pass": gate1_pass,
+        "value": n,
+        "threshold": 288,
+        "type": "hard",
+    }
+    if not gate1_pass:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": f"Insufficient samples: {n} < 288 required",
+            "soft_fails": 0,
+        }
+
+    champ_mae = float(np.mean(np.abs(champion_errors)))
+    chall_mae = float(np.mean(np.abs(challenger_errors)))
+    mae_improvement = (champ_mae - chall_mae) / champ_mae if champ_mae > 0 else 0
+    gate2_pass = mae_improvement >= 0.02
+    gates["g2_mae"] = {
+        "pass": gate2_pass,
+        "value": round(mae_improvement, 4),
+        "threshold": 0.02,
+        "champ_mae": round(champ_mae, 3),
+        "chall_mae": round(chall_mae, 3),
+        "type": "hard",
+    }
+    if not gate2_pass:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": f"MAE improvement {mae_improvement:.1%} below 2% threshold",
+            "soft_fails": 0,
+        }
+
+    e1 = np.array(champion_errors)
+    e2 = np.array(challenger_errors)
+    d = np.abs(e1) - np.abs(e2)
+    d_bar = float(np.mean(d))
+    T = len(d)
+    d_c = d - d_bar
+    h = 1
+    lrv = float(np.dot(d_c, d_c)) / T
+    for k in range(1, h):
+        lrv += 2 * (1 - k / h) * float(np.dot(d_c[k:], d_c[:-k])) / T
+    lrv = max(lrv, 1e-12)
+    DM = d_bar / ((lrv / T) ** 0.5)
+    DM_star = DM * ((T + 1 - 2 * h + h * (h - 1) / T) / T) ** 0.5
+    p_value = float(2 * (1 - scipy_stats.t.cdf(abs(DM_star), df=T - 1)))
+    gate3_pass = p_value < 0.05
+    gate3_soft = not gate3_pass and p_value < 0.10
+    if gate3_soft:
+        soft_fails += 1
+    gates["g3_dm"] = {
+        "pass": gate3_pass,
+        "soft": gate3_soft,
+        "value": round(p_value, 4),
+        "threshold": 0.05,
+        "DM_star": round(DM_star, 4),
+        "type": "soft" if gate3_soft else "hard",
+    }
+    if not gate3_pass and not gate3_soft:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": f"DM test p={p_value:.4f} not significant at 0.05",
+            "soft_fails": soft_fails,
+        }
+
+    names = ["b1", "b2", "b3", "b4", "b5", "w1", "w2", "w3"]
+    max_rel_change = 0.0
+    worst_coeff = ""
+    for i, (new, old) in enumerate(zip(challenger_coeffs, prior_coeffs)):
+        if abs(old) > 1e-6:
+            rel = abs(new - old) / abs(old)
+            if rel > max_rel_change:
+                max_rel_change = rel
+                worst_coeff = names[i]
+    gate4_hard_fail = max_rel_change >= 0.50
+    gate4_soft_fail = 0.30 <= max_rel_change < 0.50
+    if gate4_soft_fail:
+        soft_fails += 1
+    gate4_pass = max_rel_change < 0.50
+    gates["g4_stability"] = {
+        "pass": gate4_pass,
+        "soft": gate4_soft_fail,
+        "value": round(max_rel_change, 4),
+        "threshold_soft": 0.30,
+        "threshold_hard": 0.50,
+        "worst_coeff": worst_coeff,
+        "type": "soft/hard",
+    }
+    if gate4_hard_fail:
+        return {
+            "gates": gates,
+            "decision": "flag_for_review",
+            "reason": f"Coefficient {worst_coeff} changed {max_rel_change:.1%} — exceeds 50% hard limit",
+            "soft_fails": soft_fails,
+        }
+
+    if soft_fails >= 2:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": "Two soft fails accumulated — promotion blocked",
+            "soft_fails": soft_fails,
+        }
+
+    regime_wins = 0
+    regime_results = {}
+    for regime_name, regime_data in regime_errors.items():
+        if len(regime_data.get("champion", [])) < 5:
+            regime_results[regime_name] = "insufficient_data"
+            continue
+        r_champ_mae = float(np.mean(np.abs(regime_data["champion"])))
+        r_chall_mae = float(np.mean(np.abs(regime_data["challenger"])))
+        win = r_chall_mae < r_champ_mae
+        worse_pct = (r_chall_mae - r_champ_mae) / r_champ_mae if r_champ_mae > 0 else 0
+        regime_results[regime_name] = {
+            "win": win,
+            "champ_mae": round(r_champ_mae, 3),
+            "chall_mae": round(r_chall_mae, 3),
+            "worse_pct": round(worse_pct, 4),
+        }
+        if win:
+            regime_wins += 1
+        elif worse_pct > 0.05:
+            return {
+                "gates": {**gates, "g5_regime": {"pass": False, "results": regime_results, "type": "hard"}},
+                "decision": "reject",
+                "reason": f"Regime {regime_name} is {worse_pct:.1%} worse — exceeds 5% limit",
+                "soft_fails": soft_fails,
+            }
+    gate5_pass = regime_wins >= 2
+    gates["g5_regime"] = {
+        "pass": gate5_pass,
+        "wins": regime_wins,
+        "threshold": 2,
+        "results": regime_results,
+        "type": "hard",
+    }
+    if not gate5_pass:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": f"Only {regime_wins} regime(s) improved — need at least 2",
+            "soft_fails": soft_fails,
+        }
+
+    bounds_list = [
+        KF_BOUNDS["b1"],
+        KF_BOUNDS["b2"],
+        KF_BOUNDS["b3"],
+        KF_BOUNDS["b4"],
+        KF_BOUNDS["b5"],
+        KF_BOUNDS["w1"],
+        KF_BOUNDS["w2"],
+        KF_BOUNDS["w3"],
+    ]
+    plausibility_violations = []
+    for i, (lo, hi) in enumerate(bounds_list):
+        val = challenger_coeffs[i]
+        if not (lo <= val <= hi):
+            plausibility_violations.append(f"{names[i]}={val:.3f} outside [{lo},{hi}]")
+    gate6_pass = len(plausibility_violations) == 0
+    gates["g6_plausibility"] = {
+        "pass": gate6_pass,
+        "violations": plausibility_violations,
+        "type": "hard",
+    }
+    if not gate6_pass:
+        return {
+            "gates": gates,
+            "decision": "reject",
+            "reason": f"Plausibility violations: {'; '.join(plausibility_violations)}",
+            "soft_fails": soft_fails,
+        }
+
+    return {
+        "gates": gates,
+        "decision": "promote",
+        "reason": f"All 6 gates passed. MAE improvement: {mae_improvement:.1%}. DM p={p_value:.4f}.",
+        "soft_fails": soft_fails,
+        "mae_improvement": mae_improvement,
+        "dm_pvalue": p_value,
+    }
+
+
+def _generate_change_summary(
+    prior_coeffs: list[float],
+    posterior_coeffs: list[float],
+    gate_result: dict,
+    n_observations: int,
+    mae_before: float,
+    mae_after: float,
+) -> str:
+    """Generate a deterministic plain-English change summary (official record)."""
+    names = ["b1", "b2", "b3", "b4", "b5", "w1", "w2", "w3"]
+    labels = [
+        "RD slope 0-20GW",
+        "RD slope 20-28GW",
+        "RD slope 28-32GW",
+        "RD slope 32-35GW",
+        "RD slope >35GW",
+        "Wind suppression 0-5GW",
+        "Wind suppression 5-15GW",
+        "Wind suppression >15GW",
+    ]
+
+    decision = gate_result.get("decision", "unknown")
+    reason = gate_result.get("reason", "")
+
+    if decision != "promote":
+        return f"Kalman update not promoted. Reason: {reason}. Observations: {n_observations}."
+
+    changes = []
+    for i, (old, new) in enumerate(zip(prior_coeffs, posterior_coeffs)):
+        delta = new - old
+        if abs(delta) > 0.001:
+            direction = "increased" if delta > 0 else "decreased"
+            changes.append(
+                f"{labels[i]} ({names[i]}) {direction} from {old:.3f} to {new:.3f} "
+                f"(Δ{delta:+.3f} £/MWh/GW)"
+            )
+
+    mae_improvement_pct = (mae_before - mae_after) / mae_before * 100 if mae_before > 0 else 0
+
+    if not changes:
+        summary = "Kalman nightly update promoted with no material coefficient changes. "
+    else:
+        summary = f"Kalman nightly update promoted. Changes: {'; '.join(changes)}. "
+
+    summary += (
+        f"MAE improved from £{mae_before:.2f} to £{mae_after:.2f}/MWh "
+        f"({mae_improvement_pct:.1f}% improvement) "
+        f"over {n_observations} observations."
+    )
+    return summary
+
+
+async def _write_coefficient_update(
+    client: httpx.AsyncClient,
+    run_id: str,
+    run_started_at: str,
+    window_start: str,
+    window_end: str,
+    n_observations: int,
+    prior_version_id: str | None,
+    prior_coeffs: list[float],
+    prior_cov: list[list[float]],
+    kf_result: dict,
+    gate_result: dict,
+    promoted_version_id: str | None,
+    runtime_ms: int,
+) -> None:
+    """Write a coefficient_updates row to the governance schema."""
+    inns = kf_result["innovations"]
+    payload = {
+        "run_id": run_id,
+        "run_started_at": run_started_at,
+        "run_finished_at": datetime.now(timezone.utc).isoformat(),
+        "window_start_ts": window_start,
+        "window_end_ts": window_end,
+        "n_observations": n_observations,
+        "prior_version_id": prior_version_id,
+        "prior_coefficients": prior_coeffs,
+        "prior_covariance": prior_cov,
+        "innovation_mean": float(sum(inns) / len(inns)) if inns else None,
+        "innovation_var": float(sum(i**2 for i in inns) / len(inns)) if inns else None,
+        "kalman_gain_summary": kf_result["kalman_gain_summary"],
+        "posterior_coefficients": kf_result["posterior_coeffs"],
+        "posterior_covariance": kf_result["posterior_cov"],
+        "log_likelihood": kf_result["log_likelihood"],
+        "decision": gate_result["decision"],
+        "promoted_version_id": promoted_version_id,
+        "gate_results": gate_result["gates"],
+        "reason": gate_result["reason"],
+        "runtime_ms": runtime_ms,
+    }
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    resp = await client.post(
+        _governance_coefficient_updates_url(),
+        headers=headers,
+        json=payload,
+    )
+    resp.raise_for_status()
+
+
+async def _promote_model_version(
+    client: httpx.AsyncClient,
+    new_version: str,
+    parent_version_id: str | None,
+    posterior_coeffs: list[float],
+    posterior_cov: list[list[float]],
+    change_summary: str,
+    gate_result: dict,
+    n_observations: int,
+) -> str | None:
+    """Write a new model version to governance.model_versions. Returns the new version ID."""
+    names = ["b1", "b2", "b3", "b4", "b5", "w1", "w2", "w3"]
+    coeffs_dict = {names[i]: posterior_coeffs[i] for i in range(8)}
+
+    if parent_version_id:
+        patch_headers = {
+            **_supabase_auth_headers(),
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        await client.patch(
+            f"{_governance_model_versions_url()}?is_current=eq.true",
+            headers=patch_headers,
+            json={"is_current": False},
+        )
+
+    payload = {
+        "version": new_version,
+        "model_name": "zephyr_premium_v1",
+        "parent_version_id": parent_version_id,
+        "effective_from": datetime.now(timezone.utc).isoformat(),
+        "is_current": True,
+        "b1": posterior_coeffs[0],
+        "b2": posterior_coeffs[1],
+        "b3": posterior_coeffs[2],
+        "b4": posterior_coeffs[3],
+        "b5": posterior_coeffs[4],
+        "w1": posterior_coeffs[5],
+        "w2": posterior_coeffs[6],
+        "w3": posterior_coeffs[7],
+        "coefficients": coeffs_dict,
+        "covariance": posterior_cov,
+        "constants": {
+            "ETA_CCGT": ETA_CCGT,
+            "EF_TCO2": EF_TCO2_PER_MWH_EL,
+            "CPS_GBP": CPS_GBP_PER_T,
+            "VOM_GBP": VOM_GBP_PER_MWH,
+            "score_divisor": 5.0,
+        },
+        "metric_sample_n": n_observations,
+        "change_summary": change_summary,
+        "approval_status": "auto_approved",
+        "approval_decided_at": datetime.now(timezone.utc).isoformat(),
+        "promotion_audit": gate_result.get("gates", {}),
+    }
+
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    resp = await client.post(
+        _governance_model_versions_url(),
+        headers=headers,
+        json=payload,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    return result[0]["id"] if result else None
+
+
+async def _load_kalman_coefficients_on_startup(client: httpx.AsyncClient) -> None:
+    """Load latest promoted coefficients from governance.model_versions on startup."""
+    global _KALMAN_LIVE_COEFFS
+    try:
+        resp = await client.get(
+            _governance_model_versions_url(),
+            headers=_supabase_auth_headers(),
+            params={
+                "is_current": "eq.true",
+                "select": "b1,b2,b3,b4,b5,w1,w2,w3",
+                "limit": "1",
+            },
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if rows:
+            mv = rows[0]
+            _KALMAN_LIVE_COEFFS = [
+                float(mv["b1"]),
+                float(mv["b2"]),
+                float(mv["b3"]),
+                float(mv["b4"]),
+                float(mv["b5"]),
+                float(mv["w1"]),
+                float(mv["w2"]),
+                float(mv["w3"]),
+            ]
+            logger.info("kalman: loaded live coefficients from governance on startup: %s", _KALMAN_LIVE_COEFFS)
+    except Exception as e:
+        logger.info("kalman: no promoted coefficients found on startup, using hardcoded defaults: %s", e)
+
+
+async def run_kalman_calibration_job() -> None:
+    """
+    Nightly Kalman filter calibration job. Runs after accuracy fill at 02:00 UTC.
+
+    1. Fetches all filled predictions from last 30 days
+    2. Loads current coefficient state (from governance.model_versions or defaults)
+    3. Runs Kalman filter
+    4. Applies 6 promotion gates
+    5. Writes coefficient_updates row regardless of outcome
+    6. If promoted: writes new model_versions row and updates live coefficients
+    """
+    global _KALMAN_LIVE_COEFFS
+
+    import numpy as np
+    import time as time_module
+
+    run_id = f"kalman_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    run_started_at = datetime.now(timezone.utc).isoformat()
+    t_start = time_module.time()
+
+    logger.info("kalman: starting calibration job run_id=%s", run_id)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+
+        since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        try:
+            resp = await client.get(
+                f"{SUPABASE_URL.rstrip('/')}/rest/v1/premium_predictions",
+                headers=_supabase_auth_headers(),
+                params={
+                    "is_filled": "eq.true",
+                    "prediction_timestamp": f"gte.{since}",
+                    "select": "id,prediction_timestamp,target_date,target_settlement_period,"
+                    "effective_rd_gw,wind_gw,srmc_gbp_mwh,actual_price_gbp_mwh,"
+                    "predicted_price_gbp_mwh,regime,model_version",
+                    "order": "prediction_timestamp.asc",
+                    "limit": "5000",
+                },
+            )
+            resp.raise_for_status()
+            all_rows = resp.json()
+        except Exception as e:
+            logger.error("kalman: failed to fetch predictions: %s", e)
+            return
+
+        if not all_rows:
+            logger.info("kalman: no filled predictions available — skipping")
+            return
+
+        n_total = len(all_rows)
+        n_filled_days = len({r["target_date"] for r in all_rows if r.get("target_date")})
+        logger.info("kalman: loaded %d filled predictions across %d days", n_total, n_filled_days)
+
+        prior_version_id = None
+        prior_coeffs = list(KF_INITIAL_COEFFS)
+        prior_cov = [
+            [KF_P0_DIAG[i] if i == j else 0.0 for j in range(8)] for i in range(8)
+        ]
+
+        try:
+            resp = await client.get(
+                _governance_model_versions_url(),
+                headers=_supabase_auth_headers(),
+                params={
+                    "is_current": "eq.true",
+                    "select": "id,b1,b2,b3,b4,b5,w1,w2,w3,covariance",
+                    "limit": "1",
+                },
+            )
+            resp.raise_for_status()
+            mv_rows = resp.json()
+            if mv_rows:
+                mv = mv_rows[0]
+                prior_version_id = mv["id"]
+                prior_coeffs = [
+                    float(mv["b1"]),
+                    float(mv["b2"]),
+                    float(mv["b3"]),
+                    float(mv["b4"]),
+                    float(mv["b5"]),
+                    float(mv["w1"]),
+                    float(mv["w2"]),
+                    float(mv["w3"]),
+                ]
+                if mv.get("covariance"):
+                    prior_cov = mv["covariance"]
+                logger.info("kalman: loaded prior from governance.model_versions id=%s", prior_version_id)
+        except Exception as e:
+            logger.warning("kalman: could not load prior from governance, using defaults: %s", e)
+
+        alpha = min(1.0, n_filled_days / KF_MIN_FILLED_DAYS)
+        if alpha < 1.0:
+            logger.info(
+                "kalman: warm-up mode day %d of %d (alpha=%.2f)",
+                n_filled_days,
+                KF_MIN_FILLED_DAYS,
+                alpha,
+            )
+
+        window_start = all_rows[0]["prediction_timestamp"]
+        window_end = all_rows[-1]["prediction_timestamp"]
+
+        kf_result = _run_kalman_filter(all_rows, prior_coeffs, prior_cov)
+
+        raw_posterior = kf_result["posterior_coeffs"]
+        blended = [
+            alpha * raw_posterior[i] + (1 - alpha) * KF_INITIAL_COEFFS[i] for i in range(8)
+        ]
+        kf_result["posterior_coeffs"] = blended
+
+        logger.info(
+            "kalman: filter complete n_processed=%d log_likelihood=%.2f",
+            kf_result["n_processed"],
+            kf_result["log_likelihood"],
+        )
+        logger.info(
+            "kalman: posterior coeffs b=[%.3f,%.3f,%.3f,%.3f,%.3f] w=[%.3f,%.3f,%.3f]",
+            *kf_result["posterior_coeffs"],
+        )
+
+        champion_errors = []
+        challenger_errors = []
+        regime_data: dict[str, dict] = {
+            "gas-dominated": {"champion": [], "challenger": []},
+            "transitional": {"champion": [], "challenger": []},
+            "renewable": {"champion": [], "challenger": []},
+        }
+
+        for row in all_rows:
+            try:
+                actual = float(row["actual_price_gbp_mwh"])
+                predicted = float(row["predicted_price_gbp_mwh"])
+                srmc = float(row["srmc_gbp_mwh"] or 90.0)
+                rd = float(row["effective_rd_gw"] or 0)
+                wind = float(row["wind_gw"] or 0)
+            except (TypeError, ValueError, KeyError):
+                continue
+
+            champ_err = predicted - actual
+
+            F = np.array(_build_kalman_observation_vector(rd, wind))
+            chall_pred = srmc + float(F @ np.array(kf_result["posterior_coeffs"]))
+            chall_err = chall_pred - actual
+
+            champion_errors.append(champ_err)
+            challenger_errors.append(chall_err)
+
+            regime = row.get("regime") or "transitional"
+            if regime in regime_data:
+                regime_data[regime]["champion"].append(champ_err)
+                regime_data[regime]["challenger"].append(chall_err)
+
+        gate_result = _run_promotion_gates(
+            challenger_coeffs=kf_result["posterior_coeffs"],
+            prior_coeffs=prior_coeffs,
+            champion_errors=champion_errors,
+            challenger_errors=challenger_errors,
+            n_filled_days=n_filled_days,
+            regime_errors=regime_data,
+        )
+
+        logger.info(
+            "kalman: gate decision=%s reason=%s",
+            gate_result["decision"],
+            gate_result["reason"],
+        )
+
+        promoted_version_id = None
+        new_version_str = None
+
+        if gate_result["decision"] == "promote":
+            current_ver = PREMIUM_MODEL_VERSION
+            ver_clean = current_ver.lstrip("v")
+            try:
+                count_resp = await client.get(
+                    _governance_model_versions_url(),
+                    headers=_supabase_auth_headers(),
+                    params={"select": "id", "limit": "1000"},
+                )
+                count_resp.raise_for_status()
+                k_count = len(count_resp.json()) + 1
+            except Exception:
+                k_count = 1
+
+            new_version_str = f"{ver_clean}-k{k_count:04d}"
+
+            mae_before = float(np.mean(np.abs(champion_errors))) if champion_errors else 0
+            mae_after = float(np.mean(np.abs(challenger_errors))) if challenger_errors else 0
+
+            change_summary = _generate_change_summary(
+                prior_coeffs=prior_coeffs,
+                posterior_coeffs=kf_result["posterior_coeffs"],
+                gate_result=gate_result,
+                n_observations=len(champion_errors),
+                mae_before=mae_before,
+                mae_after=mae_after,
+            )
+
+            try:
+                promoted_version_id = await _promote_model_version(
+                    client=client,
+                    new_version=new_version_str,
+                    parent_version_id=prior_version_id,
+                    posterior_coeffs=kf_result["posterior_coeffs"],
+                    posterior_cov=kf_result["posterior_cov"],
+                    change_summary=change_summary,
+                    gate_result=gate_result,
+                    n_observations=len(champion_errors),
+                )
+                logger.info(
+                    "kalman: promoted new version %s id=%s",
+                    new_version_str,
+                    promoted_version_id,
+                )
+
+                _KALMAN_LIVE_COEFFS = kf_result["posterior_coeffs"]
+
+            except Exception as e:
+                logger.error("kalman: failed to write model version: %s", e)
+                gate_result["decision"] = "reject"
+                gate_result["reason"] += f" (write failed: {e})"
+
+        runtime_ms = int((time_module.time() - t_start) * 1000)
+        try:
+            await _write_coefficient_update(
+                client=client,
+                run_id=run_id,
+                run_started_at=run_started_at,
+                window_start=window_start,
+                window_end=window_end,
+                n_observations=kf_result["n_processed"],
+                prior_version_id=prior_version_id,
+                prior_coeffs=prior_coeffs,
+                prior_cov=prior_cov,
+                kf_result=kf_result,
+                gate_result=gate_result,
+                promoted_version_id=promoted_version_id,
+                runtime_ms=runtime_ms,
+            )
+            logger.info("kalman: wrote coefficient_updates run_id=%s", run_id)
+        except Exception as e:
+            logger.error("kalman: failed to write coefficient_updates: %s", e)
+
+        logger.info(
+            "kalman: job complete decision=%s runtime=%dms",
+            gate_result["decision"],
+            runtime_ms,
+        )
+
+
+def scheduled_kalman_calibration() -> None:
+    try:
+        asyncio.run(run_kalman_calibration_job())
+    except Exception as e:
+        logger.error("Kalman calibration job aborted: %s", e, exc_info=True)
 
 
 def _header_preview(value: str, max_len: int = 20) -> str:
@@ -1669,32 +2554,37 @@ def _residual_demand_premium_gbp_mwh(rd: float) -> float:
       32-35 GW: £5.00/MWh per GW (expensive plant entering)
       >35 GW:   £20.00/MWh per GW (peakers and scarcity)
     """
+    if _KALMAN_LIVE_COEFFS is not None:
+        b1, b2, b3, b4, b5 = _KALMAN_LIVE_COEFFS[:5]
+    else:
+        b1, b2, b3, b4, b5 = 0.00, 0.50, 1.50, 5.00, 20.00
+
     if rd <= 0:
         return 0.0
     premium = 0.0
     # Segment 1: 0 to 20 GW (flat — renewables dominant)
     seg1 = min(rd, 20.0)
-    premium += seg1 * 0.0
+    premium += seg1 * b1
     if rd <= 20.0:
         return premium
     # Segment 2: 20 to 28 GW (cheap CCGTs, small premium)
     seg2 = min(rd - 20.0, 8.0)
-    premium += seg2 * 0.50
+    premium += seg2 * b2
     if rd <= 28.0:
         return premium
     # Segment 3: 28 to 32 GW (mid-merit, modest premium)
     seg3 = min(rd - 28.0, 4.0)
-    premium += seg3 * 1.50
+    premium += seg3 * b3
     if rd <= 32.0:
         return premium
     # Segment 4: 32 to 35 GW (expensive plant)
     seg4 = min(rd - 32.0, 3.0)
-    premium += seg4 * 5.00
+    premium += seg4 * b4
     if rd <= 35.0:
         return premium
     # Segment 5: above 35 GW (scarcity)
     seg5 = rd - 35.0
-    premium += seg5 * 20.00
+    premium += seg5 * b5
     return premium
 
 
@@ -1707,22 +2597,27 @@ def _wind_price_suppression_gbp_mwh(wind_gw: float) -> float:
     At high penetration (>15 GW): stronger suppression ~£3.5/GW (merit-order intensifies)
     Applied as a downward adjustment to the gas-dominated implied price.
     """
+    if _KALMAN_LIVE_COEFFS is not None:
+        w1, w2, w3 = _KALMAN_LIVE_COEFFS[5:]
+    else:
+        w1, w2, w3 = 2.50, 1.80, 3.50
+
     if wind_gw <= 0:
         return 0.0
     suppression = 0.0
     # Segment 1: 0 to 5 GW
     seg1 = min(wind_gw, 5.0)
-    suppression += seg1 * 2.5
+    suppression += seg1 * w1
     if wind_gw <= 5.0:
         return suppression
     # Segment 2: 5 to 15 GW
     seg2 = min(wind_gw - 5.0, 10.0)
-    suppression += seg2 * 1.8
+    suppression += seg2 * w2
     if wind_gw <= 15.0:
         return suppression
     # Segment 3: above 15 GW
     seg3 = wind_gw - 15.0
-    suppression += seg3 * 3.5
+    suppression += seg3 * w3
     return suppression
 
 
@@ -3786,8 +4681,15 @@ def supabase_startup_check() -> None:
         logger.error("Supabase startup check failed: %s", e, exc_info=True)
 
 
+async def _startup_load_kalman_async() -> None:
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        await _load_kalman_coefficients_on_startup(client)
+
+
 def main() -> None:
     supabase_startup_check()
+
+    asyncio.run(_startup_load_kalman_async())
 
     logger.info(
         "GIE_API_KEY %s",
@@ -3802,7 +4704,8 @@ def main() -> None:
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
         "| TTF NGP every %s min | NBP NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
-        "| morning brief daily 06:00 (host TZ; use UTC) | accuracy fill daily 02:00 UTC",
+        "| morning brief daily 06:00 (host TZ; use UTC) | accuracy fill daily 02:00 UTC "
+        "| Kalman calibration daily 02:05 UTC",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -3837,6 +4740,7 @@ def main() -> None:
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
     schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
+    schedule.every().day.at("02:05").do(scheduled_kalman_calibration)
     # One-time backfill for dates missed due to price_time bug — remove after first deploy
     logger.info("accuracy_backfill: running one-time backfill on startup")
     threading.Thread(target=scheduled_accuracy_backfill, daemon=True).start()
