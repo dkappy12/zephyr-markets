@@ -321,34 +321,9 @@ export default function MarketsPage() {
     publishTime: string | null;
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
-  const [marketsScope, setMarketsScope] = useState<
+  const [marketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
-  >("gb_nbp_only");
-
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/billing/status")
-      .then(async (res) => {
-        if (!res.ok) return "gb_nbp_only" as const;
-        const body = (await res.json()) as {
-          entitlements?: {
-            markets?: "gb_nbp_only" | "five_markets" | "all_markets";
-          };
-        };
-        return body.entitlements?.markets ?? "gb_nbp_only";
-      })
-      .then((scope) => {
-        if (!active) return;
-        setMarketsScope(scope);
-      })
-      .catch(() => {
-        if (!active) return;
-        setMarketsScope("gb_nbp_only");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  >("all_markets");
 
   useEffect(() => {
     const supabase = createBrowserClient();
