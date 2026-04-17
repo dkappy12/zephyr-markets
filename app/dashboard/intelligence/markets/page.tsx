@@ -16,6 +16,7 @@ import {
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -329,6 +330,7 @@ export default function MarketsPage() {
   } | null>(null);
   const [icFlowsError, setIcFlowsError] = useState<string | null>(null);
   const [carbonUpdated, setCarbonUpdated] = useState<string | null>(null);
+  const [ukaPrice, setUkaPrice] = useState<number | null>(null);
   const [carbonHistory, setCarbonHistory] = useState<CarbonHistoryRow[]>([]);
   const [marketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
@@ -458,6 +460,11 @@ export default function MarketsPage() {
 
         const carbonRows = carbonRes.data ?? [];
         const ukaRow = carbonRows.find((r: { hub?: string }) => r.hub === "UKA");
+        setUkaPrice(
+          ukaRow?.price_gbp_per_t != null
+            ? Number(ukaRow.price_gbp_per_t)
+            : null,
+        );
         setCarbonUpdated(ukaRow?.price_date ?? null);
 
         const carbonHistoryRes = await supabase
@@ -1049,6 +1056,30 @@ export default function MarketsPage() {
         euaGbp != null && ukaGbp != null ? euaGbp - ukaGbp : null;
       return { date, euaEur, ukaGbp, spread };
     });
+  }, [carbonHistory]);
+
+  const carbonAdderGbpMwh = useMemo(() => {
+    if (ukaPrice == null) return null;
+    const CPS_GBP_PER_T = 18;
+    const EMISSION_FACTOR_TCO2_MWH_ELECTRICAL = 0.366;
+    return (ukaPrice + CPS_GBP_PER_T) * EMISSION_FACTOR_TCO2_MWH_ELECTRICAL;
+  }, [ukaPrice]);
+
+  const carbonAdderChartData = useMemo(() => {
+    const CPS_GBP_PER_T = 18;
+    const EMISSION_FACTOR = 0.366;
+    const ukaRows = carbonHistory.filter((r) => r.hub === "UKA");
+    return ukaRows
+      .filter((r) => r.price_gbp_per_t != null)
+      .map((r) => ({
+        date: r.price_date,
+        adder: Number(
+          (
+            (Number(r.price_gbp_per_t) + CPS_GBP_PER_T) *
+            EMISSION_FACTOR
+          ).toFixed(2),
+        ),
+      }));
   }, [carbonHistory]);
 
   const euaCarbonLine30 = useMemo(() => {
@@ -1727,6 +1758,82 @@ export default function MarketsPage() {
               </div>
             </div>
           </div>
+
+          {/* Carbon adder chart */}
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+              Carbon adder to SRMC (£/MWh)
+            </p>
+            <p className="mb-3 text-[10px] text-ink-light">
+              (UKA + CPS £18/t) × 0.366 tCO₂/MWh · current:{" "}
+              {carbonAdderGbpMwh != null
+                ? `£${carbonAdderGbpMwh.toFixed(2)}/MWh`
+                : "—"}
+            </p>
+            {carbonAdderChartData.length === 0 ? (
+              <p className="py-6 text-center text-[10px] text-ink-light">
+                No UKA history yet — chart appears once carbon_prices has UKA rows.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height={120}>
+                <LineChart
+                  data={carbonAdderChartData}
+                  margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(44,42,38,0.08)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 9, fill: "#888" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(d) =>
+                      typeof d === "string" ? d.slice(5) : String(d)
+                    }
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 9, fill: "#888" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => `£${v}`}
+                    domain={["auto", "auto"]}
+                    width={40}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--color-card)",
+                      border: "0.5px solid var(--color-ivory-border)",
+                      borderRadius: 4,
+                      fontSize: 11,
+                    }}
+                    formatter={(v: number) => [
+                      `£${Number(v).toFixed(2)}/MWh`,
+                      "Carbon adder",
+                    ]}
+                    labelFormatter={(l) => `Date: ${l}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="adder"
+                    stroke="#5c6b2e"
+                    strokeWidth={1.5}
+                    dot={
+                      carbonAdderChartData.length < 3
+                        ? { r: 4, fill: "#5c6b2e", strokeWidth: 0 }
+                        : false
+                    }
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
           <p className="text-[10px] text-ink-light">
             UKA trades ~£18/t below EUA reflecting the Carbon Price Support mechanism.
             Both are direct inputs to the CCGT SRMC stack.
