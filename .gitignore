@@ -34,6 +34,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!.env*.example
 
 # vercel
 .vercel
@@ -41,3 +43,42 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+venv/
+.venv/
+/ENV/
+/env/
+
+# python tooling / packaging (safe for typical app repos)
+pip-log.txt
+pip-delete-this-directory.txt
+
+# caches & local tooling
+.turbo/
+.eslintcache
+.stylelintcache
+.cache/
+.parcel-cache/
+
+# IDE / editor (machine-specific)
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# logs (general)
+*.log

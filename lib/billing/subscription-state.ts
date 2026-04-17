@@ -68,6 +68,47 @@ function normalizeInterval(value: string | null | undefined): BillingInterval | 
   return null;
 }
 
+function normalizeRole(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+async function isAdminUser(userId: string): Promise<boolean> {
+  const admin = createAdminClient();
+
+  const authRes = await admin.auth.admin.getUserById(userId);
+  const appRole = normalizeRole(
+    (authRes.data?.user?.app_metadata as { role?: string } | null | undefined)?.role,
+  );
+  if (appRole === "admin") return true;
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  const profileRole = normalizeRole((profile as { role?: string } | null)?.role);
+  return profileRole === "admin";
+}
+
+function adminOverrideState(): EffectiveBillingState {
+  return {
+    effectiveTier: "enterprise",
+    entitlements: TIER_ENTITLEMENTS.enterprise,
+    status: "admin",
+    interval: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    isPaid: true,
+    accessState: "paid",
+    canUsePremiumNow: true,
+    actionRequired: "none",
+    statusLabel: "Admin override",
+    teamMemberOfOwnerId: null,
+  };
+}
+
 export function isPaidSubscriptionStatus(status: string | null | undefined): boolean {
   return PAID_STATUSES.has(String(status ?? "").toLowerCase());
 }
@@ -180,6 +221,10 @@ export async function getEffectiveBillingState(
   userId: string,
   options?: GetBillingStateOptions,
 ): Promise<EffectiveBillingState> {
+  if (await isAdminUser(userId)) {
+    return adminOverrideState();
+  }
+
   const client = supabase as SubscriptionStateClient;
   const queryResult = await client
     .from("subscriptions")
