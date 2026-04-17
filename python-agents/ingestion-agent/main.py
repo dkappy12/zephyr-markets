@@ -111,6 +111,7 @@ MARKET_INDEX_POLL_MINUTES = 30
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
+STOOQ_EUA_QUOTE_URL = "https://stooq.com/q/l/?s=co2.f&i=d"
 ELEXON_FUELINST_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELINST"
 PV_LIVE_GSP0_URL = "https://api.pvlive.uk/pvlive/api/v4/gsp/0"
 GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
@@ -3196,26 +3197,28 @@ async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
 
     eua_eur_per_t: float | None = None
 
-    # Try Ember Climate API (free, no auth required for basic endpoint)
+    # Fetch EUA from Stooq (co2.f = EUA futures, same source as NBP nf.f)
     try:
-        resp = await http.get(
-            "https://api.ember-climate.org/v2/carbon-price",
-            params={"period": "day", "series": "EUA"},
-            timeout=15.0,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            eua_eur_per_t = _parse_ember_eua_eur_per_t(data)
-            if eua_eur_per_t is not None:
-                logger.info("carbon_cycle: EUA = €%.2f/t from Ember", eua_eur_per_t)
-            else:
-                logger.warning("carbon_cycle: Ember returned 200 but could not parse EUA price. Response: %s", str(data)[:200])
+        resp = await http.get(STOOQ_EUA_QUOTE_URL, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        text = resp.text.strip()
+        lines = text.splitlines()
+        # Stooq returns CSV: Symbol,Date,Open,High,Low,Close,Volume
+        if len(lines) >= 2:
+            fields = lines[1].split(",")
+            if len(fields) >= 6:
+                close_str = fields[5].strip()
+                if close_str and close_str != "N/D":
+                    eua_eur_per_t = float(close_str)
+                    logger.info("carbon_cycle: EUA = €%.2f/t from Stooq co2.f", eua_eur_per_t)
+                else:
+                    logger.warning("carbon_cycle: Stooq co2.f returned N/D or empty close")
         else:
-            logger.warning("carbon_cycle: Ember returned HTTP %s", resp.status_code)
+            logger.warning("carbon_cycle: Stooq co2.f response too short: %s", text[:100])
     except Exception as e:
-        logger.warning("carbon_cycle: Ember API failed: %s", e)
+        logger.warning("carbon_cycle: Stooq EUA fetch failed: %s", e)
 
-    # If Ember failed, try fetching latest from our own DB (keeps last known value)
+    # If primary fetch failed, try fetching latest from our own DB (keeps last known value)
     if eua_eur_per_t is None:
         try:
             resp = await http.get(
