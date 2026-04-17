@@ -446,9 +446,10 @@ function OverviewPageInner() {
   /** Prefer live tape; then premium card row; then raw market field from same API row if score failed to parse. */
   const n2exDisplayPrice =
     n2exPrice ?? marketPrice ?? premiumMarketTapeGbp;
+  /** Always use the live tape price for the gap calculation — never the stale physical_premium.market_price_gbp_mwh */
   const premiumGap =
-    impliedPrice != null && marketPrice != null
-      ? impliedPrice - marketPrice
+    impliedPrice != null && n2exDisplayPrice != null
+      ? impliedPrice - n2exDisplayPrice
       : null;
 
   const premiumModelRunLabel = useMemo(() => {
