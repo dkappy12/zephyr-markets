@@ -633,7 +633,11 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
   const discardReason = keep
     ? null
     : isUnsupportedType
-      ? `${rawInstrumentType === "renewable_certificate" ? "Renewable certificates (GOO/REGO)" : rawInstrumentType === "power_option" ? "Power options" : "Gas options"} are not yet supported — P&L cannot be calculated`
+      ? rawInstrumentType === "renewable_certificate"
+        ? "Renewable certificates (GOO/REGO) are not yet supported — P&L cannot be calculated"
+        : rawInstrumentType === "power_option"
+          ? "Power options are not yet supported — P&L cannot be calculated"
+          : "Gas options are not yet supported — P&L cannot be calculated"
       : typeof entry.discard_reason === "string" && entry.discard_reason.trim()
         ? entry.discard_reason.trim()
         : "Non-energy instrument";

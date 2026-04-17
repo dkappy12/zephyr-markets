@@ -31,9 +31,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 const sectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
-const UKA_REF_GBP = 55;
-const EUA_REF_EUR = 72;
-
 function normaliseMarket(value: string | null | undefined):
   | "GB_POWER"
   | "TTF"
@@ -75,8 +72,8 @@ function pricePoints(
   if (market === "NBP") {
     return which === "current" ? lp.nbpPencePerTherm : lp.nbpOpenPencePerTherm;
   }
-  if (market === "UKA") return UKA_REF_GBP;
-  if (market === "EUA") return EUA_REF_EUR;
+  if (market === "UKA") return lp.ukaGbpPerT ?? null;
+  if (market === "EUA") return lp.euaEurPerT ?? null;
   if (market === "OTHER_GAS") {
     const unit = (p.unit ?? "").toLowerCase();
     if (unit.includes("therm")) {
@@ -130,8 +127,14 @@ function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
     const v = lp.nbpPencePerTherm;
     return v != null ? `${v.toFixed(2)}p/th` : "—";
   }
-  if (market === "UKA") return `£${UKA_REF_GBP.toFixed(2)}/t`;
-  if (market === "EUA") return `€${EUA_REF_EUR.toFixed(2)}/t`;
+  if (market === "UKA") {
+    const v = lp?.ukaGbpPerT;
+    return v != null ? `£${v.toFixed(2)}/t` : "—";
+  }
+  if (market === "EUA") {
+    const v = lp?.euaEurPerT;
+    return v != null ? `€${v.toFixed(2)}/t` : "—";
+  }
   if (market === "OTHER_GAS") {
     const unit = (p.unit ?? "").toLowerCase();
     if (unit.includes("therm")) {
@@ -190,7 +193,7 @@ function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
 }
 
 const NO_MARK_SOURCE_TITLE =
-  "No mark source available for this instrument — P&L cannot be calculated. Supported markets: GB Power, TTF, NBP, UKA, EUA.";
+  "No mark source available for this instrument — P&L cannot be calculated.\nSupported markets: GB Power, TTF, NBP, UKA, EUA.";
 
 export function BookPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
@@ -252,6 +255,8 @@ export function BookPageClient() {
       gasLatest,
       gasOpen,
       fxLatest,
+      ukaLatest,
+      euaLatest,
     ] = await Promise.all([
       supabase
         .from("market_prices")
@@ -292,6 +297,20 @@ export function BookPageClient() {
         .order("rate_date", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_eur_per_t, price_date")
+        .eq("hub", "UKA")
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_eur_per_t, price_date")
+        .eq("hub", "EUA")
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const gbp =
@@ -326,6 +345,16 @@ export function BookPageClient() {
       ? ttfEurOpen * gbpPerEur
       : null;
 
+    const ukaGbp = ukaLatest.data
+      ? Number((ukaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+    const euaEur = euaLatest.data
+      ? Number((euaLatest.data as { price_eur_per_t?: unknown }).price_eur_per_t)
+      : NaN;
+    const euaGbp = euaLatest.data
+      ? Number((euaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+
     setLivePrices({
       gbPowerGbpMwh: Number.isFinite(gbp) ? gbp : null,
       gbPowerOpenGbpMwh: Number.isFinite(gbpOpen) ? gbpOpen : null,
@@ -340,6 +369,9 @@ export function BookPageClient() {
           ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
           : null,
       gbpPerEur,
+      ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
+      euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
+      euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
     });
   }, [supabase]);
 
@@ -729,7 +761,6 @@ export function BookPageClient() {
                   }
 
                   const hasMark = hasMarkSource(p, livePrices);
-                  const curStr = formatCurrentPrice(p, livePrices);
                   const curReason = currentMarkReason(p, livePrices);
                   const tFmt =
                     hasMark && total != null ? formatGbpColored(total) : null;
@@ -772,11 +803,13 @@ export function BookPageClient() {
                           !hasMark
                             ? NO_MARK_SOURCE_TITLE
                             : curReason ??
-                              (curStr === "—" ? DASH_MISSING_MARK : undefined)
+                              (formatCurrentPrice(p, livePrices) === "—"
+                                ? DASH_MISSING_MARK
+                                : undefined)
                         }
                       >
-                        {hasMark ? (
-                          curStr
+                        {hasMarkSource(p, livePrices) ? (
+                          formatCurrentPrice(p, livePrices)
                         ) : (
                           <span className="rounded-[3px] bg-[#92400E]/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#92400E]">
                             No mark source
