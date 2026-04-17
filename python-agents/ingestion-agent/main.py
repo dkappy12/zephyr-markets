@@ -3208,6 +3208,10 @@ async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
             eua_eur_per_t = _parse_ember_eua_eur_per_t(data)
             if eua_eur_per_t is not None:
                 logger.info("carbon_cycle: EUA = €%.2f/t from Ember", eua_eur_per_t)
+            else:
+                logger.warning("carbon_cycle: Ember returned 200 but could not parse EUA price. Response: %s", str(data)[:200])
+        else:
+            logger.warning("carbon_cycle: Ember returned HTTP %s", resp.status_code)
     except Exception as e:
         logger.warning("carbon_cycle: Ember API failed: %s", e)
 
