@@ -125,6 +125,9 @@ export type LivePrices = {
   nbpOpenPencePerTherm: number | null;
   /** EUR→GBP for TTF £ bridge and TTF P&amp;L (live from fx_rates or {@link GBP_PER_EUR}). */
   gbpPerEur: number;
+  ukaGbpPerT: number | null;
+  euaEurPerT: number | null;
+  euaGbpPerT: number | null;
 };
 
 /** TTF (and EUR/MWh) P&amp;L in £: diff in EUR/MWh × size, then × `gbpPerEur`. */
