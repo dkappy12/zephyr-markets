@@ -390,7 +390,7 @@ MAX_BACKOFF_SEC = 60.0
 
 SOURCE_LABEL = "Elexon BMRS"
 SIGNAL_TYPE = "remit"
-CONFIDENCE = "HIGH"
+# Confidence is now derived per-notice in classify_confidence()
 
 # -----------------------------------------------------------------------------
 # Logging — structured, Railway-friendly (stdout, no noisy libraries)
@@ -5005,6 +5005,27 @@ def classify_direction(unavailable_mw: float | None) -> str:
     return "neutral"
 
 
+def classify_confidence(unavailable_mw: float | None, unavailability_type: str | None) -> str:
+    """
+    Derive signal confidence from outage size and type.
+    HIGH   — unplanned outage >= 400 MW, or any outage >= 800 MW
+    MEDIUM — unplanned 100-399 MW, or planned 300-799 MW
+    LOW    — small outages, unknown type, or derates < 100 MW
+    """
+    mw = unavailable_mw or 0.0
+    ut = (unavailability_type or "").strip().lower()
+    unplanned = "unplanned" in ut
+    if unplanned and mw >= 400:
+        return "HIGH"
+    if mw >= 800:
+        return "HIGH"
+    if unplanned and mw >= 100:
+        return "MEDIUM"
+    if mw >= 300:
+        return "MEDIUM"
+    return "LOW"
+
+
 def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
     mid = _get_remit_mrid(notice)
     if not mid:
@@ -5012,6 +5033,7 @@ def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     unavailable = _get_float(notice, "unavailableCapacity", "UnavailableCapacity")
+    unavailability_type = _get_str(notice, "unavailabilityType", "UnavailabilityType")
 
     return {
         "remit_message_id": mid,
@@ -5020,7 +5042,7 @@ def notice_to_row(notice: dict[str, Any]) -> dict[str, Any] | None:
         "description": build_description(notice),
         "direction": classify_direction(unavailable),
         "source": SOURCE_LABEL,
-        "confidence": CONFIDENCE,
+        "confidence": classify_confidence(unavailable, unavailability_type),
         "raw_data": notice,
     }
 
