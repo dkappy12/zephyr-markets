@@ -637,51 +637,90 @@ export default function Home() {
                 <div>
                   <p className="font-serif text-4xl text-ink">£22.49</p>
                   <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-ink-mid">
-                    MAE · first 7 days live
+                    Overall MAE · 24 predictions
                   </p>
                 </div>
                 <div>
-                  <p className="font-serif text-4xl text-ink">Nightly</p>
+                  <p className="font-serif text-4xl text-[#8B3A3A]">−£2.37</p>
                   <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-ink-mid">
-                    Coefficient recalibration
+                    Mean bias · slight underestimate
                   </p>
                 </div>
               </div>
             </div>
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
-              <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-light">
-                Meridian · accuracy log
-              </p>
-              <div className="mt-5 space-y-3">
+              <div className="flex items-center justify-between border-b border-ivory-border pb-4">
+                <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-light">
+                  Meridian · live accuracy
+                </p>
+                <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
+                  1 of 18 days
+                </span>
+              </div>
+
+              {/* Top stats row */}
+              <div className="mt-5 grid grid-cols-2 gap-4 border-b border-ivory-border pb-5">
+                <div>
+                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                    Overall MAE
+                  </p>
+                  <p className="mt-1 font-serif text-2xl text-ink">
+                    £22.49<span className="font-sans text-xs text-ink-mid">/MWh</span>
+                  </p>
+                </div>
+                <div>
+                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                    Bias
+                  </p>
+                  <p className="mt-1 font-serif text-2xl text-[#8B3A3A]">
+                    −£2.37<span className="font-sans text-xs text-ink-mid">/MWh</span>
+                  </p>
+                  <p className="mt-0.5 font-sans text-[9px] text-ink-light">
+                    Slight underestimate
+                  </p>
+                </div>
+              </div>
+
+              {/* MAE by regime */}
+              <div className="mt-5">
+                <p className="mb-3 font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                  MAE by regime
+                </p>
                 {[
-                  { date: "18 Apr", mae: "£21.40", regime: "Renewable", bias: "+£23.1" },
-                  { date: "17 Apr", mae: "£19.80", regime: "Transitional", bias: "-£17.2" },
-                  { date: "16 Apr", mae: "£24.60", regime: "Gas-dominated", bias: "-£24.8" },
-                  { date: "15 Apr", mae: "£23.10", regime: "Renewable", bias: "+£21.4" },
-                  { date: "14 Apr", mae: "£22.49", regime: "Transitional", bias: "-£16.9" },
+                  { regime: "Gas-dominated", mae: "£25.13", n: "n=6" },
+                  { regime: "Transitional", mae: "£17.53", n: "n=8" },
+                  { regime: "Renewable", mae: "£24.86", n: "n=10" },
                 ].map((row) => (
                   <div
-                    key={row.date}
-                    className="flex items-center justify-between border-b border-ivory-border pb-3 last:border-0 last:pb-0"
+                    key={row.regime}
+                    className="flex items-center justify-between border-b border-ivory-border py-2.5 last:border-0"
                   >
-                    <span className="font-mono text-[11px] text-ink-mid">{row.date}</span>
-                    <span className="font-mono text-[11px] text-ink-mid">{row.regime}</span>
-                    <span className="font-mono text-[11px] tabular-nums text-ink">
-                      MAE {row.mae}
-                    </span>
-                    <span
-                      className={`font-mono text-[11px] tabular-nums ${
-                        row.bias.startsWith("+") ? "text-bull" : "text-[#8B3A3A]"
-                      }`}
-                    >
-                      {row.bias}
-                    </span>
+                    <span className="text-[12px] text-ink-mid">{row.regime}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-[10px] text-ink-light">{row.n}</span>
+                      <span className="font-mono text-[12px] tabular-nums text-ink">
+                        {row.mae}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
-              <p className="mt-5 text-[10px] leading-relaxed text-ink-light">
+
+              {/* Calibration status */}
+              <div className="mt-5 rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-4 py-3">
+                <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                  Calibration status
+                </p>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-mid">
+                  Coefficient updates are gated. Meridian will not promote new
+                  parameters until sufficient settlement periods are observed.
+                  Currently in warm-up.
+                </p>
+              </div>
+
+              <p className="mt-4 text-[10px] leading-relaxed text-ink-light">
                 Bias is mean signed error (predicted minus actual). Negative = model
-                underestimating. Recalibrates nightly at 02:00 UTC.
+                underestimating market price. Recalibrates nightly at 02:00 UTC.
               </p>
             </div>
           </div>
