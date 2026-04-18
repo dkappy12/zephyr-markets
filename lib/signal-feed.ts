@@ -11,10 +11,20 @@ export type AssetTab =
   | "OTHER";
 
 const CCGT_TAGS = [
-  "DRAXX",
-  "CNQPS",
+  "BLHLB", // Black Hill CCGT
+  "BRGG", // Brigg CCGT
   "CDCL",
+  "DRAXX",
+  "FDUNT", // Ferrybridge CCGT
+  "GRAI", // Grain CCGT
+  "CNQPS",
+  "PETEM", // Peterborough CCGT
   "PEHE",
+  "ROCH", // Roch CCGT
+  "SCCL", // Saltend CCGT
+  "STAY", // Staythorpe (STAY-1, STAY-2, STAY-3, etc.)
+  "TSREP", // Tees CCGT
+  "WBUR", // West Burton B CCGT
   "CARR",
   "ROCK",
   "STAYS",
@@ -82,11 +92,11 @@ const IC_TAGS = [
 /** Weights for impact sort (aligned with desk prioritisation). */
 export const ASSET_TYPE_WEIGHT: Record<Exclude<AssetTab, "ALL">, number> = {
   CCGT: 1.0,
-  WIND: 0.8,
-  NUCLEAR: 1.2,
-  INTERCONNECTOR: 1.1,
-  STORAGE: 0.9,
-  OTHER: 0.5,
+  WIND: 0.7,
+  NUCLEAR: 1.3,
+  INTERCONNECTOR: 1.2,
+  STORAGE: 0.8,
+  OTHER: 0.4,
 };
 
 const TITLE_SEPARATORS = [" — ", " – ", " - "] as const;
@@ -357,38 +367,52 @@ export function impactScore(
   return parsedMw * typeWeight * unplannedMultiplier;
 }
 
+export function estimatePriceImpactGbpMwh(
+  mw: number | null,
+  residualDemandGw: number | null,
+): string | null {
+  if (!mw || mw <= 0 || residualDemandGw == null) return null;
+  const gw = mw / 1000;
+  let slopePerGw: number;
+  if (residualDemandGw < 20) slopePerGw = 2;
+  else if (residualDemandGw < 28) slopePerGw = 5;
+  else if (residualDemandGw < 32) slopePerGw = 15;
+  else slopePerGw = 35;
+  const impact = gw * slopePerGw;
+  if (impact < 0.5) return null;
+  return `~£${impact.toFixed(0)}/MWh estimated price impact`;
+}
+
 export function marketImplication(
   assetType: Exclude<AssetTab, "ALL">,
   mw: number | null,
   unplanned: boolean,
   planned: boolean,
+  residualDemandGw: number | null = null,
 ): string {
   const m = Math.max(0, Math.round(mw ?? 0));
+  let text: string;
   if (assetType === "CCGT" && planned) {
-    return `Planned maintenance — ${m} MW. Absorbed into day-ahead scheduling; expect minimal spot impact.`;
+    text = `Planned maintenance — ${m} MW. Absorbed into day-ahead scheduling; expect minimal spot impact.`;
+  } else if (assetType === "CCGT" && unplanned && m > 500) {
+    text = `Significant thermal loss — ${m} MW removed from dispatch stack. Price supportive at current SRMC levels.`;
+  } else if (assetType === "CCGT" && unplanned && m >= 200) {
+    text = `Moderate thermal loss — ${m} MW offline. Marginal impact; wind output will determine if gas plant fills the gap.`;
+  } else if (assetType === "CCGT" && unplanned) {
+    text = `Minor thermal loss — ${m} MW offline. Likely absorbed with current system margin.`;
+  } else if (assetType === "WIND" && unplanned) {
+    text = `Wind constraint — ${m} MW offline. Reduces renewable oversupply pressure; slightly supportive for gas-marginal periods.`;
+  } else if (assetType === "INTERCONNECTOR" && unplanned) {
+    text = `Import capacity loss — ${m} MW. Reduces GB supply buffer; price impact depends on current import level.`;
+  } else if (assetType === "NUCLEAR") {
+    text = `Nuclear baseload reduction — ${m} MW. Increases residual demand by equivalent amount; gas or imports fill gap.`;
+  } else if (assetType === "STORAGE") {
+    text = `Storage derate — ${m} MW. May widen balancing and intraday spreads around peak periods.`;
+  } else {
+    text = "Monitor for system impact";
   }
-  if (assetType === "CCGT" && unplanned && m > 500) {
-    return `Significant thermal loss — ${m} MW removed from dispatch stack. Price supportive at current SRMC levels.`;
-  }
-  if (assetType === "CCGT" && unplanned && m >= 200) {
-    return `Moderate thermal loss — ${m} MW offline. Marginal impact; wind output will determine if gas plant fills the gap.`;
-  }
-  if (assetType === "CCGT" && unplanned) {
-    return `Minor thermal loss — ${m} MW offline. Likely absorbed with current system margin.`;
-  }
-  if (assetType === "WIND" && unplanned) {
-    return `Wind constraint — ${m} MW offline. Reduces renewable oversupply pressure; slightly supportive for gas-marginal periods.`;
-  }
-  if (assetType === "INTERCONNECTOR" && unplanned) {
-    return `Import capacity loss — ${m} MW. Reduces GB supply buffer; price impact depends on current import level.`;
-  }
-  if (assetType === "NUCLEAR") {
-    return `Nuclear baseload reduction — ${m} MW. Increases residual demand by equivalent amount; gas or imports fill gap.`;
-  }
-  if (assetType === "STORAGE") {
-    return `Storage derate — ${m} MW. May widen balancing and intraday spreads around peak periods.`;
-  }
-  return "Monitor for system impact";
+  const impactHint = estimatePriceImpactGbpMwh(mw, residualDemandGw);
+  return impactHint ? `${text} — ${impactHint}` : text;
 }
 
 export type CapacityHeaderStats = {
