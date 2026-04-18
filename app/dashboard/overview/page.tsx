@@ -449,7 +449,7 @@ function OverviewPageInner() {
 
   const billingBannerCopy =
     billingBanner === "success"
-      ? "Thank you — your subscription is updated. Stripe will email your receipt to your account address. Your plan may take a moment to show everywhere."
+      ? "Thank you — your subscription is updated. Your plan may take a moment to show everywhere."
       : billingBanner === "cancelled"
         ? "Checkout was cancelled. No changes were made to your plan."
         : null;

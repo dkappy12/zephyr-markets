@@ -1437,7 +1437,7 @@ function PlanApiPanel() {
             : isPaidTier
               ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. You will be sent back to Overview when you finish in Stripe."
               + " If you decide not to continue, use the Return link in Stripe’s left sidebar."
-              : "Subscribe in the section below to unlock premium. Stripe emails a receipt after payment."}
+              : "Subscribe in the section below to unlock premium."}
         </p>
         {isPaidTier && !isTeamSeat ? (
           <button
@@ -1474,7 +1474,7 @@ function PlanApiPanel() {
           </p>
           <p className="mt-2 text-xs text-ink-light">
             New subscriptions use Stripe Checkout. After payment you&apos;ll return
-            to Overview with a confirmation — Stripe also emails your receipt.
+            to Overview with a confirmation.
           </p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div className="rounded-[4px] border-[0.5px] border-gold/45 bg-ivory p-5">

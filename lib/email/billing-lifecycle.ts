@@ -43,7 +43,7 @@ export async function sendBillingLifecycleEmail(input: {
           "",
           "Thank you for subscribing to Zephyr.",
           `Current plan: ${plan}.`,
-          "Stripe will send your payment receipt and invoice to this email address.",
+          "You will receive confirmation emails for any billing changes to this address.",
           "",
           `You can manage your billing anytime: ${manageUrl}`,
         ]
@@ -83,7 +83,7 @@ export async function sendBillingLifecycleEmail(input: {
       </p>
       <p style="margin:0 0 12px"><strong>Plan:</strong> ${escapeHtml(plan)}</p>
       <p style="margin:0 0 12px"><strong>Status:</strong> ${escapeHtml(input.status)}</p>
-      <p style="margin:0 0 16px">Stripe will email any applicable receipt/invoice for this change.</p>
+      <p style="margin:0 0 16px">You will receive a confirmation email for this change.</p>
       <p style="margin:0 0 8px">
         <a href="${escapeHtml(manageUrl)}" style="color:#7a5f1a;font-weight:600">Open billing overview</a>
       </p>
