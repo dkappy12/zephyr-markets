@@ -342,10 +342,10 @@ def demand_baseline_gw_utc(hour: int, month: int | None = None) -> float:
     # Apr, May, Sep — base profile
     return base
 
-CLAUDE_BRIEF_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_BRIEF_MODEL = "claude-haiku-4-5-20251001"
 # Further reading step 2 (JSON format only, no tools).
 CLAUDE_ARTICLES_FORMAT_MODEL = "claude-haiku-4-5-20251001"
-BRIEF_SOURCE = "Claude claude-sonnet-4-20250514"
+BRIEF_SOURCE = "Claude claude-haiku-4-5-20251001"
 
 # Further reading: strip articles from these URL substrings before storing (backend guardrail).
 BLOCKED_DOMAINS = [
