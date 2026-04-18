@@ -1,9 +1,9 @@
 "use client";
 
+import { useTheme } from "@/context/ThemeContext";
 import { createClient } from "@/lib/supabase/client";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
-import { useTheme } from "@/context/ThemeContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -341,8 +341,8 @@ function ProfilePanel() {
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full border-[0.5px] transition-colors ${
                   theme === "dark"
-                    ? "border-ink bg-ink"
-                    : "border-ivory-border bg-ivory-dark"
+                    ? "bg-ink border-ink"
+                    : "bg-ivory-dark border-ivory-border"
                 }`}
                 aria-label="Toggle dark mode"
                 aria-pressed={theme === "dark"}
