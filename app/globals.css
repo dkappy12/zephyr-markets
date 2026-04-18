@@ -28,8 +28,44 @@
   --gold: #8c6d1f;
 }
 
+[data-theme="dark"] {
+  --background: #1a1916;
+  --foreground: #f0ebe1;
+  --ivory: #1a1916;
+  --ivory-dark: #221f1b;
+  --ivory-border: #3a3630;
+  --card: #242019;
+  --ink: #f0ebe1;
+  --ink-dark: #f0ebe1;
+  --ink-mid: #a09890;
+  --ink-light: #6b6560;
+  --bull: #1d6b4e;
+  --bear: #9b3d20;
+  --watch: #8c5a0e;
+  --gold: #8c6d1f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #1a1916;
+    --foreground: #f0ebe1;
+    --ivory: #1a1916;
+    --ivory-dark: #221f1b;
+    --ivory-border: #3a3630;
+    --card: #242019;
+    --ink: #f0ebe1;
+    --ink-dark: #f0ebe1;
+    --ink-mid: #a09890;
+    --ink-light: #6b6560;
+    --bull: #1d6b4e;
+    --bear: #9b3d20;
+    --watch: #8c5a0e;
+    --gold: #8c6d1f;
+  }
+}
+
 html {
-  color-scheme: light;
+  color-scheme: light dark;
 }
 
 body {
