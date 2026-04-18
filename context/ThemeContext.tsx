@@ -19,9 +19,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    const effective = getEffectiveTheme();
-    setThemeState(effective);
-    applyTheme(effective);
+    // Defer so we don't setState synchronously in the effect body (react-hooks/set-state-in-effect).
+    queueMicrotask(() => {
+      const effective = getEffectiveTheme();
+      setThemeState(effective);
+      applyTheme(effective);
+    });
 
     // Listen for system preference changes
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
