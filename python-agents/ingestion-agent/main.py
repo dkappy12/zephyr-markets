@@ -160,7 +160,7 @@ PHYSICAL_PREMIUM_POLL_MINUTES = 5
 PREMIUM_MODEL_VERSION = "v1.3.0"
 
 # Kalman filter — initial coefficient state (matches v1.3.0 hand-calibrated values)
-KF_INITIAL_COEFFS = [0.00, 0.50, 1.50, 5.00, 20.00, 2.50, 1.80, 3.50]  # [b1,b2,b3,b4,b5,w1,w2,w3]
+KF_INITIAL_COEFFS = [0.00, 0.50, 1.50, 5.00, 20.00, 3.50, 2.50, 4.50]  # [b1,b2,b3,b4,b5,w1,w2,w3]
 
 # Live coefficient state — updated by Kalman job when a promotion occurs
 # None means use the hardcoded constants in _residual_demand_premium_gbp_mwh
@@ -2808,15 +2808,15 @@ def _wind_price_suppression_gbp_mwh(wind_gw: float) -> float:
     """
     Piecewise wind price suppression effect on implied price.
     Research basis: ECIU (2024/2025), UK DML causal study showing U-shaped relationship.
-    At low penetration: moderate suppression ~£2.5/GW
-    At mid penetration (5-15 GW): lower suppression ~£1.8/GW (saturation effect)
-    At high penetration (>15 GW): stronger suppression ~£3.5/GW (merit-order intensifies)
+    At low penetration: moderate suppression ~£3.5/GW
+    At mid penetration (5-15 GW): lower suppression ~£2.5/GW (saturation effect)
+    At high penetration (>15 GW): stronger suppression ~£4.5/GW (merit-order intensifies)
     Applied as a downward adjustment to the gas-dominated implied price.
     """
     if _KALMAN_LIVE_COEFFS is not None:
         w1, w2, w3 = _KALMAN_LIVE_COEFFS[5:]
     else:
-        w1, w2, w3 = 2.50, 1.80, 3.50
+        w1, w2, w3 = 3.50, 2.50, 4.50
 
     if wind_gw <= 0:
         return 0.0
