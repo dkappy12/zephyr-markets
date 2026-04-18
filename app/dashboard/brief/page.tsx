@@ -257,7 +257,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 
   const content = (
     <>
-      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-ivory sm:h-36 sm:w-64">
+      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg sm:h-36 sm:w-64">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={thumb}
