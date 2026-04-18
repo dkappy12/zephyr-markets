@@ -639,20 +639,6 @@ export default function Home() {
               <p className="mt-3 text-sm leading-relaxed text-ink-mid">
                 Most analytics platforms don&apos;t publish their own accuracy. We do.
               </p>
-              <div className="mt-8 grid grid-cols-2 gap-6 border-t border-ivory-border pt-8">
-                <div>
-                  <p className="font-serif text-4xl text-ink">£22.49</p>
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-ink-mid">
-                    Overall MAE · 24 predictions
-                  </p>
-                </div>
-                <div>
-                  <p className="font-serif text-4xl text-[#8B3A3A]">−£2.37</p>
-                  <p className="mt-1 text-[11px] uppercase tracking-[0.1em] text-ink-mid">
-                    Mean bias · slight underestimate
-                  </p>
-                </div>
-              </div>
             </div>
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
               <div className="flex items-center justify-between border-b border-ivory-border pb-4">
