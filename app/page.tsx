@@ -913,7 +913,7 @@ export default function Home() {
 
 function LandingDataPanel() {
   return (
-    <div className="flex h-full flex-col justify-between rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
+    <div className="flex h-full flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-ivory-border pb-3">
         <span className="text-[9px] uppercase tracking-[0.18em] text-ink-light">
@@ -943,19 +943,26 @@ function LandingDataPanel() {
         ))}
       </div>
 
+      <div className="my-4 border-t border-ivory-border" />
+
       {/* Physical generation block */}
       <div className="space-y-2">
         {[
-          { label: "GB wind", value: "8.2 GW" },
-          { label: "GB solar", value: "1.1 GW" },
-          { label: "Residual demand", value: "22.4 GW" },
+          { label: "GB wind", value: "8.2 GW", color: "" },
+          { label: "GB solar", value: "1.1 GW", color: "" },
+          { label: "Residual demand", value: "22.4 GW", color: "" },
+          { label: "Wind vs 7d avg", value: "+1.5 GW", color: "text-bull" },
         ].map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-4">
             <span className="text-[10px] text-ink-light">{row.label}</span>
-            <span className="text-[11px] tabular-nums text-ink">{row.value}</span>
+            <span className={`text-[11px] tabular-nums ${row.color || "text-ink"}`}>
+              {row.value}
+            </span>
           </div>
         ))}
       </div>
+
+      <div className="my-4 border-t border-ivory-border" />
 
       {/* Gas & market block */}
       <div className="space-y-2">
@@ -964,6 +971,8 @@ function LandingDataPanel() {
           { label: "NBP", value: "95.10 p/therm" },
           { label: "REMIT signals 24h", value: "19" },
           { label: "Unplanned MW", value: "3,240 MW" },
+          { label: "EU storage", value: "38.4% full" },
+          { label: "GBP/EUR", value: "1.182" },
         ].map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-4">
             <span className="text-[10px] text-ink-light">{row.label}</span>
@@ -971,6 +980,8 @@ function LandingDataPanel() {
           </div>
         ))}
       </div>
+
+      <div className="my-4 border-t border-ivory-border" />
 
       {/* Active REMIT block */}
       <div>
@@ -1004,7 +1015,7 @@ function LandingDataPanel() {
       </div>
 
       {/* Bridge element — pinned to bottom */}
-      <div className="pt-4">
+      <div className="mt-8">
         <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
