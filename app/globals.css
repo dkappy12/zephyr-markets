@@ -6,8 +6,20 @@
 @theme inline {
   --font-dm-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-cormorant: "Cormorant Garamond", ui-serif, Georgia, serif;
-  --color-background: #f5f0e8;
-  --color-foreground: #2c2a26;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-ivory: var(--ivory);
+  --color-ivory-dark: var(--ivory-dark);
+  --color-ivory-border: var(--ivory-border);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-dark: var(--ink-dark);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-light: var(--ink-light);
+  --color-bull: var(--bull);
+  --color-bear: var(--bear);
+  --color-watch: var(--watch);
+  --color-gold: var(--gold);
 }
 
 :root {
