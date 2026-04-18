@@ -5230,6 +5230,7 @@ def main() -> None:
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
     # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
+    schedule.every(2).minutes.do(scheduled_morning_brief)
     schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
     schedule.every().day.at("02:05").do(scheduled_kalman_calibration)
 
