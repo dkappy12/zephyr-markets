@@ -230,13 +230,11 @@ const snippetClampStyle: CSSProperties = {
 
 /**
  * Further reading: include an article only if it has its own remote thumbnail URL.
- * Anything else (missing URL, generic placeholder asset, non-http(s) URL) is
- * excluded — those articles are not shown in the brief at all.
+ * Missing or invalid http(s) URLs are excluded — those articles are not shown.
  */
 function hasDisplayableThumbnail(article: BriefArticle): boolean {
   const t = article.thumbnail_url?.trim();
   if (!t) return false;
-  if (t.toLowerCase().includes("article-placeholder")) return false;
   try {
     const u = new URL(t.startsWith("//") ? `https:${t}` : t);
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;

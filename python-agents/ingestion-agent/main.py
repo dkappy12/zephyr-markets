@@ -4031,8 +4031,6 @@ def _thumbnail_url_is_valid_for_brief(url: str | None) -> bool:
     t = url.strip()
     if not t:
         return False
-    if "article-placeholder" in t.lower():
-        return False
     try:
         p = urlparse(t)
         return p.scheme in ("http", "https") and bool(p.netloc)
