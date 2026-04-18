@@ -591,7 +591,14 @@ export default function Home() {
                     market is underpricing tightness risk by £17/MWh. The short 25,000
                     therm NBP Winter 2026 is correctly positioned given
                     temperature-suppressed demand; TTF at €50/MWh with weak heating
-                    load supports the bias.
+                    load supports the bias. Both carbon positions are immaterial to
+                    this morning&apos;s regime. Single largest risk: 3,240 MW of
+                    unplanned REMIT capacity active — any resolution could compress the
+                    premium gap immediately.
+                  </p>
+                  <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
+                    Personalised to: Long 50 MW GB Power Q3 2026 · Short 25,000 therm
+                    NBP Winter 2026 · Long 700 tco2 UKA Dec-2026
                   </p>
                 </div>
               </div>
