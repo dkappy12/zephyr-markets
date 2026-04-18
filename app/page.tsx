@@ -596,13 +596,13 @@ export default function Home() {
                     </p>
                     <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
                       The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
-                      well-supported — today&apos;s physical conditions suggest the
+                      well-supported. Today&apos;s physical conditions suggest the
                       market is underpricing tightness risk by £17/MWh. The short 25,000
                       therm NBP Winter 2026 is correctly positioned given
                       temperature-suppressed demand; TTF at €50/MWh with weak heating load
                       supports the bias. Both carbon positions are immaterial to this
                       morning&apos;s regime. Single largest risk: 3,240 MW of unplanned
-                      REMIT capacity active — any resolution could compress the premium
+                      REMIT capacity active; any resolution could compress the premium
                       gap immediately.
                     </p>
                     <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
@@ -745,7 +745,6 @@ export default function Home() {
               cta="Get Pro"
               href="/signup?plan=pro"
               emphasis
-              footnote="Reserve your place."
             />
             <PricingCard
               name="Team"
@@ -755,7 +754,6 @@ export default function Home() {
               cta="Get Team"
               href="/signup?plan=team"
               emphasis={false}
-              footnote="Reserve your place."
             />
           </div>
           <p className="mt-10 text-center text-sm text-ink-light">
