@@ -17,6 +17,7 @@ import {
   buildCapacityHeaderStats,
   classifyAssetType,
   dedupeByAsset,
+  estimatePriceImpactGbpMwh,
   eventLabelFromTitle,
   impactScore,
   isActiveOutage,
@@ -101,9 +102,11 @@ function severityPillClass(s: "HIGH" | "MEDIUM" | "LOW"): string {
 function StructuredSignalCard({
   item,
   muted,
+  residualDemandGw,
 }: {
   item: DedupedSignal;
   muted: boolean;
+  residualDemandGw: number | null;
 }) {
   const { latest, updateCount, asset } = item;
   const titleAsset = assetNameFromTitle(latest.title);
@@ -126,6 +129,7 @@ function StructuredSignalCard({
     unplanned,
     planned,
   );
+  const priceImpact = estimatePriceImpactGbpMwh(mw, residualDemandGw);
 
   const offlineStr =
     mw != null ? `${formatMw(mw)} MW offline` : "Capacity impact unknown";
@@ -243,6 +247,11 @@ function StructuredSignalCard({
         style={{ borderColor: BRAND_GREEN }}
       >
         {implication}
+        {priceImpact ? (
+          <span className="ml-1 not-italic font-medium text-ink-mid">
+            · {priceImpact}
+          </span>
+        ) : null}
       </p>
     </article>
   );
@@ -258,6 +267,9 @@ export default function SignalFeedPage() {
   const [showCleared, setShowCleared] = useState(false);
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
+  const [residualDemandGw, setResidualDemandGw] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     let active = true;
@@ -344,6 +356,21 @@ export default function SignalFeedPage() {
   useEffect(() => {
     const t = setInterval(() => setNowTs(Date.now()), 60_000);
     return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    supabase
+      .from("physical_premium")
+      .select("residual_demand_gw")
+      .order("calculated_at", { ascending: false })
+      .limit(1)
+      .single()
+      .then(({ data }) => {
+        if (data?.residual_demand_gw != null) {
+          setResidualDemandGw(Number(data.residual_demand_gw));
+        }
+      });
   }, []);
 
   const headerStats = useMemo(
@@ -565,6 +592,7 @@ export default function SignalFeedPage() {
                 <StructuredSignalCard
                   item={item}
                   muted={isOutageExpired(item.latest, new Date())}
+                  residualDemandGw={residualDemandGw}
                 />
               </motion.div>
             ))}
