@@ -9,7 +9,6 @@ import {
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import Image from "next/image";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -229,43 +228,47 @@ const snippetClampStyle: CSSProperties = {
   overflow: "hidden",
 };
 
-/** Served from /public/images/article-placeholder.png — replace that file to change artwork. */
-const ARTICLE_THUMB_PLACEHOLDER = "/images/article-placeholder.png";
+/**
+ * Further reading: include an article only if it has its own remote thumbnail URL.
+ * Anything else (missing URL, generic placeholder asset, non-http(s) URL) is
+ * excluded — those articles are not shown in the brief at all.
+ */
+function hasDisplayableThumbnail(article: BriefArticle): boolean {
+  const t = article.thumbnail_url?.trim();
+  if (!t) return false;
+  if (t.toLowerCase().includes("article-placeholder")) return false;
+  try {
+    const u = new URL(t.startsWith("//") ? `https:${t}` : t);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
 
 function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
   const [imgFailed, setImgFailed] = useState(false);
   const href = normalizeArticleHref(article.url);
   const thumb = article.thumbnail_url?.trim();
-  const showImg = Boolean(thumb) && !imgFailed;
 
   const cardClass =
     "flex gap-4 rounded-lg border border-stone-200 p-4 transition-all duration-150 hover:border-stone-400 hover:shadow-md";
 
+  /** Parent filters with {@link hasDisplayableThumbnail}; if the image still fails to load, hide the whole card. */
+  if (!hasDisplayableThumbnail(article) || imgFailed) return null;
+
   const content = (
     <>
       <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#f5f0e8] sm:h-36 sm:w-64">
-        {showImg ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={thumb}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover"
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            onError={() => setImgFailed(true)}
-          />
-        ) : (
-          <Image
-            src={ARTICLE_THUMB_PLACEHOLDER}
-            alt=""
-            fill
-            sizes="(max-width: 640px) 224px, 256px"
-            className="object-contain object-center"
-            unoptimized
-            draggable={false}
-            priority={false}
-          />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={thumb}
+          alt=""
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onError={() => setImgFailed(true)}
+        />
       </div>
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-start justify-between">
@@ -578,6 +581,7 @@ export default function BriefPage() {
   const articles: BriefArticle[] = Array.isArray(row?.articles)
     ? row!.articles!
     : [];
+  const articlesWithThumbnails = articles.filter(hasDisplayableThumbnail);
 
   const headerTime =
     row?.generated_at != null
@@ -785,8 +789,8 @@ export default function BriefPage() {
           <div className="mt-4 space-y-4">
             {loading ? (
               <p className="text-ink-mid">…</p>
-            ) : articles.length > 0 ? (
-              articles.map((article, index) => (
+            ) : articlesWithThumbnails.length > 0 ? (
+              articlesWithThumbnails.map((article, index) => (
                 <FurtherReadingArticleCard
                   key={
                     normalizeArticleHref(article.url) ??
@@ -796,7 +800,10 @@ export default function BriefPage() {
                 />
               ))
             ) : (
-              <p className="text-[13px] text-ink-mid">No articles linked yet.</p>
+              <p className="text-[13px] text-ink-mid">
+                No further-reading items with preview images yet — the morning brief
+                usually lists 3–5 once today&apos;s run completes.
+              </p>
             )}
           </div>
         </div>

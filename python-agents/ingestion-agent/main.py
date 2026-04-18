@@ -4021,7 +4021,65 @@ def _repair_brief_articles_with_search_urls(
                 a["url"] = fixed
                 pi += 1
                 out.append(a)
-    return out[:8]
+    return out[:30]
+
+
+def _thumbnail_url_is_valid_for_brief(url: str | None) -> bool:
+    """True if we can show this URL as an article card image (https og:image)."""
+    if not url or not isinstance(url, str):
+        return False
+    t = url.strip()
+    if not t:
+        return False
+    if "article-placeholder" in t.lower():
+        return False
+    try:
+        p = urlparse(t)
+        return p.scheme in ("http", "https") and bool(p.netloc)
+    except Exception:
+        return False
+
+
+async def _collect_brief_articles_with_thumbnails(
+    http: httpx.AsyncClient,
+    articles: list[dict[str, Any]],
+    *,
+    min_count: int = 3,
+    max_count: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Walk candidates in order (newest first). Keep only articles where og:image
+    resolves to a usable thumbnail. Stop at max_count. Target min_count–max_count
+    for the daily brief further-reading rail.
+    """
+    og_cache: dict[str, str | None] = {}
+    out: list[dict[str, Any]] = []
+    for a in articles:
+        if not isinstance(a, dict):
+            continue
+        if len(out) >= max_count:
+            break
+        raw_u = a.get("url")
+        if not isinstance(raw_u, str) or not raw_u.strip():
+            continue
+        page_url = raw_u.strip()
+        if page_url not in og_cache:
+            og_cache[page_url] = await _fetch_og_image(http, page_url)
+        og = og_cache[page_url]
+        if og and _thumbnail_url_is_valid_for_brief(og):
+            row = dict(a)
+            row["thumbnail_url"] = og
+            out.append(row)
+    if len(out) < min_count:
+        logger.warning(
+            "further reading: only %d articles with valid og thumbnails "
+            "(target %d–%d); candidates=%d",
+            len(out),
+            min_count,
+            max_count,
+            len([x for x in articles if isinstance(x, dict)]),
+        )
+    return out
 
 
 async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
@@ -4172,6 +4230,8 @@ Summarise your findings in plain English. For each piece, include headline, publ
 
 Only include articles published within the last 7 days. Today is {_today_short}. Exclude any article that appears older than 7 days. Order the array with the most recently published articles first.
 
+Include **10 to 15** distinct articles in the array (the product shows 3–5 with preview images; extras are fallback candidates).
+
 Do not include entries whose URL points to excluded domains (e.g. state-controlled or activist outlets listed in the search instructions). Prefer editorially independent news and official regulatory sources (Ofgem, NESO, GOV.UK).
 
 CRITICAL for "url":
@@ -4196,7 +4256,7 @@ Required JSON format:
 ]"""
     body_format: dict[str, Any] = {
         "model": CLAUDE_ARTICLES_FORMAT_MODEL,
-        "max_tokens": 1500,
+        "max_tokens": 4500,
         "system": "You are a JSON formatter. You output only valid JSON arrays, nothing else.",
         "messages": [{"role": "user", "content": format_user}],
     }
@@ -4648,18 +4708,17 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             if nu:
                 article["url"] = nu
 
-        # Fetch og:image for each article with a URL; set thumbnail_url before insert
-        for article in articles:
-            if not isinstance(article, dict):
-                continue
-            u = article.get("url")
-            if isinstance(u, str) and u.strip():
-                og = await _fetch_og_image(http, u.strip())
-                article["thumbnail_url"] = og
+        # Keep 3–5 further-reading items, each with a verified og:image (drop the rest).
+        articles = await _collect_brief_articles_with_thumbnails(
+            http,
+            articles,
+            min_count=3,
+            max_count=5,
+        )
 
         logger.info(
-            "og:image fetch complete, inserting brief with thumbnails: %s",
-            [a.get("thumbnail_url") for a in articles],
+            "further reading: inserting %s articles (each with og thumbnail)",
+            len(articles),
         )
 
         row = {
