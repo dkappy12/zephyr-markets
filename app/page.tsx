@@ -469,7 +469,7 @@ export default function Home() {
       </section>
 
       <section className="border-b-[0.5px] border-ivory-border bg-card/80 py-16 sm:py-24">
-        <div className="mx-auto max-w-[720px] px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -485,14 +485,16 @@ export default function Home() {
               positions.
             </p>
           </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.45, delay: 0.05 }}
-            className="mt-10"
-          >
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8">
+          <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-5 lg:items-start">
+            <LandingFurtherReading />
+            <div className="order-1 lg:order-2 lg:col-span-3">
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-40px" }}
+                transition={{ duration: 0.45, delay: 0.05 }}
+              >
+                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8">
               <div className="flex items-center justify-between border-b border-ivory-border pb-4">
                 <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-mid">
                   Morning brief · 06:00 GMT
@@ -602,8 +604,10 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+                </div>
+              </motion.div>
             </div>
-          </motion.div>
+          </div>
         </div>
       </section>
 
@@ -858,6 +862,92 @@ export default function Home() {
           </div>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function LandingFurtherReading() {
+  const articles = [
+    {
+      publication: "Reorg Energy",
+      date: "18 Apr 2026",
+      headline:
+        "GB wind capture rates fall to 81% as spring oversupply deepens",
+      snippet:
+        "Negative pricing hours reached 176 in 2024 and are tracking above that pace in Q1 2026, as curtailment costs and CfD payment suspension during negative periods reshape generator dispatch incentives.",
+    },
+    {
+      publication: "Cornwall Insight",
+      date: "17 Apr 2026",
+      headline:
+        "CCGT spark spreads turn negative for third consecutive week amid high wind output",
+      snippet:
+        "Clean spark spreads fell to −£3.40/MWh on Tuesday as TTF softened to €41/MWh and wind generation averaged 11.2 GW across the trading day, pushing gas plant to the margin of dispatch.",
+    },
+    {
+      publication: "NESO",
+      date: "16 Apr 2026",
+      headline:
+        "Demand Flexibility Service: Q2 2026 procurement and settlement update",
+      snippet:
+        "National Energy System Operator published Q2 procurement volumes and clearing prices for the Demand Flexibility Service, with 1.4 GW secured at a weighted average of £3.20/MWh.",
+    },
+  ];
+
+  return (
+    <div className="order-2 lg:order-1 lg:col-span-2">
+      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-light">
+        Further reading
+      </p>
+      <div className="mt-4 space-y-4">
+        {articles.map((a, i) => (
+          <div
+            key={i}
+            className="flex cursor-default gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4"
+          >
+            {/* Thumbnail placeholder */}
+            <div className="flex h-20 w-28 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-ivory-dark">
+              <div className="h-full w-full bg-gradient-to-br from-ivory-dark to-ivory-border opacity-60" />
+            </div>
+            {/* Text */}
+            <div className="min-w-0 flex-1">
+              <div className="mb-1.5 flex items-start justify-between gap-2">
+                <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ink-light">
+                  {a.publication}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-ink-light">
+                  {a.date}
+                </span>
+              </div>
+              <p
+                className="mb-1.5 font-serif text-[15px] leading-snug text-ink"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {a.headline}
+              </p>
+              <p
+                className="text-[11px] leading-relaxed text-ink-mid"
+                style={{
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+              >
+                {a.snippet}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-[10px] italic leading-relaxed text-ink-light">
+        Articles curated by Meridian each morning. Illustrative examples shown.
+      </p>
     </div>
   );
 }
