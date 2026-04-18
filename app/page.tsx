@@ -913,7 +913,7 @@ export default function Home() {
 
 function LandingDataPanel() {
   return (
-    <div className="flex h-full flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
+    <div className="flex h-full flex-col justify-between rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-ivory-border pb-3">
         <span className="text-[9px] uppercase tracking-[0.18em] text-ink-light">
@@ -943,8 +943,6 @@ function LandingDataPanel() {
         ))}
       </div>
 
-      <div className="my-4 border-t border-ivory-border" />
-
       {/* Physical generation block */}
       <div className="space-y-2">
         {[
@@ -958,8 +956,6 @@ function LandingDataPanel() {
           </div>
         ))}
       </div>
-
-      <div className="my-4 border-t border-ivory-border" />
 
       {/* Gas & market block */}
       <div className="space-y-2">
@@ -975,8 +971,6 @@ function LandingDataPanel() {
           </div>
         ))}
       </div>
-
-      <div className="my-4 border-t border-ivory-border" />
 
       {/* Active REMIT block */}
       <div>
@@ -1010,7 +1004,7 @@ function LandingDataPanel() {
       </div>
 
       {/* Bridge element — pinned to bottom */}
-      <div className="mt-auto pt-6">
+      <div className="pt-4">
         <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
