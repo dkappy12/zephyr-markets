@@ -4177,7 +4177,21 @@ async def _anthropic_further_reading_articles(
         "anthropic-beta": "web-search-2025-03-05",
         "content-type": "application/json",
     }
-    search_prompt = f"""Search for news articles published in the last 7 days. Today's date is {_today_long}. Do not include any articles older than 7 days. Prioritise the most recent articles first in how you order and emphasise your findings (newest and most relevant at the top). If you cannot find suitable articles on a topic within that window, skip it rather than returning out-of-date pieces. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources: BBC News, The Guardian, Carbon Brief, Energy Monitor, Recharge News, Energy Voice, PV Magazine, Wind Power Monthly, Montel News, Cornwall Insight blog, NESO blog (nationalgrideso.com), Ofgem news (ofgem.gov.uk), GOV.UK press releases. Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
+    search_prompt = f"""Search for news articles published in the last 7 days. Today's date is {_today_long}. Do not include any articles older than 7 days. Prioritise the most recent articles first in how you order and emphasise your findings (newest and most relevant at the top). If you cannot find suitable articles on a topic within that window, skip it rather than returning out-of-date pieces. Only include articles from FREE publicly accessible sources with no paywall or login required. Good sources (prioritise these in order — they consistently provide preview images):
+1. BBC News (bbc.co.uk/news) — always has og:image
+2. The Guardian (theguardian.com) — always has og:image
+3. Recharge News (rechargenews.com) — reliable og:image
+4. Energy Monitor (energymonitor.ai) — reliable og:image
+5. Carbon Brief (carbonbrief.org) — reliable og:image
+6. Energy Voice (energyvoice.com) — reliable og:image
+7. PV Magazine (pv-magazine.com) — reliable og:image
+8. Wind Power Monthly (windpowermonthly.com) — reliable og:image
+9. NESO blog (nationalgrideso.com) — reliable og:image
+10. Ofgem news (ofgem.gov.uk) — reliable og:image
+11. GOV.UK press releases — reliable og:image
+Deprioritise: Cornwall Insight blog, Montel News, Wind Power Monthly (these often lack preview images).
+Always aim to find at least 8 candidate articles so that after image filtering 5 remain.
+Do NOT include Bloomberg, Reuters, Financial Times, S&P Global Platts, ICIS, Argus Media, or any paywalled source.
 
 STRICTLY EXCLUDE articles from these sources and domains: wafa.ps, WAFA, Palestine News Agency, Al Jazeera, Press TV, RT (Russia Today), Sputnik, any state-controlled media, any news agency affiliated with a government or political organisation, any activist or advocacy publication. Only include editorially independent journalism and official regulatory/government sources (Ofgem, NESO, GOV.UK).
 
