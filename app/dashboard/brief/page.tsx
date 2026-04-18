@@ -257,7 +257,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
 
   const content = (
     <>
-      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-[#f5f0e8] sm:h-36 sm:w-64">
+      <div className="relative h-32 w-56 shrink-0 overflow-hidden rounded-lg bg-ivory sm:h-36 sm:w-64">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={thumb}
@@ -269,40 +269,28 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
         />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-start justify-between">
-          <span
-            style={{
-              fontSize: "10px",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "#9ca3af",
-            }}
-          >
+        <div className="mb-1 flex items-start justify-between gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-light">
             {article.publication}
           </span>
-          <span
-            style={{
-              fontSize: "11px",
-              color: "#9ca3af",
-              flexShrink: 0,
-              marginLeft: "8px",
-            }}
-          >
+          <span className="font-mono text-[10px] text-ink-light shrink-0">
             {article.published_date || ""}
           </span>
         </div>
-        <div
+        <p
+          className="font-serif text-[16px] leading-snug text-ink mb-1.5"
           style={{
-            fontSize: "16px",
-            fontFamily: "Cormorant Garamond, serif",
-            color: "#1a1a0e",
-            marginBottom: "6px",
-            lineHeight: 1.3,
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
           }}
         >
           {article.headline}
-        </div>
-        <div style={snippetClampStyle}>{article.snippet}</div>
+        </p>
+        <p className="text-[11px] leading-relaxed text-ink-mid" style={snippetClampStyle}>
+          {article.snippet}
+        </p>
       </div>
     </>
   );
