@@ -1016,7 +1016,7 @@ function LandingDataPanel() {
       </div>
 
       {/* Bridge element — pinned to bottom */}
-      <div className="mt-4">
+      <div className="mt-4 flex flex-1 flex-col justify-end">
         <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
