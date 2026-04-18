@@ -4025,7 +4025,7 @@ def _repair_brief_articles_with_search_urls(
 
 
 def _thumbnail_url_is_valid_for_brief(url: str | None) -> bool:
-    """True if we can show this URL as an article card image (https og:image)."""
+    """True if URL is http(s) with a host — used for og:image URLs parsed from the article page."""
     if not url or not isinstance(url, str):
         return False
     t = url.strip()
@@ -4038,6 +4038,79 @@ def _thumbnail_url_is_valid_for_brief(url: str | None) -> bool:
         return False
 
 
+def _parse_og_image_from_html(html: str, page_url: str) -> str | None:
+    """Extract best preview image URL from HTML (Open Graph, Twitter, link rel)."""
+    patterns = (
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        r'<meta[^>]+property=["\']og:image:secure_url["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image:secure_url["\']',
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+        r'<meta[^>]+name=["\']twitter:image:src["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']',
+    )
+    for pat in patterns:
+        match = re.search(pat, html, re.IGNORECASE)
+        if match:
+            raw_img = match.group(1).strip()
+            if raw_img:
+                out = _resolve_to_absolute_url(page_url, raw_img)
+                if _thumbnail_url_is_valid_for_brief(out):
+                    return out
+    return None
+
+
+_HTML_HEADERS_PRIMARY = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+_HTML_HEADERS_ALT = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.2 Safari/605.1.15"
+    ),
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+
+async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
+    page_url = url.strip() if isinstance(url, str) else ""
+    if not page_url:
+        return None
+    try:
+        resp = await http.get(
+            page_url,
+            timeout=12.0,
+            follow_redirects=True,
+            headers=_HTML_HEADERS_PRIMARY,
+        )
+        if resp.status_code == 403:
+            resp = await http.get(
+                page_url,
+                timeout=12.0,
+                follow_redirects=True,
+                headers=_HTML_HEADERS_ALT,
+            )
+        if resp.status_code != 200:
+            return None
+        html = resp.text
+        return _parse_og_image_from_html(html, page_url)
+    except Exception as e:
+        logger.debug("og:image fetch failed for %s: %s", url, e)
+    return None
+
+
 async def _collect_brief_articles_with_thumbnails(
     http: httpx.AsyncClient,
     articles: list[dict[str, Any]],
@@ -4046,9 +4119,9 @@ async def _collect_brief_articles_with_thumbnails(
     max_count: int = 5,
 ) -> list[dict[str, Any]]:
     """
-    Walk candidates in order (newest first). Keep only articles where og:image
-    resolves to a usable thumbnail. Stop at max_count. Target min_count–max_count
-    for the daily brief further-reading rail.
+    Walk candidates in order (newest first). Keep an article only if we fetch its
+    HTML and extract a real preview image (Open Graph / Twitter / image_src from
+    that page). No other thumbnail source.
     """
     og_cache: dict[str, str | None] = {}
     out: list[dict[str, Any]] = []
@@ -4070,7 +4143,7 @@ async def _collect_brief_articles_with_thumbnails(
             out.append(row)
     if len(out) < min_count:
         logger.warning(
-            "further reading: only %d articles with valid og thumbnails "
+            "further reading: only %d articles with og/twitter preview from page HTML "
             "(target %d–%d); candidates=%d",
             len(out),
             min_count,
@@ -4078,56 +4151,6 @@ async def _collect_brief_articles_with_thumbnails(
             len([x for x in articles if isinstance(x, dict)]),
         )
     return out
-
-
-async def _fetch_og_image(http: httpx.AsyncClient, url: str) -> str | None:
-    page_url = url.strip() if isinstance(url, str) else ""
-    if not page_url:
-        return None
-    try:
-        resp = await http.get(
-            page_url,
-            timeout=8.0,
-            follow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-            },
-        )
-        if resp.status_code != 200:
-            return None
-        html = resp.text
-        match = re.search(
-            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-            html,
-            re.IGNORECASE,
-        )
-        if not match:
-            match = re.search(
-                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-                html,
-                re.IGNORECASE,
-            )
-        if not match:
-            match = re.search(
-                r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-                html,
-                re.IGNORECASE,
-            )
-        if not match:
-            match = re.search(
-                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
-                html,
-                re.IGNORECASE,
-            )
-        if match:
-            raw_img = match.group(1).strip()
-            return _resolve_to_absolute_url(page_url, raw_img)
-    except Exception as e:
-        logger.debug("og:image fetch failed for %s: %s", url, e)
-    return None
 
 
 async def _anthropic_further_reading_articles(
@@ -4706,7 +4729,7 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
             if nu:
                 article["url"] = nu
 
-        # Keep 3–5 further-reading items, each with a verified og:image (drop the rest).
+        # Keep 3–5 further-reading items, each thumbnail parsed from the article HTML.
         articles = await _collect_brief_articles_with_thumbnails(
             http,
             articles,
@@ -4715,7 +4738,7 @@ Do not use markdown bold or headings other than the exact headers above. Do not 
         )
 
         logger.info(
-            "further reading: inserting %s articles (each with og thumbnail)",
+            "further reading: inserting %s articles (preview image from article page)",
             len(articles),
         )
 

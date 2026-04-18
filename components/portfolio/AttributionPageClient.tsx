@@ -38,6 +38,7 @@ import { mwDeratedForRow } from "@/lib/signal-feed";
 import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -270,6 +271,21 @@ export function AttributionPageClient() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [persistErr, setPersistErr] = useState<string | null>(null);
   const lastPersistHashRef = useRef<string | null>(null);
+  const [billingChecked, setBillingChecked] = useState(false);
+  const [portfolioEnabled, setPortfolioEnabled] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/billing/status")
+      .then((r) => r.json())
+      .then((body: { entitlements?: { portfolioEnabled?: boolean } }) => {
+        setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
+        setBillingChecked(true);
+      })
+      .catch(() => {
+        setPortfolioEnabled(false);
+        setBillingChecked(true);
+      });
+  }, []);
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
@@ -1097,6 +1113,22 @@ export function AttributionPageClient() {
         <p className="text-sm text-ink-mid">Loading attribution…</p>
       ) : !userId ? (
         <p className="text-sm text-ink-mid">Sign in to view attribution.</p>
+      ) : !billingChecked ? (
+        <p className="text-sm text-ink-mid">Loading…</p>
+      ) : !portfolioEnabled ? (
+        <div className="flex flex-col items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-20 text-center">
+          <p className="font-serif text-2xl text-ink">Portfolio requires Pro</p>
+          <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-mid">
+            Upgrade to Pro to access attribution analysis, risk metrics, and
+            portfolio optimisation.
+          </p>
+          <Link
+            href="/dashboard/settings?tab=plan"
+            className="mt-6 inline-flex items-center rounded-[4px] bg-ink px-5 py-2.5 text-sm font-medium text-ivory transition-colors hover:bg-ink/90"
+          >
+            Upgrade to Pro →
+          </Link>
+        </div>
       ) : !hasPositions ? (
         <div className="flex flex-col items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-16 text-center">
           <p className="font-serif text-xl text-ink">No positions to attribute</p>

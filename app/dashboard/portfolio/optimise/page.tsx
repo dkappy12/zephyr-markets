@@ -4,6 +4,7 @@ import type { HedgeTrade } from "@/lib/portfolio/optimise";
 import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -114,6 +115,21 @@ export default function OptimisePage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
   const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
+  const [billingChecked, setBillingChecked] = useState(false);
+  const [portfolioEnabled, setPortfolioEnabled] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/billing/status")
+      .then((r) => r.json())
+      .then((body: { entitlements?: { portfolioEnabled?: boolean } }) => {
+        setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
+        setBillingChecked(true);
+      })
+      .catch(() => {
+        setPortfolioEnabled(false);
+        setBillingChecked(true);
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +250,26 @@ export default function OptimisePage() {
   }, [data, objective]);
 
   const tailRiskAxisLabel = objective === "cvar" ? "CVaR loss" : "VaR loss";
+
+  if (!billingChecked) return null;
+
+  if (userId && !portfolioEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-20 text-center">
+        <p className="font-serif text-2xl text-ink">Portfolio requires Pro</p>
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-mid">
+          Upgrade to Pro to access attribution analysis, risk metrics, and
+          portfolio optimisation.
+        </p>
+        <Link
+          href="/dashboard/settings?tab=plan"
+          className="mt-6 inline-flex items-center rounded-[4px] bg-ink px-5 py-2.5 text-sm font-medium text-ivory transition-colors hover:bg-ink/90"
+        >
+          Upgrade to Pro →
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
