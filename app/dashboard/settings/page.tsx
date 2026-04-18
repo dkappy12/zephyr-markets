@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
+import { useTheme } from "@/context/ThemeContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -125,7 +126,7 @@ function ProfilePanel() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
+  const { theme, setTheme, resetToSystem } = useTheme();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -332,24 +333,36 @@ function ProfilePanel() {
               <div>
                 <p className="text-sm font-medium text-ink">Dark mode</p>
                 <p className="mt-0.5 text-xs text-ink-light">
-                  Coming soon — toggle will be enabled in a future update.
+                  Follows your system preference by default.
                 </p>
               </div>
               <button
                 type="button"
-                disabled
-                onClick={() => setDarkMode((v) => !v)}
-                className="relative inline-flex h-6 w-11 cursor-not-allowed items-center rounded-full border-[0.5px] border-ivory-border bg-ivory-dark opacity-50 transition-colors"
-                aria-label="Dark mode toggle (coming soon)"
-                aria-pressed={darkMode}
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full border-[0.5px] transition-colors ${
+                  theme === "dark"
+                    ? "border-ink bg-ink"
+                    : "border-ivory-border bg-ivory-dark"
+                }`}
+                aria-label="Toggle dark mode"
+                aria-pressed={theme === "dark"}
               >
                 <span
-                  className={`inline-block h-4 w-4 rounded-full bg-ink-light transition-transform ${
-                    darkMode ? "translate-x-6" : "translate-x-1"
+                  className={`inline-block h-4 w-4 rounded-full transition-transform ${
+                    theme === "dark"
+                      ? "translate-x-6 bg-ivory"
+                      : "translate-x-1 bg-ink-light"
                   }`}
                 />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={resetToSystem}
+              className="mt-3 text-[10px] uppercase tracking-[0.1em] text-ink-light transition-colors hover:text-ink-mid"
+            >
+              Reset to system default
+            </button>
           </div>
 
           <div className="mt-8 border-t-[0.5px] border-ivory-border pt-6">
