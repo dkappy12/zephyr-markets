@@ -468,8 +468,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-b-[0.5px] border-ivory-border bg-card/80 py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-4 sm:px-8 lg:px-12">
+      <section className="border-b-[0.5px] border-ivory-border bg-ivory-dark/40 py-16 sm:py-24">
+        <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-16">
           {/* Heading — full width, centred */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -495,7 +495,7 @@ export default function Home() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-40px" }}
               transition={{ duration: 0.45, delay: 0.05 }}
-              className="lg:col-span-2"
+              className="lg:col-span-2 lg:self-stretch"
             >
               <LandingDataPanel />
             </motion.div>
@@ -913,7 +913,7 @@ export default function Home() {
 
 function LandingDataPanel() {
   return (
-    <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5 font-mono">
+    <div className="h-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-ivory-border pb-3">
         <span className="text-[9px] uppercase tracking-[0.18em] text-ink-light">
@@ -928,11 +928,11 @@ function LandingDataPanel() {
       {/* Premium & price block */}
       <div className="mt-4 space-y-2">
         {[
-          { label: "Regime", value: "Transitional", color: "" },
-          { label: "Premium score", value: "−3.1  Softening", color: "text-[#8B3A3A]" },
-          { label: "Implied price", value: "£76.49/MWh", color: "" },
-          { label: "N2EX", value: "£78.21/MWh", color: "" },
-          { label: "SRMC", value: "£82.40/MWh", color: "" },
+          { label: "Regime", value: "Transitional → gas-dominated", color: "" },
+          { label: "Premium score", value: "+4.8  Firming", color: "text-bull" },
+          { label: "Implied price", value: "£118.40/MWh", color: "" },
+          { label: "N2EX", value: "£101.12/MWh", color: "" },
+          { label: "SRMC", value: "£89.50/MWh", color: "" },
         ].map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-4">
             <span className="text-[10px] text-ink-light">{row.label}</span>
@@ -967,7 +967,7 @@ function LandingDataPanel() {
           { label: "TTF", value: "€42.03/MWh" },
           { label: "NBP", value: "95.10 p/therm" },
           { label: "REMIT signals 24h", value: "19" },
-          { label: "Unplanned MW", value: "1,840 MW" },
+          { label: "Unplanned MW", value: "3,240 MW" },
         ].map((row) => (
           <div key={row.label} className="flex items-baseline justify-between gap-4">
             <span className="text-[10px] text-ink-light">{row.label}</span>
