@@ -1015,8 +1015,34 @@ function LandingDataPanel() {
         </div>
       </div>
 
+      <div className="my-4 border-t border-ivory-border" />
+
+      <div>
+        <p className="mb-3 text-[9px] uppercase tracking-[0.14em] text-ink-light">
+          Meridian · model accuracy
+        </p>
+        <div className="space-y-2">
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-[10px] text-ink-light">Overall MAE</span>
+            <span className="text-[11px] tabular-nums text-ink">£22.49/MWh</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-[10px] text-ink-light">Bias</span>
+            <span className="text-[11px] tabular-nums text-[#8B3A3A]">−£2.37/MWh</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-[10px] text-ink-light">Recalibrates</span>
+            <span className="text-[11px] tabular-nums text-ink">Nightly 02:00 UTC</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-[10px] text-ink-light">Status</span>
+            <span className="text-[11px] tabular-nums text-ink-mid">Warm-up · 1 of 18 days</span>
+          </div>
+        </div>
+      </div>
+
       {/* Bridge element — pinned to bottom */}
-      <div className="mt-4 flex flex-1 flex-col justify-end">
+      <div className="mt-6">
         <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
