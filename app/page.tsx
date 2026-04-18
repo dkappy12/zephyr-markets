@@ -479,7 +479,7 @@ export default function Home() {
             className="text-center"
           >
             <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
-              The session ahead. In your inbox by 06:00.
+              Every data point, synthesised. In your inbox by 06:00.
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
               Published at 06:00 GMT every trading day, personalised to your open
@@ -913,7 +913,7 @@ export default function Home() {
 
 function LandingDataPanel() {
   return (
-    <div className="h-full rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
+    <div className="flex h-full flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-ivory-border pb-3">
         <span className="text-[9px] uppercase tracking-[0.18em] text-ink-light">
@@ -1006,6 +1006,28 @@ function LandingDataPanel() {
               <span className="shrink-0 text-[10px] tabular-nums text-ink">{sig.mw}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Bridge element — pinned to bottom */}
+      <div className="mt-auto pt-6">
+        <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[9px] uppercase tracking-[0.16em] text-ink-light">
+                Morning brief ready · 06:00 GMT
+              </p>
+              <div className="mt-2.5 space-y-1">
+                <p className="text-[10px] text-ink-mid">8 data sources ingested</p>
+                <p className="text-[10px] text-ink-mid">19 REMIT signals processed</p>
+                <p className="text-[10px] text-ink-mid">Live premium score applied</p>
+                <p className="text-[10px] text-ink-mid">Book positions personalised</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col items-center justify-center self-stretch">
+              <span className="font-serif text-2xl text-ink-light">→</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
