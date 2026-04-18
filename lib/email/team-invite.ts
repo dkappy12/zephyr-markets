@@ -38,30 +38,32 @@ export async function sendTeamInviteEmail(params: {
   const replyTo =
     process.env.RESEND_REPLY_TO?.trim() || DEFAULT_RESEND_REPLY_TO;
 
-  const subject = `You're invited to ${params.teamName} on Zephyr`;
+  const subject = `You've been invited to join ${params.teamName} on Zephyr`;
 
   const text = [
     `You've been invited to join ${params.teamName} on Zephyr.`,
     "",
-    "Open this link while signed in with the invited email address to accept:",
+    "Zephyr is a GB power and European gas trading intelligence platform — real-time REMIT signals, physical premium scoring, and portfolio analytics built for professional energy traders.",
+    "",
+    "Accept your invitation (sign in with this email address first):",
     params.inviteUrl,
     "",
-    "If you didn't expect this, you can ignore this email.",
+    "If you weren't expecting this, you can safely ignore this email.",
+    "",
+    "The Zephyr team",
   ].join("\n");
 
   const html = `
-      <div style="font-family:system-ui,Segoe UI,sans-serif;line-height:1.5;color:#2C2A26;max-width:520px">
-        <p style="font-size:18px;margin:0 0 12px">You're invited</p>
-        <p style="margin:0 0 16px">You've been invited to join <strong>${escapeHtml(
-          params.teamName,
-        )}</strong> on Zephyr.</p>
-        <p style="margin:0 0 20px">Open the link below while signed in with this email address to accept:</p>
-        <p style="margin:0 0 24px"><a href="${escapeHtml(
-          params.inviteUrl,
-        )}" style="color:#7a5f1a;font-weight:600">Accept invitation</a></p>
-        <p style="font-size:13px;color:#666;margin:0">If you didn't expect this, you can ignore this email.</p>
-      </div>
-    `;
+    <div style="font-family:system-ui,Segoe UI,sans-serif;line-height:1.6;color:#2C2A26;max-width:520px">
+      <p style="margin:0 0 16px">You've been invited to join <strong>${escapeHtml(params.teamName)}</strong> on Zephyr.</p>
+      <p style="margin:0 0 16px">Zephyr is a GB power and European gas trading intelligence platform — real-time REMIT signals, physical premium scoring, and portfolio analytics built for professional energy traders.</p>
+      <p style="margin:0 0 20px">Accept your invitation using the link below. Make sure you're signed in with this email address first.</p>
+      <p style="margin:0 0 24px">
+        <a href="${escapeHtml(params.inviteUrl)}" style="color:#7a5f1a;font-weight:600">Accept invitation →</a>
+      </p>
+      <p style="margin:0;font-size:13px;color:#666">If you weren't expecting this, you can safely ignore this email.</p>
+      <p style="margin:0;font-size:13px;color:#666">The Zephyr team</p>
+    </div>`;
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
