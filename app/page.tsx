@@ -994,6 +994,7 @@ function LandingDataPanel() {
             { asset: "IFA2", mw: "2,028 MW", unplanned: false },
             { asset: "SCCL-1", mw: "400 MW", unplanned: true },
             { asset: "T_MRWD-1", mw: "920 MW", unplanned: false },
+            { asset: "FDUNT-1", mw: "59 MW", unplanned: false },
           ].map((sig) => (
             <div key={sig.asset} className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
@@ -1015,7 +1016,7 @@ function LandingDataPanel() {
       </div>
 
       {/* Bridge element — pinned to bottom */}
-      <div className="mt-8">
+      <div className="mt-4">
         <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
