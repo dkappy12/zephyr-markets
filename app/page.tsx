@@ -486,8 +486,10 @@ export default function Home() {
             </p>
           </motion.div>
           <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-5 lg:items-start">
-            <LandingFurtherReading />
-            <div className="order-1 lg:order-2 lg:col-span-3">
+            <div className="lg:col-span-2">
+              <LandingConditionsPanel />
+            </div>
+            <div className="lg:col-span-3">
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -495,115 +497,119 @@ export default function Home() {
                 transition={{ duration: 0.45, delay: 0.05 }}
               >
                 <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8">
-              <div className="flex items-center justify-between border-b border-ivory-border pb-4">
-                <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-mid">
-                  Morning brief · 06:00 GMT
-                </p>
-                <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                  Powered by Meridian
-                </p>
-              </div>
-
-              <div className="mt-6 space-y-6">
-                {/* Reliability */}
-                <div>
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    Reliability
-                  </p>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-ink-mid">
-                    Confidence HIGH · Physical premium context uses latest model run ·
-                    Book touchpoints personalised · 8 sources live
-                  </p>
-                </div>
-
-                {/* Overnight Summary */}
-                <div>
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    Overnight summary
-                  </p>
-                  <p className="mt-2 font-serif text-[17px] leading-relaxed text-ink">
-                    Physical premium model shows moderate firming with a normalised
-                    score of +4.8, as market prices at £101.12/MWh sit £17.28/MWh
-                    below the physically-implied £118.40/MWh. Wind generation at 8.2
-                    GW with solar adding 1.1 GW drives residual demand to 22.4 GW.
-                    Key overnight REMIT signal: Drax Unit 4 unplanned 645 MW outage
-                    continuing through multiple periods.
-                  </p>
-                </div>
-
-                {/* Weather Watch */}
-                <div>
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    Weather watch
-                  </p>
-                  <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">
-                    Wind speeds forecast 4–9 m/s across the 24h window. If wind falls
-                    materially below 6.5 GW in the second half, system flips
-                    gas-marginal. Market currently prices flat to this transition
-                    risk.
-                  </p>
-                </div>
-
-                {/* Risk callout */}
-                <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-4">
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    One risk the market may be underpricing
-                  </p>
-                  <p className="mt-2 text-[13px] leading-relaxed text-ink">
-                    Synchronised IFA2 outage (2×1,014 MW) combined with ~900 MW of
-                    unplanned thermal outages removes ~2.9 GW of capacity during peak
-                    morning demand. The 48p premium gap to physical value likely
-                    understates scarcity risk in the 09:00–11:00 UTC window when
-                    import support vanishes.
-                  </p>
-                </div>
-
-                {/* Watch List */}
-                <div>
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    Watch list{" "}
-                    <span className="ml-2 font-mono normal-case tracking-normal text-ink-light">
-                      3 items
-                    </span>
-                  </p>
-                  <div className="mt-3 space-y-3">
-                    {[
-                      "IFA2 offline 08:00–10:45 UTC: monitor N2EX intraday for 10:00–11:00 UTC spike if wind <6.0 GW coincides.",
-                      "SCCL-1 (400 MW unplanned) offline 06:00–12:30 UTC: cascading with IFA2 creates tight morning shoulder.",
-                      "Wind forecast second-half decay: if outturn slips below 7.7 GW, residual demand approaches 15+ GW and pulls price toward SRMC (£99.94/MWh).",
-                    ].map((item, i) => (
-                      <div key={i} className="flex gap-3">
-                        <span className="mt-0.5 shrink-0 font-mono text-[11px] text-ink-light">
-                          →
-                        </span>
-                        <p className="text-[12px] leading-relaxed text-ink-mid">{item}</p>
-                      </div>
-                    ))}
+                  <div className="flex items-center justify-between border-b border-ivory-border pb-4">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-mid">
+                      Morning brief · 06:00 GMT
+                    </p>
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Powered by Meridian
+                    </p>
                   </div>
-                </div>
 
-                {/* Book Touchpoints */}
-                <div className="border-t border-ivory-border pt-5">
-                  <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                    Book touchpoints
-                  </p>
-                  <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
-                    The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
-                    well-supported — today&apos;s physical conditions suggest the
-                    market is underpricing tightness risk by £17/MWh. The short 25,000
-                    therm NBP Winter 2026 is correctly positioned given
-                    temperature-suppressed demand; TTF at €50/MWh with weak heating
-                    load supports the bias. Both carbon positions are immaterial to
-                    this morning&apos;s regime. Single largest risk: 3,240 MW of
-                    unplanned REMIT capacity active — any resolution could compress the
-                    premium gap immediately.
-                  </p>
-                  <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
-                    Personalised to: Long 50 MW GB Power Q3 2026 · Short 25,000 therm
-                    NBP Winter 2026 · Long 700 tco2 UKA Dec-2026
-                  </p>
-                </div>
-              </div>
+                  <div className="mt-6 space-y-6">
+                    {/* Reliability */}
+                    <div>
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Reliability
+                      </p>
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-ink-mid">
+                        Confidence HIGH · Physical premium context uses latest model run
+                        · Book touchpoints personalised · 8 sources live
+                      </p>
+                    </div>
+
+                    {/* Overnight Summary */}
+                    <div>
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Overnight summary
+                      </p>
+                      <p className="mt-2 font-serif text-[17px] leading-relaxed text-ink">
+                        Physical premium model shows moderate firming with a normalised
+                        score of +4.8, as market prices at £101.12/MWh sit £17.28/MWh
+                        below the physically-implied £118.40/MWh. Wind generation at 8.2
+                        GW with solar adding 1.1 GW drives residual demand to 22.4 GW.
+                        Key overnight REMIT signal: Drax Unit 4 unplanned 645 MW outage
+                        continuing through multiple periods.
+                      </p>
+                    </div>
+
+                    {/* Weather Watch */}
+                    <div>
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Weather watch
+                      </p>
+                      <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">
+                        Wind speeds forecast 4–9 m/s across the 24h window. If wind
+                        falls materially below 6.5 GW in the second half, system flips
+                        gas-marginal. Market currently prices flat to this transition
+                        risk.
+                      </p>
+                    </div>
+
+                    {/* Risk callout */}
+                    <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-4">
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        One risk the market may be underpricing
+                      </p>
+                      <p className="mt-2 text-[13px] leading-relaxed text-ink">
+                        Synchronised IFA2 outage (2×1,014 MW) combined with ~900 MW of
+                        unplanned thermal outages removes ~2.9 GW of capacity during
+                        peak morning demand. The 48p premium gap to physical value
+                        likely understates scarcity risk in the 09:00–11:00 UTC window
+                        when import support vanishes.
+                      </p>
+                    </div>
+
+                    {/* Watch List */}
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                          Watch list
+                        </p>
+                        <span className="font-mono text-[9px] text-ink-light">
+                          3 items
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {[
+                          "IFA2 offline 08:00–10:45 UTC: monitor N2EX intraday for 10:00–11:00 UTC spike if wind <6.0 GW coincides.",
+                          "SCCL-1 (400 MW unplanned) offline 06:00–12:30 UTC: cascading with IFA2 creates tight morning shoulder.",
+                          "Wind forecast second-half decay: if outturn slips below 7.7 GW, residual demand approaches 15+ GW and pulls price toward SRMC (£99.94/MWh).",
+                        ].map((item, i) => (
+                          <div key={i} className="flex gap-3">
+                            <span className="mt-0.5 shrink-0 font-mono text-[11px] text-ink-light">
+                              →
+                            </span>
+                            <p className="text-[12px] leading-relaxed text-ink-mid">
+                              {item}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Book Touchpoints */}
+                    <div className="border-t border-ivory-border pt-5">
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Book touchpoints
+                      </p>
+                      <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
+                        The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
+                        well-supported — today&apos;s physical conditions suggest the
+                        market is underpricing tightness risk by £17/MWh. The short
+                        25,000 therm NBP Winter 2026 is correctly positioned given
+                        temperature-suppressed demand; TTF at €50/MWh with weak heating
+                        load supports the bias. Both carbon positions are immaterial to
+                        this morning&apos;s regime. Single largest risk: 3,240 MW of
+                        unplanned REMIT capacity active — any resolution could compress
+                        the premium gap immediately.
+                      </p>
+                      <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
+                        Personalised to: Long 50 MW GB Power Q3 2026 · Short 25,000 therm
+                        NBP Winter 2026 · Long 700 tco2 UKA Dec-2026
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             </div>
@@ -905,87 +911,98 @@ export default function Home() {
   );
 }
 
-function LandingFurtherReading() {
-  const articles = [
-    {
-      publication: "Reorg Energy",
-      date: "18 Apr 2026",
-      headline:
-        "GB wind capture rates fall to 81% as spring oversupply deepens",
-      snippet:
-        "Negative pricing hours reached 176 in 2024 and are tracking above that pace in Q1 2026, as curtailment costs and CfD payment suspension during negative periods reshape generator dispatch incentives.",
-    },
-    {
-      publication: "Cornwall Insight",
-      date: "17 Apr 2026",
-      headline:
-        "CCGT spark spreads turn negative for third consecutive week amid high wind output",
-      snippet:
-        "Clean spark spreads fell to −£3.40/MWh on Tuesday as TTF softened to €41/MWh and wind generation averaged 11.2 GW across the trading day, pushing gas plant to the margin of dispatch.",
-    },
-    {
-      publication: "NESO",
-      date: "16 Apr 2026",
-      headline:
-        "Demand Flexibility Service: Q2 2026 procurement and settlement update",
-      snippet:
-        "National Energy System Operator published Q2 procurement volumes and clearing prices for the Demand Flexibility Service, with 1.4 GW secured at a weighted average of £3.20/MWh.",
-    },
+function LandingConditionsPanel() {
+  const rows: {
+    label: string;
+    value: string;
+    highlight?: "bull" | "bear" | "neutral";
+  }[] = [
+    { label: "Regime", value: "Transitional" },
+    { label: "Premium score", value: "−3.1  Softening", highlight: "bear" },
+    { label: "Implied price", value: "£76.49/MWh" },
+    { label: "N2EX", value: "£78.21/MWh" },
+    { label: "SRMC", value: "£82.40/MWh" },
+  ];
+
+  const physicalRows: { label: string; value: string }[] = [
+    { label: "GB wind", value: "7.0 GW" },
+    { label: "GB solar", value: "4.3 GW" },
+    { label: "Residual demand", value: "21.7 GW" },
+  ];
+
+  const gasRows: { label: string; value: string }[] = [
+    { label: "REMIT signals 24h", value: "19" },
+    { label: "Unplanned MW", value: "1,840 MW" },
+    { label: "TTF", value: "€42.03/MWh" },
+    { label: "NBP", value: "95.10 p/therm" },
   ];
 
   return (
-    <div className="order-2 lg:order-1 lg:col-span-2">
-      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-light">
-        Further reading
-      </p>
-      <div className="mt-4 space-y-4">
-        {articles.map((a, i) => (
-          <div
-            key={i}
-            className="flex cursor-default gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4"
-          >
-            {/* Thumbnail placeholder */}
-            <div className="flex h-20 w-28 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-ivory-dark">
-              <div className="h-full w-full bg-gradient-to-br from-ivory-dark to-ivory-border opacity-60" />
-            </div>
-            {/* Text */}
-            <div className="min-w-0 flex-1">
-              <div className="mb-1.5 flex items-start justify-between gap-2">
-                <span className="font-sans text-[10px] uppercase tracking-[0.08em] text-ink-light">
-                  {a.publication}
-                </span>
-                <span className="shrink-0 font-mono text-[10px] text-ink-light">
-                  {a.date}
-                </span>
-              </div>
-              <p
-                className="mb-1.5 font-serif text-[15px] leading-snug text-ink"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 3,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {a.headline}
-              </p>
-              <p
-                className="text-[11px] leading-relaxed text-ink-mid"
-                style={{
-                  display: "-webkit-box",
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-              >
-                {a.snippet}
-              </p>
-            </div>
+    <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-ivory-border pb-3">
+        <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-light">
+          Live conditions
+        </p>
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 animate-live-dot-pulse rounded-full bg-bull" />
+          <span className="font-mono text-[9px] text-ink-light">5 min ago</span>
+        </div>
+      </div>
+
+      {/* Premium rows */}
+      <div className="mt-4 space-y-2.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-2">
+            <span className="font-mono text-[10px] text-ink-light">{row.label}</span>
+            <span
+              className={`font-mono text-[11px] tabular-nums ${
+                row.highlight === "bear"
+                  ? "text-[#8B3A3A]"
+                  : row.highlight === "bull"
+                    ? "text-bull"
+                    : "text-ink"
+              }`}
+            >
+              {row.value}
+            </span>
           </div>
         ))}
       </div>
-      <p className="mt-4 text-[10px] italic leading-relaxed text-ink-light">
-        Articles curated by Meridian each morning. Illustrative examples shown.
+
+      {/* Divider */}
+      <div className="my-4 border-t border-ivory-border" />
+
+      {/* Physical rows */}
+      <div className="space-y-2.5">
+        {physicalRows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-2">
+            <span className="font-mono text-[10px] text-ink-light">{row.label}</span>
+            <span className="font-mono text-[11px] tabular-nums text-ink">
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div className="my-4 border-t border-ivory-border" />
+
+      {/* Gas/REMIT rows */}
+      <div className="space-y-2.5">
+        {gasRows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-2">
+            <span className="font-mono text-[10px] text-ink-light">{row.label}</span>
+            <span className="font-mono text-[11px] tabular-nums text-ink">
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer note */}
+      <p className="mt-5 border-t border-ivory-border pt-4 text-[9px] leading-relaxed text-ink-light">
+        Illustrative snapshot. Live data updates every 5 minutes in-product.
       </p>
     </div>
   );
