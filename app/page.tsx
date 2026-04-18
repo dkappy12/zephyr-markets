@@ -234,11 +234,7 @@ export default function Home() {
   const [showComparison, setShowComparison] = useState(false);
 
   return (
-    <div className="relative min-h-screen bg-ivory">
-      <div className="pointer-events-none absolute inset-0 z-0 min-h-full w-full">
-        <TopoBackground className="h-full min-h-full w-full" lineOpacity={0.07} />
-      </div>
-      <div className="relative z-10 flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-ivory">
       <nav className="sticky top-0 z-50 border-b-[0.5px] border-ivory-border bg-ivory/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-[1100px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <Link href="/" className="font-serif text-xl text-ink">
@@ -261,6 +257,9 @@ export default function Home() {
         </div>
       </nav>
       <section className="relative overflow-hidden border-b-[0.5px] border-ivory-border">
+        <div className="pointer-events-none absolute inset-0 z-0 min-h-[560px]">
+          <TopoBackground className="h-full w-full min-h-[560px]" lineOpacity={0.25} />
+        </div>
         <div className="pointer-events-none absolute bottom-0 right-0 z-[1] opacity-[0.14] sm:opacity-[0.18]">
           <TriangulationMesh width={280} height={360} opacity={0.22} strokeWidth={0.9} />
         </div>
@@ -852,7 +851,6 @@ export default function Home() {
           </div>
         </div>
       </footer>
-      </div>
     </div>
   );
 }
@@ -962,7 +960,7 @@ function LandingSignalCard({
 function ProductStat({ value, label }: { value: string; label: string }) {
   return (
     <div className="text-center sm:text-left">
-      <p className="font-serif text-5xl tracking-tight text-ink sm:text-6xl">
+      <p className="font-serif text-4xl tracking-tight text-ink sm:text-[2.75rem]">
         {value}
       </p>
       <p className="mt-2 text-sm leading-snug text-ink-mid">{label}</p>
