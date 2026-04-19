@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Suspense,
@@ -1876,6 +1877,14 @@ function PlanApiPanel() {
             ? "REST API access for your administrator account. Use the keys above with the X-API-Key header."
             : "Full REST API available on the Team plan. Programmatic access to all Zephyr data feeds."}
         </p>
+        <Link
+          href="/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-mid transition-colors hover:text-ink"
+        >
+          View API docs →
+        </Link>
         <div className="mt-5 divide-y-[0.5px] divide-ivory-border">
           {endpoints.map((e) => (
             <div key={e.path} className="flex items-center gap-4 py-3">
