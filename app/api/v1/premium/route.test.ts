@@ -53,7 +53,6 @@ describe("GET /api/v1/premium", () => {
         solar_gw: 2,
         residual_demand_gw: 20,
         regime: "tight",
-        model_version: "v1",
         calculated_at: "2026-01-01T12:00:00.000Z",
       },
       error: null,
@@ -77,6 +76,6 @@ describe("GET /api/v1/premium", () => {
     expect(body.data.premium_score).toBe(0.5);
     expect(body.data.direction).toBe("bullish");
     expect(body.meta.endpoint).toBe("/api/v1/premium");
-    expect(body.meta.model_version).toBe("v1");
+    expect(body.meta.model_version).toBe("1.2.0");
   });
 });

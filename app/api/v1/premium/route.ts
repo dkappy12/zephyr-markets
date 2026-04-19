@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const { data: row, error } = await admin
       .from("physical_premium")
       .select(
-        "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, srmc_gbp_mwh, wind_gw, solar_gw, residual_demand_gw, regime, model_version, calculated_at",
+        "normalised_score, direction, implied_price_gbp_mwh, market_price_gbp_mwh, srmc_gbp_mwh, wind_gw, solar_gw, residual_demand_gw, regime, calculated_at",
       )
       .order("calculated_at", { ascending: false })
       .limit(1)
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
         calculated_at: toIsoString(r.calculated_at),
       },
       meta: {
-        model_version: String(r.model_version ?? ""),
+        model_version: "1.2.0",
         generated_at: new Date().toISOString(),
         endpoint: "/api/v1/premium",
       },
