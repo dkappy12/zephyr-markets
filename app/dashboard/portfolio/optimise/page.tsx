@@ -486,7 +486,6 @@ export default function OptimisePage() {
                       fill="#8B3A3A"
                       shape={(props) => <circle {...props} r={8} />}
                     >
-                      <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
                       <LabelList
                         position="bottom"
                         fontSize={10}
