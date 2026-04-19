@@ -64,6 +64,9 @@ const PREMIUM_HISTORY_MAX_POINTS = 200;
 const PREMIUM_CHART_GOLD_STROKE = "#C9A84C";
 const PREMIUM_CHART_TERRA_STROKE = "#D85A30";
 const PREMIUM_CHART_TICK = "#6b6560";
+/** Main series line — lighter than solid ink so it matches fine borders elsewhere. */
+const PREMIUM_CHART_SCORE_LINE_STROKE = "rgba(44,42,38,0.52)";
+const PREMIUM_CHART_SCORE_LINE_WIDTH = 0.85;
 const PREMIUM_CHART_Y_DOMAIN: [number, number] = [-12, 12];
 const PREMIUM_CHART_Y_TICKS = [-10, -5, 0, 5, 10];
 
@@ -270,8 +273,8 @@ function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
           <Line
             type="monotone"
             dataKey="score"
-            stroke="#2c2a26"
-            strokeWidth={1}
+            stroke={PREMIUM_CHART_SCORE_LINE_STROKE}
+            strokeWidth={PREMIUM_CHART_SCORE_LINE_WIDTH}
             dot={false}
             isAnimationActive={false}
           />
