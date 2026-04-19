@@ -1892,33 +1892,11 @@ function PlanApiPanel() {
           ))}
         </div>
         <p className="mt-4 text-xs text-ink-light">
-          {isAdmin ? (
-            <>
-              5 endpoints live. Full documentation at{" "}
-              <Link
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
-              >
-                zephyr.markets/docs
-              </Link>
-            </>
-          ) : currentTierCode === "team" ? (
-            <>
-              5 endpoints live. Full documentation at{" "}
-              <Link
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
-              >
-                zephyr.markets/docs
-              </Link>
-            </>
-          ) : (
-            "API access is unlocked on Team plan and above."
-          )}
+          {isAdmin
+            ? "5 endpoints live."
+            : currentTierCode === "team"
+              ? "5 endpoints live."
+              : "API access is unlocked on Team plan and above."}
         </p>
       </div>
     </motion.div>
