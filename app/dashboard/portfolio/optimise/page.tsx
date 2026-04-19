@@ -1,9 +1,9 @@
 "use client";
 
+import { TierGate } from "@/components/billing/TierGate";
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -117,20 +117,16 @@ export default function OptimisePage() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
   const [openAlternatives, setOpenAlternatives] = useState<Record<number, boolean>>({});
-  const [billingChecked, setBillingChecked] = useState(false);
-  const [portfolioEnabled, setPortfolioEnabled] = useState(false);
+  const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(null);
 
   useEffect(() => {
     fetch("/api/billing/status")
       .then((r) => r.json())
-      .then((body: { entitlements?: { portfolioEnabled?: boolean } }) => {
-        setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
-        setBillingChecked(true);
+      .then((body: { effectiveTier?: string }) => {
+        const t = body.effectiveTier;
+        setCurrentTier(t === "pro" || t === "team" ? t : "free");
       })
-      .catch(() => {
-        setPortfolioEnabled(false);
-        setBillingChecked(true);
-      });
+      .catch(() => setCurrentTier("free"));
   }, []);
 
   useEffect(() => {
@@ -230,28 +226,14 @@ export default function OptimisePage() {
 
   const tailRiskAxisLabel = objective === "cvar" ? "CVaR loss" : "VaR loss";
 
-  if (!billingChecked) return null;
-
-  if (userId && !portfolioEnabled) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-20 text-center">
-        <p className="font-serif text-2xl text-ink">Portfolio requires Pro</p>
-        <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-mid">
-          Upgrade to Pro to access attribution analysis, risk metrics, and
-          portfolio optimisation.
-        </p>
-        <Link
-          href="/dashboard/settings?tab=plan"
-          className="mt-6 inline-flex items-center rounded-[4px] bg-ink px-5 py-2.5 text-sm font-medium text-ivory transition-colors hover:bg-ink/90"
-        >
-          Upgrade to Pro →
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-8">
+    <TierGate
+      requiredTier="pro"
+      currentTier={currentTier}
+      featureName="Portfolio Optimiser"
+      description="Scenario-based hedge recommendations with explicit risk reduction metrics. Available on the Pro plan."
+    >
+      <div className="space-y-8">
       <div>
         <motion.h1
           initial={{ opacity: 0, y: 8 }}
@@ -797,6 +779,7 @@ export default function OptimisePage() {
           </section>
         </>
       )}
-    </div>
+      </div>
+    </TierGate>
   );
 }
