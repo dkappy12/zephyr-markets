@@ -193,7 +193,8 @@ export async function GET(req: Request) {
         .select("price_date, price_gbp_mwh, market")
         .or("market.eq.N2EX,market.eq.APX")
         .gte("price_date", sinceDate)
-        .order("price_date", { ascending: true }),
+        .order("price_date", { ascending: true })
+        .limit(15000),
       supabase
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
