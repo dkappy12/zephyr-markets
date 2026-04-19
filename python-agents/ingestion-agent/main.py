@@ -32,6 +32,7 @@ Required Supabase:
 
 Environment:
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required
+  RESEND_API_KEY — optional; required to send premium score email alerts
   ANTHROPIC_API_KEY — required for morning brief generation
   ELEXON_API_KEY — optional; sent as APIKey query param when set
   GIE_API_KEY — optional; sent as request header x-key for GIE AGSI (required for production API)
@@ -99,6 +100,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 ELEXON_API_KEY = os.environ.get("ELEXON_API_KEY", "").strip()
 GIE_API_KEY = os.environ.get("GIE_API_KEY", "").strip()
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 
 REMIT_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/REMIT"
 MID_DATASET_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/MID"
@@ -384,6 +386,10 @@ WEATHER_START_DELAY_SECONDS = 60
 
 POLL_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT = 45.0
+
+# Cooldown between premium-score alert emails per user (module-local; resets on process restart).
+PREMIUM_ALERT_EMAIL_COOLDOWN_SEC = 3600
+_PREMIUM_ALERT_LAST_SENT_AT: dict[str, float] = {}
 MAX_RETRIES = 6
 INITIAL_BACKOFF_SEC = 1.0
 MAX_BACKOFF_SEC = 60.0
@@ -497,6 +503,16 @@ def _carbon_prices_rest_url() -> str:
 def _physical_premium_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/physical_premium"
+
+
+def _alerts_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/alerts"
+
+
+def _admin_job_log_rest_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/admin_job_log"
 
 
 def _premium_predictions_rest_url() -> str:
@@ -2903,6 +2919,217 @@ async def insert_physical_premium_http(
     resp.raise_for_status()
 
 
+async def fetch_premium_score_email_alerts_http(
+    client: httpx.AsyncClient,
+) -> list[dict[str, Any]]:
+    """Rows in `alerts` for premium score email delivery."""
+    r = await client.get(
+        _alerts_rest_url(),
+        headers=_supabase_auth_headers(),
+        params={
+            "threshold_type": "eq.premium_score",
+            "delivery_channel": "eq.email",
+            "select": "id,user_id,threshold_value",
+        },
+        timeout=HTTP_TIMEOUT,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data if isinstance(data, list) else []
+
+
+async def fetch_auth_user_email_http(
+    client: httpx.AsyncClient, user_id: str
+) -> str | None:
+    """Resolve email via GoTrue admin API (service role)."""
+    url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{user_id}"
+    r = await client.get(url, headers=_supabase_auth_headers(), timeout=20.0)
+    if r.status_code == 404:
+        return None
+    if not r.is_success:
+        logger.warning(
+            "premium_alert: auth admin lookup failed for %s: %s %s",
+            user_id,
+            r.status_code,
+            (r.text or "")[:240],
+        )
+        return None
+    body = r.json()
+    if not isinstance(body, dict):
+        return None
+    email = body.get("email")
+    if not email and isinstance(body.get("user"), dict):
+        email = body["user"].get("email")
+    if isinstance(email, str) and "@" in email:
+        return email.strip()
+    return None
+
+
+async def send_resend_plain_email_http(
+    client: httpx.AsyncClient,
+    *,
+    to: str,
+    subject: str,
+    text: str,
+) -> None:
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY is not set")
+    r = await client.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": "Zephyr Alerts <alerts@zephyr.markets>",
+            "to": [to],
+            "subject": subject,
+            "text": text,
+        },
+        timeout=30.0,
+    )
+    if not r.is_success:
+        logger.warning(
+            "premium_alert: Resend HTTP %s: %s",
+            r.status_code,
+            (r.text or "")[:500],
+        )
+    r.raise_for_status()
+
+
+async def insert_premium_alert_job_log_http(
+    client: httpx.AsyncClient,
+    *,
+    user_id: str,
+    normalised_score: float,
+    threshold_value: float,
+) -> None:
+    """Audit row for each premium alert email sent."""
+    meta = {
+        "user_id": user_id,
+        "normalised_score": normalised_score,
+        "threshold_value": threshold_value,
+    }
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    payloads: list[dict[str, Any]] = [
+        {
+            "job_name": "premium_alert",
+            "status": "sent",
+            "metadata": meta,
+        },
+        {
+            "job_name": "premium_alert",
+            "status": "sent",
+            "error_message": json.dumps(meta),
+        },
+    ]
+    last_err: str | None = None
+    for payload in payloads:
+        resp = await client.post(_admin_job_log_rest_url(), headers=headers, json=payload)
+        if resp.is_success:
+            return
+        last_err = f"{resp.status_code} {(resp.text or '')[:400]}"
+    logger.warning("premium_alert: admin_job_log insert failed: %s", last_err)
+
+
+async def process_premium_score_email_alerts(
+    client: httpx.AsyncClient,
+    *,
+    normalised_score: float,
+    direction: str,
+    calculated_at: str,
+    implied_price_gbp_mwh: float | None,
+    market_price_gbp_mwh: float | None,
+) -> None:
+    """Send threshold emails via Resend; rate-limit per user in-process."""
+    if not RESEND_API_KEY:
+        logger.debug("premium_alert: RESEND_API_KEY not set; skipping")
+        return
+    try:
+        alert_rows = await fetch_premium_score_email_alerts_http(client)
+    except Exception as e:
+        logger.warning("premium_alert: could not query alerts: %s", e)
+        return
+    if not alert_rows:
+        return
+
+    score = float(normalised_score)
+    abs_score = abs(score)
+    now_ts = time.time()
+    ip_s = (
+        f"£{implied_price_gbp_mwh:.2f}/MWh"
+        if implied_price_gbp_mwh is not None
+        else "n/a"
+    )
+    mp_s = (
+        f"£{market_price_gbp_mwh:.2f}/MWh"
+        if market_price_gbp_mwh is not None
+        else "n/a"
+    )
+
+    for row in alert_rows:
+        uid_raw = row.get("user_id")
+        if not uid_raw:
+            continue
+        uid_str = str(uid_raw).strip()
+        try:
+            th = float(row.get("threshold_value"))
+        except (TypeError, ValueError):
+            continue
+        if abs_score < th:
+            continue
+        if (
+            now_ts - _PREMIUM_ALERT_LAST_SENT_AT.get(uid_str, 0.0)
+            < PREMIUM_ALERT_EMAIL_COOLDOWN_SEC
+        ):
+            continue
+
+        to_email = await fetch_auth_user_email_http(client, uid_str)
+        if not to_email:
+            continue
+
+        subject = f"Zephyr alert: Physical premium score {score:+.1f}"
+        body = "\n".join(
+            [
+                "Physical premium score alert",
+                "",
+                f"Normalised score: {score:+.1f}",
+                f"Direction: {direction}",
+                "",
+                f"Implied price (physical model): {ip_s}",
+                f"N2EX day-ahead reference: {mp_s}",
+                "",
+                f"Model run (UTC): {calculated_at}",
+                "",
+                f"Your alert threshold is |score| ≥ {th:g}. This run met or exceeded that level.",
+                "",
+                "Zephyr Meridian",
+            ]
+        )
+        try:
+            await send_resend_plain_email_http(
+                client, to=to_email, subject=subject, text=body
+            )
+        except Exception as e:
+            logger.warning("premium_alert: send failed for %s: %s", uid_str, e)
+            continue
+
+        _PREMIUM_ALERT_LAST_SENT_AT[uid_str] = now_ts
+        try:
+            await insert_premium_alert_job_log_http(
+                client,
+                user_id=uid_str,
+                normalised_score=score,
+                threshold_value=th,
+            )
+        except Exception as e:
+            logger.warning("premium_alert: job log failed for %s: %s", uid_str, e)
+
+
 # Supabase (run once): unique constraint required for PostgREST upsert merge-duplicates.
 # ALTER TABLE premium_predictions ADD CONSTRAINT premium_predictions_date_sp_version_key UNIQUE (target_date, target_settlement_period, model_version);
 
@@ -3634,6 +3861,19 @@ async def calculate_physical_premium() -> None:
         }
 
         await insert_physical_premium_http(http, row)
+
+        if normalised_score is not None:
+            try:
+                await process_premium_score_email_alerts(
+                    http,
+                    normalised_score=normalised_score,
+                    direction=direction,
+                    calculated_at=calculated_at,
+                    implied_price_gbp_mwh=implied_price_gbp_mwh,
+                    market_price_gbp_mwh=market_price_gbp_mwh,
+                )
+            except Exception as e:
+                logger.warning("premium_alert: cycle error: %s", e)
 
         # Log prediction for self-improvement engine validation
         # actual_price_gbp_mwh will be filled by the nightly accuracy job
