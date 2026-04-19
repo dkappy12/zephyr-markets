@@ -581,6 +581,18 @@ function PrefsSwitch({
 const sectionTitleMarketsClass =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
+/** Non-interactive “on” switch (GB Power always visible). Matches PrefsSwitch on-state styling. */
+function StaticOnSwitchVisual() {
+  return (
+    <span
+      className="relative inline-flex h-7 w-[46px] shrink-0 cursor-not-allowed items-center rounded-full border-[0.5px] border-[#1D6B4E] bg-[#1D6B4E] p-[3px] opacity-60"
+      aria-hidden
+    >
+      <span className="pointer-events-none block h-[22px] w-[22px] translate-x-[18px] rounded-full bg-card shadow-[0_1px_2px_rgba(44,42,38,0.14)] ring-0" />
+    </span>
+  );
+}
+
 function MarketsAlertsPanel() {
   const markets = [
     {
@@ -1149,17 +1161,25 @@ function MarketsAlertsPanel() {
                     <p className="mt-0.5 text-xs text-ink-light">{row.sub}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2.5">
-                    <span className="text-[11px] font-medium text-ink-mid">
-                      Visible
-                    </span>
                     {row.lock ? (
-                      <span title="GB Power is always shown">
-                        <PrefsSwitch
-                          checked
-                          disabled
-                          ariaLabel="GB Power always visible"
-                          onClick={() => {}}
-                        />
+                      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-medium text-ink-mid">
+                        <span>Visible</span>
+                        <span className="text-[10px] font-normal text-ink-light">
+                          (always on)
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-medium text-ink-mid">
+                        Visible
+                      </span>
+                    )}
+                    {row.lock ? (
+                      <span
+                        className="inline-flex items-center"
+                        title="GB Power is always shown"
+                      >
+                        <span className="sr-only">GB Power is always visible</span>
+                        <StaticOnSwitchVisual />
                       </span>
                     ) : (
                       <PrefsSwitch
@@ -1183,88 +1203,84 @@ function MarketsAlertsPanel() {
             {visMsg ? (
               <p className="mt-3 text-xs font-medium text-[#1D6B4E]">{visMsg}</p>
             ) : null}
-          </div>
 
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-            <p className={sectionTitleMarketsClass}>REMIT signal filters</p>
-            <p className="mt-1 text-xs text-ink-light">
-              Default filters applied to your signal feed.
-            </p>
-            <div className="mt-5 space-y-4">
-              <div>
-                <p className="text-sm font-medium text-ink">
-                  Only show outages above X MW
-                </p>
-                <p className="mt-1 text-xs text-ink-light">
-                  Leave empty to show all sizes.
-                </p>
-                <label
-                  htmlFor="remit-min-mw"
-                  className="sr-only"
-                >
-                  Minimum outage size in MW
-                </label>
-                <input
-                  id="remit-min-mw"
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={remitMinMwInput}
-                  onChange={(e) => setRemitMinMwInput(e.target.value)}
-                  placeholder="No minimum"
-                  className="mt-2 block w-full max-w-xs rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40"
-                />
-              </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink">Unplanned outages only</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2.5">
-                  <span className="text-[11px] font-medium text-ink-mid">
-                    Enabled
-                  </span>
-                  <PrefsSwitch
-                    checked={remitUnplannedOnly}
-                    disabled={remitSaving}
-                    ariaLabel="Unplanned REMIT only"
-                    onClick={() => setRemitUnplannedOnly(!remitUnplannedOnly)}
+            <div className="mt-6 border-t-[0.5px] border-ivory-border pt-6">
+              <p className={sectionTitleMarketsClass}>REMIT signal filters</p>
+              <p className="mt-1 text-xs text-ink-light">
+                Default filters applied to your signal feed.
+              </p>
+              <div className="mt-5 space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-ink">
+                    Only show outages above X MW
+                  </p>
+                  <p className="mt-1 text-xs text-ink-light">
+                    Leave empty to show all sizes.
+                  </p>
+                  <label htmlFor="remit-min-mw" className="sr-only">
+                    Minimum outage size in MW
+                  </label>
+                  <input
+                    id="remit-min-mw"
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={remitMinMwInput}
+                    onChange={(e) => setRemitMinMwInput(e.target.value)}
+                    placeholder="No minimum"
+                    className="mt-2 block w-full max-w-xs rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40"
                   />
                 </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink">Unplanned outages only</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2.5">
+                    <span className="text-[11px] font-medium text-ink-mid">
+                      Enabled
+                    </span>
+                    <PrefsSwitch
+                      checked={remitUnplannedOnly}
+                      disabled={remitSaving}
+                      ariaLabel="Unplanned REMIT only"
+                      onClick={() => setRemitUnplannedOnly(!remitUnplannedOnly)}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={remitSaving}
+                  onClick={() => void saveRemitPrefs()}
+                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                >
+                  {remitSaving ? "Saving…" : "Save"}
+                </button>
+                {remitMsg ? (
+                  <span className="text-xs font-medium text-[#1D6B4E]">{remitMsg}</span>
+                ) : null}
+                {remitErr ? (
+                  <span className="text-xs text-bear" role="alert">
+                    {remitErr}
+                  </span>
+                ) : null}
               </div>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                disabled={remitSaving}
-                onClick={() => void saveRemitPrefs()}
-                className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
-              >
-                {remitSaving ? "Saving…" : "Save"}
-              </button>
-              {remitMsg ? (
-                <span className="text-xs font-medium text-[#1D6B4E]">{remitMsg}</span>
-              ) : null}
-              {remitErr ? (
-                <span className="text-xs text-bear" role="alert">
-                  {remitErr}
-                </span>
-              ) : null}
-            </div>
-          </div>
 
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-            <p className={sectionTitleMarketsClass}>Alert thresholds</p>
-            <p className="mt-1 text-xs text-ink-light">
-              Configure email alerts for key market signals.
-            </p>
-
-            {alertsLoadError ? (
-              <p className="mt-4 text-sm text-bear" role="alert">
-                {alertsLoadError}
+            <div className="mt-6 border-t-[0.5px] border-ivory-border pt-6">
+              <p className={sectionTitleMarketsClass}>Alert thresholds</p>
+              <p className="mt-1 text-xs text-ink-light">
+                Configure email alerts for key market signals.
               </p>
-            ) : (
-              <div className="mt-5 space-y-8 border-t-[0.5px] border-ivory-border pt-5">
+
+              {alertsLoadError ? (
+                <p className="mt-4 text-sm text-bear" role="alert">
+                  {alertsLoadError}
+                </p>
+              ) : (
+                <div className="mt-5 space-y-8">
                 <div>
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 max-w-xl">
@@ -1292,9 +1308,9 @@ function MarketsAlertsPanel() {
                     <div>
                       <label
                         htmlFor="premium-score-threshold"
-                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                        className="text-[9px] font-semibold tracking-[0.12em] text-ink-mid"
                       >
-                        THRESHOLD
+                        <span className="uppercase tracking-[0.12em]">Threshold</span>
                       </label>
                       <input
                         id="premium-score-threshold"
@@ -1358,9 +1374,10 @@ function MarketsAlertsPanel() {
                     <div>
                       <label
                         htmlFor="n2ex-move-threshold"
-                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                        className="text-[9px] font-semibold tracking-[0.12em] text-ink-mid"
                       >
-                        THRESHOLD (£/MWh)
+                        <span className="uppercase tracking-[0.12em]">Threshold</span>
+                        <span className="font-semibold normal-case"> (£/MWh)</span>
                       </label>
                       <input
                         id="n2ex-move-threshold"
@@ -1428,9 +1445,10 @@ function MarketsAlertsPanel() {
                     <div>
                       <label
                         htmlFor="ttf-move-threshold"
-                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                        className="text-[9px] font-semibold tracking-[0.12em] text-ink-mid"
                       >
-                        THRESHOLD (€/MWh)
+                        <span className="uppercase tracking-[0.12em]">Threshold</span>
+                        <span className="font-semibold normal-case"> (€/MWh)</span>
                       </label>
                       <input
                         id="ttf-move-threshold"
@@ -1498,9 +1516,10 @@ function MarketsAlertsPanel() {
                     <div>
                       <label
                         htmlFor="nbp-move-threshold"
-                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                        className="text-[9px] font-semibold tracking-[0.12em] text-ink-mid"
                       >
-                        THRESHOLD (p/therm)
+                        <span className="uppercase tracking-[0.12em]">Threshold</span>
+                        <span className="font-semibold normal-case"> (p/therm)</span>
                       </label>
                       <input
                         id="nbp-move-threshold"
@@ -1547,6 +1566,7 @@ function MarketsAlertsPanel() {
                 ) : null}
               </div>
             )}
+            </div>
           </div>
         </>
       )}
