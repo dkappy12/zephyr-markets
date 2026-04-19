@@ -58,7 +58,7 @@ export async function GET(request: Request) {
       admin
         .from("market_prices")
         .select("price_gbp_mwh, fetched_at, price_date, market")
-        .eq("market", "N2EX")
+        .eq("market", "APX")
         .order("fetched_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
