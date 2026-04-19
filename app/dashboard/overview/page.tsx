@@ -109,6 +109,7 @@ function OverviewPageInner() {
   const [preview, setPreview] = useState<CardWithId[]>([]);
   const [remit24h, setRemit24h] = useState<number | null>(null);
   const [windGw, setWindGw] = useState<number | null>(null);
+  const [windHistory, setWindHistory] = useState<number[]>([]);
   const [premiumLoading, setPremiumLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -231,8 +232,7 @@ function OverviewPageInner() {
           .eq("location", "GB")
           .lte("forecast_time", nowIso)
           .order("forecast_time", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .limit(12),
         supabase
           .from("physical_premium")
           .select(
@@ -277,21 +277,41 @@ function OverviewPageInner() {
       }
 
       if (!windRes.error && windRes.data) {
-        const w = windRes.data.wind_speed_100m;
-        const ms =
-          typeof w === "number" ? w : w != null ? Number(w) : Number.NaN;
-        setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
-        const ft = windRes.data.forecast_time;
-        setWindForecastTimeIso(
-          typeof ft === "string"
-            ? ft
-            : ft != null
-              ? String(ft)
-              : null,
-        );
+        const rows = Array.isArray(windRes.data) ? windRes.data : [];
+        const first = rows[0] as Record<string, unknown> | undefined;
+        if (first) {
+          const w = first.wind_speed_100m;
+          const ms =
+            typeof w === "number" ? w : w != null ? Number(w) : Number.NaN;
+          setWindGw(Number.isFinite(ms) ? ms * MS_TO_GW : null);
+          const ft = first.forecast_time;
+          setWindForecastTimeIso(
+            typeof ft === "string"
+              ? ft
+              : ft != null
+                ? String(ft)
+                : null,
+          );
+          const history: number[] = [];
+          for (const row of rows) {
+            const r = row as Record<string, unknown>;
+            const v = r.wind_speed_100m;
+            const m =
+              typeof v === "number" ? v : v != null ? Number(v) : Number.NaN;
+            if (Number.isFinite(m)) {
+              history.push(m * MS_TO_GW);
+            }
+          }
+          setWindHistory(history);
+        } else {
+          setWindGw(null);
+          setWindForecastTimeIso(null);
+          setWindHistory([]);
+        }
       } else {
         setWindGw(null);
         setWindForecastTimeIso(null);
+        setWindHistory([]);
       }
 
       const nsRaw = premiumRes.data?.normalised_score;
@@ -454,6 +474,16 @@ function OverviewPageInner() {
         ? "Checkout was cancelled. No changes were made to your plan."
         : null;
 
+  const windTrend: "up" | "down" | "flat" | undefined = (() => {
+    if (windGw === null || windHistory.length < 3) return undefined;
+    const mean =
+      windHistory.slice(1).reduce((a, b) => a + b, 0) /
+      (windHistory.length - 1);
+    if (windGw > mean + 1) return "up";
+    if (windGw < mean - 1) return "down";
+    return "flat";
+  })();
+
   return (
     <div className="space-y-10">
       {billingBanner != null && billingBannerCopy ? (
@@ -500,6 +530,7 @@ function OverviewPageInner() {
           label="GB WIND (MODEL)"
           value={windGw === null ? "—" : windGw.toFixed(1)}
           unit="GW"
+          trend={windTrend}
           footnote={
             windForecastTimeIso
               ? `Forecast step ${formatDbAge(windForecastTimeIso, relativeNowMs)}`
