@@ -42,7 +42,7 @@ export default function RootLayout({
         try {
           var path = window.location.pathname;
           if (!path.startsWith("/dashboard")) {
-            document.documentElement.removeAttribute("data-theme");
+            document.documentElement.setAttribute("data-theme", "light");
             return;
           }
           var saved = localStorage.getItem('zephyr-theme');
