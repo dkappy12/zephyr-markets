@@ -232,6 +232,36 @@ export default function OptimisePage() {
       currentTier={currentTier}
       featureName="Portfolio Optimiser"
       description="Scenario-based hedge recommendations with explicit risk reduction metrics. Available on the Pro plan."
+      mockup={
+        <div className="space-y-4 p-6">
+          <div className="h-9 w-32 rounded bg-ink/10" />
+          <div className="h-4 w-80 rounded bg-ink/8" />
+          <div className="rounded-[4px] border border-ivory-border bg-card p-4">
+            <div className="mb-2 h-3 w-24 rounded bg-ink/10" />
+            <div className="mb-2 h-5 w-20 rounded bg-amber-600/30" />
+            <div className="flex gap-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-2 w-12 rounded bg-ink/15" />
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {["VAR 95", "CVAR 95", "WORST STRESS"].map((l) => (
+              <div key={l} className="rounded-[4px] border border-ivory-border bg-card p-4">
+                <div className="mb-3 h-3 w-16 rounded bg-ink/10" />
+                <div className="mb-2 h-8 w-24 rounded bg-[#1D6B4E]/20" />
+                <div className="h-2 w-full rounded bg-[#1D6B4E]/30" />
+              </div>
+            ))}
+          </div>
+          <div className="h-48 rounded-[4px] border border-ivory-border bg-card p-4" />
+          <div className="space-y-2">
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="h-24 rounded-[4px] border border-ivory-border bg-card p-4" />
+            ))}
+          </div>
+        </div>
+      }
     >
       <div className="space-y-8">
       <div>

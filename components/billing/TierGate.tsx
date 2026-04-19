@@ -9,6 +9,9 @@ export type TierGateProps = {
   featureName: string;
   description: string;
   children: ReactNode;
+  /** Static mockup to show blurred behind the gate.
+      If not provided, shows a generic blurred placeholder. */
+  mockup?: ReactNode;
 };
 
 const TIER_RANK: Record<"free" | "pro" | "team", number> = {
@@ -30,17 +33,29 @@ export function TierGate({
   featureName,
   description,
   children,
+  mockup,
 }: TierGateProps) {
-  if (currentTier === null || tierMeetsOrExceeds(currentTier, requiredTier)) {
+  // Still loading billing — show nothing to prevent flash
+  if (currentTier === null) {
+    return null;
+  }
+
+  // Has access — render normally
+  if (tierMeetsOrExceeds(currentTier, requiredTier)) {
     return <>{children}</>;
   }
 
+  // Gated — show static mockup blurred with overlay panel
   return (
-    <div className="relative">
-      <div className="pointer-events-none select-none blur-sm opacity-60">{children}</div>
+    <div className="relative min-h-[600px]">
+      {/* Static blurred mockup behind */}
+      <div className="pointer-events-none select-none blur-md opacity-50">
+        {mockup ?? <GenericMockup />}
+      </div>
 
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="mx-auto max-w-sm rounded-[6px] border-[0.5px] border-ivory-border bg-ivory/95 px-8 py-10 text-center shadow-lg backdrop-blur-sm">
+      {/* Gate panel — fixed to viewport centre */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="mx-auto max-w-sm rounded-[6px] border-[0.5px] border-ivory-border bg-ivory/98 px-8 py-10 text-center shadow-xl backdrop-blur-sm">
           <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-ink/5">
             <svg
               width="18"
@@ -79,6 +94,22 @@ export function TierGate({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GenericMockup() {
+  return (
+    <div className="space-y-4 p-6">
+      <div className="h-8 w-48 rounded bg-ink/10" />
+      <div className="h-4 w-72 rounded bg-ink/8" />
+      <div className="mt-6 grid grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-32 rounded-[4px] border border-ivory-border bg-card" />
+        ))}
+      </div>
+      <div className="h-48 rounded-[4px] border border-ivory-border bg-card" />
+      <div className="h-32 rounded-[4px] border border-ivory-border bg-card" />
     </div>
   );
 }

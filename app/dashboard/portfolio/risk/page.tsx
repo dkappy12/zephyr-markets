@@ -502,6 +502,23 @@ export default function RiskPage() {
       currentTier={currentTier}
       featureName="Portfolio Risk"
       description="Value at Risk, stress tests, and concentration analysis for your book. Available on the Pro plan."
+      mockup={
+        <div className="space-y-4 p-6">
+          <div className="h-9 w-20 rounded bg-ink/10" />
+          <div className="h-4 w-60 rounded bg-ink/8" />
+          <div className="grid grid-cols-3 gap-3">
+            {["VAR 95", "CVAR 95", "WORST STRESS"].map((l) => (
+              <div key={l} className="rounded-[4px] border border-ivory-border bg-card p-4">
+                <div className="mb-3 h-3 w-16 rounded bg-ink/10" />
+                <div className="mb-2 h-8 w-24 rounded bg-ink/15" />
+                <div className="h-3 w-20 rounded bg-ink/8" />
+              </div>
+            ))}
+          </div>
+          <div className="h-48 rounded-[4px] border border-ivory-border bg-card p-4" />
+          <div className="h-32 rounded-[4px] border border-ivory-border bg-card p-4" />
+        </div>
+      }
     >
       <div className="space-y-10">
         <div>
