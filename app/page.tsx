@@ -232,6 +232,33 @@ function LiveTicker() {
 
 export default function Home() {
   const [showComparison, setShowComparison] = useState(false);
+  const [meridianStats, setMeridianStats] = useState<{
+    overall_mae: number;
+    overall_bias: number;
+    filled_count: number;
+    days_of_data: number;
+    regime_stats: { regime: string; mae: number; n: number }[];
+  } | null>(null);
+
+  useEffect(() => {
+    async function loadMeridianAccuracy() {
+      try {
+        const res = await fetch("/api/meridian/accuracy");
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          overall_mae: number;
+          overall_bias: number;
+          filled_count: number;
+          days_of_data: number;
+          regime_stats: { regime: string; mae: number; n: number }[];
+        };
+        setMeridianStats(json);
+      } catch {
+        /* keep null */
+      }
+    }
+    void loadMeridianAccuracy();
+  }, []);
 
   return (
     <div className="flex min-h-screen flex-col bg-ivory">
@@ -652,7 +679,7 @@ export default function Home() {
                   Meridian · live accuracy
                 </p>
                 <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
-                  1 of 18 days
+                  {meridianStats?.days_of_data ?? "—"} OF 18 DAYS
                 </span>
               </div>
 
@@ -663,19 +690,45 @@ export default function Home() {
                     Overall MAE
                   </p>
                   <p className="mt-1 font-serif text-2xl text-ink">
-                    £22.49<span className="font-sans text-xs text-ink-mid">/MWh</span>
+                    {meridianStats != null ? (
+                      <>
+                        £{meridianStats.overall_mae.toFixed(2)}
+                        <span className="font-sans text-xs text-ink-mid">/MWh</span>
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </p>
                 </div>
                 <div>
                   <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
                     Bias
                   </p>
-                  <p className="mt-1 font-serif text-2xl text-[#8B3A3A]">
-                    −£2.37<span className="font-sans text-xs text-ink-mid">/MWh</span>
-                  </p>
-                  <p className="mt-0.5 font-sans text-[9px] text-ink-light">
-                    Slight underestimate
-                  </p>
+                  {meridianStats == null ? (
+                    <p className="mt-1 font-serif text-2xl text-ink">—</p>
+                  ) : meridianStats.overall_bias >= 0 ? (
+                    <>
+                      <p className="mt-1 font-serif text-2xl text-bull">
+                        +£{meridianStats.overall_bias.toFixed(2)}
+                        <span className="font-sans text-xs text-ink-mid">/MWh</span>
+                      </p>
+                      <p className="mt-0.5 font-sans text-[9px] text-ink-light">
+                        {meridianStats.overall_bias > 0
+                          ? "Slight overestimate"
+                          : "Slight underestimate"}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-1 font-serif text-2xl text-[#8B3A3A]">
+                        −£{Math.abs(meridianStats.overall_bias).toFixed(2)}
+                        <span className="font-sans text-xs text-ink-mid">/MWh</span>
+                      </p>
+                      <p className="mt-0.5 font-sans text-[9px] text-ink-light">
+                        Slight underestimate
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -684,24 +737,29 @@ export default function Home() {
                 <p className="mb-3 font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
                   MAE by regime
                 </p>
-                {[
-                  { regime: "Gas-dominated", mae: "£25.13", n: "n=6" },
-                  { regime: "Transitional", mae: "£17.53", n: "n=8" },
-                  { regime: "Renewable", mae: "£24.86", n: "n=10" },
-                ].map((row) => (
-                  <div
-                    key={row.regime}
-                    className="flex items-center justify-between border-b border-ivory-border py-2.5 last:border-0"
-                  >
-                    <span className="text-[12px] text-ink-mid">{row.regime}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-[10px] text-ink-light">{row.n}</span>
-                      <span className="font-mono text-[12px] tabular-nums text-ink">
-                        {row.mae}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                {(["Gas-dominated", "Transitional", "Renewable"] as const).map(
+                  (regimeLabel) => {
+                    const row = meridianStats?.regime_stats?.find(
+                      (r) => r.regime === regimeLabel,
+                    );
+                    return (
+                      <div
+                        key={regimeLabel}
+                        className="flex items-center justify-between border-b border-ivory-border py-2.5 last:border-0"
+                      >
+                        <span className="text-[12px] text-ink-mid">{regimeLabel}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono text-[10px] text-ink-light">
+                            {row != null ? `n=${row.n}` : "—"}
+                          </span>
+                          <span className="font-mono text-[12px] tabular-nums text-ink">
+                            {row != null ? `£${row.mae.toFixed(2)}` : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  },
+                )}
               </div>
 
               {/* Calibration status */}
