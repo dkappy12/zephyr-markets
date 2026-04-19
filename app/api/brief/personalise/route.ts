@@ -41,19 +41,19 @@ function asNum(v: unknown): number | null {
 
 function fmtGbp(n: unknown): string {
   const v = asNum(n);
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return v.toFixed(2);
 }
 
 function fmtGw(n: unknown): string {
   const v = asNum(n);
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return v.toFixed(1);
 }
 
 function fmtScore(n: unknown): string {
   const v = asNum(n);
-  if (v == null) return "—";
+  if (v == null) return "n/a";
   return v.toFixed(1);
 }
 
@@ -157,7 +157,7 @@ export async function POST(req: Request) {
     }
     const normalised_score = fmtScore(body.normalised_score);
     const direction = String(body.direction ?? "STABLE");
-    const regime = String(body.regime ?? "—").trim() || "—";
+    const regime = String(body.regime ?? "n/a").trim() || "n/a";
     const residual_demand = fmtGw(body.residual_demand);
     const market_price = fmtGbp(body.market_price);
     const implied_price = fmtGbp(body.implied_price);
@@ -167,7 +167,7 @@ export async function POST(req: Request) {
     const remit_mw =
       remitMwRaw != null && Number.isFinite(remitMwRaw)
         ? remitMwRaw.toFixed(1)
-        : "—";
+        : "n/a";
 
     const positions = Array.isArray(body.positions)
       ? body.positions.filter((p) => p != null && typeof p === "object")
@@ -206,7 +206,7 @@ export async function POST(req: Request) {
         const inst = p.instrument || p.label;
         const entry =
           p.tp == null || !Number.isFinite(p.tp) ? "market" : String(p.tp);
-        return `${side} ${p.size} ${p.unit} ${inst} (${p.market}) — entered at ${entry}`;
+        return `${side} ${p.size} ${p.unit} ${inst} (${p.market}), entered at ${entry}`;
       })
       .join("\n");
 
@@ -220,17 +220,18 @@ ${position_lines}
 
 Write one paragraph explaining what this morning's physical picture means for these specific lines. 
 Rules:
-- Reference each position by its exact instrument name using third-person observational language ("The long …", "The short …") — never "I", "we", "you", "my", "your", or "our"
+- Reference each position by its exact instrument name using third-person observational language ("The long …", "The short …"); never "I", "we", "you", "my", "your", or "our"
 - State whether each position is helped or hurt by current conditions and by how much in £/MWh terms where possible
 - Identify the single biggest risk to the book today
 - End with one specific thing to watch
 - No hedging language. No 'may', 'could', 'might'. State things directly.
+- Never use the em dash character (—); use commas, semicolons, colons, or separate sentences instead.
 
 Example of the style and quality required:
-"The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 faces £35/MWh of mean reversion risk with the market at £125 against a physically-implied £90 — renewable dominance at 18 GW wind is structurally suppressing the price anchor the position needs. Both short gas legs are correctly positioned: the short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 benefit from temperature-suppressed demand keeping TTF capped around €50/MWh. The key risk today is a wind ramp-down below 15 GW switching the regime and pulling power back toward SRMC — watch the 14:00-18:00 UTC window where forecast uncertainty is highest."`;
+"The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 faces £35/MWh of mean reversion risk with the market at £125 against a physically-implied £90; renewable dominance at 18 GW wind is structurally suppressing the price anchor the position needs. Both short gas legs are correctly positioned: the short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 benefit from temperature-suppressed demand keeping TTF capped around €50/MWh. The key risk today is a wind ramp-down below 15 GW switching the regime and pulling power back toward SRMC; watch the 14:00-18:00 UTC window where forecast uncertainty is highest."`;
 
     const systemPrompt =
-      "You are a senior energy markets analyst writing a single morning observation paragraph. You write exactly one paragraph of 3-4 sentences. Every sentence contains a specific number — price, volume, or percentage. You never use phrases like 'it is worth noting', 'it is important', or filler. You write in third-person observational voice only: describe the book and the physical picture as an analyst would — never first or second person (no I, we, you, my, your, our).";
+      "You are a senior energy markets analyst writing a single morning observation paragraph. You write exactly one paragraph of 3-4 sentences. Every sentence contains a specific number: price, volume, or percentage. You never use phrases like 'it is worth noting', 'it is important', or filler. You write in third-person observational voice only: describe the book and the physical picture as an analyst would; never first or second person (no I, we, you, my, your, our). Never use the em dash character (—); use commas, semicolons, or colons instead.";
 
     async function runAnthropic(
       apiKey: string,
@@ -296,7 +297,12 @@ Example of the style and quality required:
       );
     }
 
-    const cleaned = text.replace(/\[P\d+\]\s*/g, "").trim();
+    const cleaned = text
+      .replace(/\[P\d+\]\s*/g, "")
+      .replace(/\u2014/g, ", ")
+      .replace(/\s*,\s*,/g, ",")
+      .replace(/ ,/g, ",")
+      .trim();
     if (!cleaned || !validatePersonalisedText(cleaned)) {
       return NextResponse.json(
         { error: "Personalised output omitted one or more open positions" },

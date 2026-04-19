@@ -4319,6 +4319,16 @@ def _normalize_watch_list_block(text: str) -> str:
     return "\n".join(lines)
 
 
+def _brief_strip_em_dashes(text: str) -> str:
+    """Remove em dash (U+2014) from model prose; Claude often over-uses it."""
+    if not text:
+        return text
+    t = text.replace(" \u2014 ", "; ").replace("\u2014", ", ")
+    while ", ," in t:
+        t = t.replace(", ,", ",")
+    return t.replace(",  ", ", ").replace(" ,", ",")
+
+
 def parse_brief_sections(raw: str) -> tuple[str, str, str, str, str]:
     """Split on five section headers; returns overnight, weather, one_risk, watch, book."""
     m = BRIEF_FIVE_RE.search(raw)
@@ -5181,9 +5191,11 @@ async def generate_morning_brief() -> None:
         system_prompt = (
             "You are Zephyr's market intelligence engine. You write concise, professional "
             "morning briefs for GB and NW European energy traders. Your tone is direct, "
-            "precise, and analytical — like a senior trader explaining the physical picture "
+            "precise, and analytical, like a senior trader explaining the physical picture "
             "to a colleague. Never use filler phrases. Every sentence should contain a "
-            "tradeable insight or relevant context. Write in present tense."
+            "tradeable insight or relevant context. Write in present tense. "
+            "Never use the em dash character (Unicode U+2014); use commas, semicolons, "
+            "colons, or short separate sentences instead."
         )
 
         implied_vs_mkt = (
@@ -5205,7 +5217,7 @@ PHYSICAL PREMIUM MODEL:
 
 GENERATION:
 - Wind (model): {_brief_fmt_num(wind_gw, 1)} GW | Solar: {_brief_fmt_num(solar_gw, 1)} GW | Residual demand: {_brief_fmt_num(residual, 1)} GW
-- 24h forecast wind speed range at 100m: {_brief_fmt_num(w_min, 1)}–{_brief_fmt_num(w_max, 1)} m/s (forecast range only — actual current wind outturn shown above as Wind (model) GW from Elexon FUELINST).
+- 24h forecast wind speed range at 100m: {_brief_fmt_num(w_min, 1)}–{_brief_fmt_num(w_max, 1)} m/s (forecast range only; actual current wind outturn shown above as Wind (model) GW from Elexon FUELINST).
 - Nearest forecast temperature: {_brief_fmt_num(current_temp_c, 1)} °C.
 - 24h temperature span: {_brief_fmt_num(t_min_c, 1)}–{_brief_fmt_num(t_max_c, 1)} °C.
 - Wind profile (24h window, first vs second half): {wind_trend_note}
@@ -5227,7 +5239,7 @@ OVERNIGHT SUMMARY
 What the physical world has done since the previous close. Reference the physical premium score direction, wind and solar generation levels, any significant REMIT outages that came in overnight, and how the market price compares to the physically-implied price. Be specific with numbers. 2-3 sentences.
 
 WEATHER WATCH
-Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. The renewable-to-gas regime transition threshold is 15 GW of residual demand — use this figure if referencing regime switches in the watch list or weather watch. Use the Wind (model) GW figure as the actual current wind outturn. The m/s forecast range is for directional context only — do not convert m/s to GW using any scaling factor. 2-3 sentences.
+Based on the 24-hour wind forecast range and current temperature. Quantify the expected wind generation range in GW (using the {WIND_MS_TO_GW:.4f} GW per m/s scaling). Note whether wind is forecast to rise or fall through the session and what that means for residual demand and price direction. Note current temperature and whether it is supportive of gas demand. The renewable-to-gas regime transition threshold is 15 GW of residual demand; use this figure if referencing regime switches in the watch list or weather watch. Use the Wind (model) GW figure as the actual current wind outturn. The m/s forecast range is for directional context only; do not convert m/s to GW using any scaling factor. 2-3 sentences.
 
 ONE RISK THE MARKET MAY BE UNDERPRICING
 The single most important contrarian physical signal in the current data. Look for disconnects between the market price and the physical implied price, REMIT capacity that could clear and tighten the system, wind forecast drops that would switch regime from renewable to gas-dominated, or storage levels that signal supply tightness. Be specific and quantified. 2-3 sentences.
@@ -5238,11 +5250,13 @@ Exactly three bullet lines starting with • (bullet character). Each one line, 
 BOOK TOUCHPOINTS
 Write nothing substantive here (a single word "reserved" is fine). Book-specific touchpoints are generated in the web app from each user's live open positions.
 
-Do not use markdown bold or headings other than the exact headers above. Do not add extra sections."""
+Do not use markdown bold or headings other than the exact headers above. Do not add extra sections.
+Do not use em dashes (—); use commas, semicolons, colons, or parentheses."""
 
         raw_text = await _anthropic_morning_brief(
             system_prompt, user_prompt, max_tokens=3500, http=http
         )
+        raw_text = _brief_strip_em_dashes(raw_text)
         logger.debug("brief_cycle: sleeping 10s before article search to avoid rate limit")
         await asyncio.sleep(10)
         overnight_s, weather_s, one_risk_s, watch_s, book_s = parse_brief_sections(
