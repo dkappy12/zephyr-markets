@@ -1,5 +1,6 @@
 "use client";
 
+import { TopoBackground } from "@/components/ui/TopoBackground";
 import { createClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -41,7 +42,8 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ivory px-4 py-16">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ivory px-4 py-16">
+      <TopoBackground className="absolute inset-0 h-full w-full" lineOpacity={0.15} />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

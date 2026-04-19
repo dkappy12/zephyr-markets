@@ -1,5 +1,6 @@
 "use client";
 
+import { TopoBackground } from "@/components/ui/TopoBackground";
 import { createClient } from "@/lib/supabase/client";
 import { validatePasswordPolicy } from "@/lib/auth/password-policy";
 import { motion, AnimatePresence } from "framer-motion";
@@ -178,7 +179,8 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-ivory px-4 py-12 sm:py-16">
+    <div className="relative min-h-screen overflow-hidden bg-ivory px-4 py-12 sm:py-16">
+      <TopoBackground className="absolute inset-0 h-full w-full" lineOpacity={0.15} />
       <div className="mx-auto w-full max-w-[520px]">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
