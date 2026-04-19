@@ -40,6 +40,7 @@ import {
   AreaChart,
   CartesianGrid,
   ComposedChart,
+  Legend,
   Line,
   LineChart,
   ReferenceArea,
@@ -92,7 +93,7 @@ function nearestPpWind(
   for (const row of pp) {
     const t = parseISO(row.calculated_at).getTime();
     const d = Math.abs(t - targetMs);
-    if (d < bestDiff && d < 3.5 * 60 * 60 * 1000) {
+    if (d < bestDiff && d < 35 * 60 * 1000) {
       bestDiff = d;
       best = row;
     }
@@ -494,6 +495,31 @@ export default function WeatherPage() {
     const bias =
       biases.reduce((a, b) => a + b, 0) / biases.length;
     return { mae, bias, n: errs.length };
+  }, [wfYesterday, pp48]);
+
+  const yesterdayHourlyComparison = useMemo(() => {
+    if (wfYesterday.length === 0 || pp48.length === 0) return [];
+    const ppAsc = [...pp48].sort(
+      (a, b) =>
+        parseISO(a.calculated_at).getTime() -
+        parseISO(b.calculated_at).getTime(),
+    );
+    const points: { hour: string; forecast: number; actual: number }[] = [];
+    for (const r of wfYesterday) {
+      const w100 = parseNum(r.wind_speed_100m);
+      if (w100 == null) continue;
+      const fGw = Number((w100 * WIND_MS_TO_GW).toFixed(1));
+      const t = parseISO(r.forecast_time).getTime();
+      const act = nearestPpWind(t, ppAsc);
+      if (act == null) continue;
+      const hour = formatInTimeZone(
+        new Date(t),
+        "UTC",
+        "HH:mm",
+      );
+      points.push({ hour, forecast: fGw, actual: Number(act.toFixed(1)) });
+    }
+    return points;
   }, [wfYesterday, pp48]);
 
   const droughtSeverity = useMemo(() => {
@@ -1176,6 +1202,68 @@ export default function WeatherPage() {
                       ? "Moderate accuracy"
                       : "Poor accuracy — treat forecasts with caution"}
                 </p>
+                {yesterdayHourlyComparison.length > 0 ? (
+                  <div className="mt-4 h-[140px] w-full">
+                    <ResponsiveContainer width="100%" height={140}>
+                      <LineChart
+                        data={yesterdayHourlyComparison}
+                        margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="rgba(44,42,38,0.08)"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="hour"
+                          tick={{ fill: "var(--ink-mid)", fontSize: 9 }}
+                          axisLine={false}
+                          tickLine={false}
+                          interval={3}
+                        />
+                        <YAxis
+                          tick={{ fill: "var(--ink-mid)", fontSize: 9 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={28}
+                          tickFormatter={(v) => `${v}`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "var(--ivory)",
+                            border: "0.5px solid var(--ivory-border)",
+                            borderRadius: 4,
+                            fontSize: 11,
+                          }}
+                          formatter={(v, name) => [
+                            `${Number(v).toFixed(1)} GW`,
+                            name === "forecast" ? "Forecast" : "Actual",
+                          ]}
+                        />
+                        <Legend
+                          iconSize={8}
+                          wrapperStyle={{ fontSize: 10 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="forecast"
+                          stroke="#9E9890"
+                          strokeWidth={1.5}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="actual"
+                          stroke="#1D6B4E"
+                          strokeWidth={1.5}
+                          dot={false}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="mt-2 text-xs italic text-ink-light">
