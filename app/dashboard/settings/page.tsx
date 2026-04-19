@@ -779,16 +779,30 @@ function MarketsAlertsPanel() {
                   Email when |score| crosses your threshold
                 </p>
               </div>
-              <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[11px] text-ink-mid">
-                <input
-                  type="checkbox"
-                  checked={enabled}
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span className="text-[11px] font-medium text-ink-mid">
+                  Enabled
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={enabled}
+                  aria-label="Enable physical premium score email alert"
                   disabled={busy}
-                  onChange={(e) => void applyPremiumEnabled(e.target.checked)}
-                  className="rounded border-ivory-border text-ink accent-[#1D6B4E]"
-                />
-                <span className="font-medium text-ink">Enabled</span>
-              </label>
+                  onClick={() => void applyPremiumEnabled(!enabled)}
+                  className={`relative inline-flex h-7 w-[46px] shrink-0 items-center rounded-full border-[0.5px] p-[3px] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:cursor-not-allowed disabled:opacity-60 ${
+                    enabled
+                      ? "border-[#1D6B4E] bg-[#1D6B4E]"
+                      : "border-ivory-border bg-ivory-dark/90"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none block h-[22px] w-[22px] rounded-full bg-card shadow-[0_1px_2px_rgba(44,42,38,0.14)] ring-0 transition-transform duration-200 ease-out ${
+                      enabled ? "translate-x-[18px]" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <div>
@@ -813,7 +827,7 @@ function MarketsAlertsPanel() {
                   onBlur={() =>
                     setInputValue((v) => clampPremiumScoreThreshold(v))
                   }
-                  className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm tabular-nums text-ink outline-none transition-colors focus:border-ink/35 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-1 block w-[120px] appearance-none rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-2 font-sans text-sm tabular-nums text-ink shadow-none outline-none transition-colors [-moz-appearance:textfield] focus:border-ink/35 disabled:cursor-not-allowed disabled:opacity-60 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               </div>
               {valueDirty ? (
