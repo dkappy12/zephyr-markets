@@ -56,10 +56,9 @@ export async function GET(request: Request) {
       const { data, error } = await supabase
         .from("positions")
         .select(
-          "instrument, market, direction, size, unit, trade_price, tenor, updated_at",
+          "instrument, market, direction, size, unit, trade_price, tenor",
         )
-        .eq("user_id", user.id)
-        .order("updated_at", { ascending: false });
+        .eq("user_id", user.id);
       if (error) throw new Error(error.message);
       rows = (data ?? []) as Record<string, unknown>[];
       filename = "positions-export.csv";
