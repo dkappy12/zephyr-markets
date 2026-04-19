@@ -116,6 +116,7 @@ export default function OptimisePage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
   const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
+  const [openAlternatives, setOpenAlternatives] = useState<Record<number, boolean>>({});
   const [billingChecked, setBillingChecked] = useState(false);
   const [portfolioEnabled, setPortfolioEnabled] = useState(false);
 
@@ -670,47 +671,91 @@ export default function OptimisePage() {
                 {data.alternatives.map((alt) => (
                   <div
                     key={alt.rank}
-                    className="group flex flex-wrap items-center justify-between gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3 transition-colors hover:bg-ivory-dark"
+                    className="group rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3 transition-colors hover:bg-ivory-dark"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-ivory font-mono text-[11px] text-ink">
-                        #{alt.rank}
-                      </span>
-                      <div>
-                        <p className="text-sm text-ink">
-                          {alt.trades.length} trade{alt.trades.length === 1 ? "" : "s"}
-                        </p>
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-ink-light">
-                          Alternative package
-                        </p>
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-ivory font-mono text-[11px] text-ink">
+                            #{alt.rank}
+                          </span>
+                          <div>
+                            <p className="text-sm text-ink">
+                              {alt.trades.length} trade{alt.trades.length === 1 ? "" : "s"}
+                            </p>
+                            <p className="text-[10px] text-ink-light">Click to see trades</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex w-fit items-center gap-2 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
+                          onClick={() =>
+                            setOpenAlternatives((prev) => ({
+                              ...prev,
+                              [alt.rank]: !prev[alt.rank],
+                            }))
+                          }
+                        >
+                          {openAlternatives[alt.rank] ? "Hide trades" : "Show trades"}
+                          <span className="text-xs">{openAlternatives[alt.rank] ? "▴" : "▾"}</span>
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                            CVaR
+                          </p>
+                          <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                            {formatGbp(alt.deltas.cvar95Reduction)}
+                          </p>
+                        </div>
+                        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                            Worst stress
+                          </p>
+                          <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                            {formatGbp(alt.deltas.worstStressReduction)}
+                          </p>
+                        </div>
+                        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                            VaR
+                          </p>
+                          <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                            {formatGbp(alt.deltas.var95Reduction)}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
-                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                          CVaR
-                        </p>
-                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
-                          {formatGbp(alt.deltas.cvar95Reduction)}
-                        </p>
+                    {openAlternatives[alt.rank] ? (
+                      <div className="mt-3 border-t-[0.5px] border-ivory-border pt-3">
+                        {!alt.trades || alt.trades.length === 0 ? (
+                          <p className="text-xs text-ink-light">Trade details unavailable</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {alt.trades.map((t, ti) => (
+                              <div
+                                key={`${alt.rank}-${t.market}-${ti}`}
+                                className="flex flex-wrap items-center gap-3"
+                              >
+                                <span
+                                  className={`inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${
+                                    t.direction === "BUY"
+                                      ? "bg-[#1D6B4E]/10 text-[#1D6B4E]"
+                                      : "bg-[#8B3A3A]/10 text-[#8B3A3A]"
+                                  }`}
+                                >
+                                  {t.direction}
+                                </span>
+                                <p className="font-serif text-sm text-ink">
+                                  {t.size.toLocaleString("en-GB")} {t.unit} {t.market}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
-                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                          Worst stress
-                        </p>
-                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
-                          {formatGbp(alt.deltas.worstStressReduction)}
-                        </p>
-                      </div>
-                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
-                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                          VaR
-                        </p>
-                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
-                          {formatGbp(alt.deltas.var95Reduction)}
-                        </p>
-                      </div>
-                    </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
