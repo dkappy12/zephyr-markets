@@ -365,6 +365,41 @@ export default function MarketsPage() {
   const [marketsScope] = useState<
     "gb_nbp_only" | "five_markets" | "all_markets"
   >("all_markets");
+  const [marketVisibility, setMarketVisibility] = useState({
+    gb_power: true,
+    nbp: true,
+    ttf: true,
+    uka: true,
+    eua: true,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/user-preferences")
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const body = (await res.json().catch(() => null)) as {
+          market_visibility?: Record<string, unknown>;
+        } | null;
+        if (!body || cancelled) return;
+        const mv = body.market_visibility;
+        if (mv && typeof mv === "object" && !Array.isArray(mv)) {
+          setMarketVisibility({
+            gb_power: true,
+            nbp: Boolean(mv.nbp),
+            ttf: Boolean(mv.ttf),
+            uka: Boolean(mv.uka),
+            eua: Boolean(mv.eua),
+          });
+        }
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const supabase = createBrowserClient();
@@ -1500,7 +1535,7 @@ export default function MarketsPage() {
         </motion.div>
 
         {/* Spark — same column as GB Power so it aligns with Carbon, not with TTF’s row */}
-        {marketsScope !== "gb_nbp_only" ? (
+        {marketsScope !== "gb_nbp_only" && marketVisibility.ttf ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1631,7 +1666,7 @@ export default function MarketsPage() {
           </div>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         {/* TTF stack */}
-        {marketsScope !== "gb_nbp_only" ? (
+        {marketsScope !== "gb_nbp_only" && marketVisibility.ttf ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1658,12 +1693,14 @@ export default function MarketsPage() {
             ), not the gas-day index hour.
           </p>
           <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">NBP equivalent</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
+            {marketVisibility.nbp ? (
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-mid">NBP equivalent</dt>
+                <dd className="tabular-nums text-ink">
+                  {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
+                </dd>
+              </div>
+            ) : null}
             <div className="flex justify-between gap-4">
               <dt className="text-ink-mid">Gas-to-power (50% eff.)</dt>
               <dd className="tabular-nums text-ink">
@@ -1694,6 +1731,7 @@ export default function MarketsPage() {
         ) : null}
 
         {/* Carbon — flex-1 so the adder chart can grow to match the Spark card height */}
+        {marketVisibility.uka && marketVisibility.eua ? (
         <section className="flex min-h-0 flex-1 flex-col gap-4">
           <div className="flex shrink-0 items-baseline gap-3">
             <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
@@ -1895,11 +1933,12 @@ export default function MarketsPage() {
             Both are direct inputs to the CCGT SRMC stack.
           </p>
         </section>
+        ) : null}
         </div>
       </div>
 
         {/* EU Storage — full width below the two columns */}
-        {marketsScope !== "gb_nbp_only" ? (
+        {marketsScope !== "gb_nbp_only" && marketVisibility.eua ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

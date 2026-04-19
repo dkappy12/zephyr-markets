@@ -394,6 +394,13 @@ function OverviewPageInner() {
   const [hasPositions, setHasPositions] = useState<boolean>(false);
   const [premiumHistoryAll, setPremiumHistoryAll] = useState<PremiumHistoryRow[]>([]);
   const [premiumHistoryWindow, setPremiumHistoryWindow] = useState<7 | 14 | 30>(30);
+  const [marketVisibility, setMarketVisibility] = useState({
+    gb_power: true,
+    nbp: true,
+    ttf: true,
+    uka: true,
+    eua: true,
+  });
 
   useEffect(() => {
     let active = true;
@@ -460,6 +467,7 @@ function OverviewPageInner() {
     async function load() {
       setLoading(true);
       const [
+        prefRes,
         sigRes,
         countRes,
         windRes,
@@ -469,6 +477,7 @@ function OverviewPageInner() {
         ttfRes,
         solarRes,
       ] = await Promise.all([
+        fetch("/api/user-preferences"),
         supabase
           .from("signals")
           .select(
@@ -526,6 +535,26 @@ function OverviewPageInner() {
           .limit(1)
           .maybeSingle(),
       ]);
+
+      if (prefRes.ok) {
+        try {
+          const prefBody = (await prefRes.json()) as {
+            market_visibility?: Record<string, unknown>;
+          };
+          const mv = prefBody.market_visibility;
+          if (mv && typeof mv === "object" && !Array.isArray(mv)) {
+            setMarketVisibility({
+              gb_power: true,
+              nbp: Boolean(mv.nbp),
+              ttf: Boolean(mv.ttf),
+              uka: Boolean(mv.uka),
+              eua: Boolean(mv.eua),
+            });
+          }
+        } catch {
+          // keep existing defaults
+        }
+      }
 
       if (!sigRes.error && sigRes.data) {
         const deduped = dedupeSignalRowsByTitleDescription(
@@ -887,13 +916,15 @@ function OverviewPageInner() {
           }
           footnote="REMIT-type signals in rolling 24h window"
         />
-        <MetricCard
-          label="TTF (GAS CONTEXT)"
-          value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
-          unit="/MWh"
-          footnote={ttfTapeFootnote ?? "—"}
-          hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
-        />
+        {marketVisibility.ttf ? (
+          <MetricCard
+            label="TTF (GAS CONTEXT)"
+            value={ttfPrice == null ? "—" : `€${ttfPrice.toFixed(2)}`}
+            unit="/MWh"
+            footnote={ttfTapeFootnote ?? "—"}
+            hoverDetail="European gas benchmark — context for interconnect and fuel switching. The physical premium headline is GB power; TTF is not the premium’s primary leg."
+          />
+        ) : null}
         <MetricCard
           label="GB SOLAR (OUTTURN)"
           value={solarGw === null ? "—" : solarGw.toFixed(2)}
@@ -1024,17 +1055,19 @@ function OverviewPageInner() {
                 {residualDemandGw != null ? `${residualDemandGw.toFixed(1)} GW` : "—"}
               </p>
             </div>
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
-                TTF (context)
-              </p>
-              <p className="mt-1 font-mono text-sm text-ink">
-                {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
-              </p>
-              <p className="mt-1 text-[10px] leading-snug text-ink-light">
-                European gas benchmark
-              </p>
-            </div>
+            {marketVisibility.ttf ? (
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-gold/60">
+                  TTF (context)
+                </p>
+                <p className="mt-1 font-mono text-sm text-ink">
+                  {ttfPrice != null ? `€${ttfPrice.toFixed(2)}` : "—"}
+                </p>
+                <p className="mt-1 text-[10px] leading-snug text-ink-light">
+                  European gas benchmark
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       </motion.section>
