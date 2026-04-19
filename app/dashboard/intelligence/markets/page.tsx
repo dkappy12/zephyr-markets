@@ -319,6 +319,80 @@ function readInkCssVars(): { ink: string; inkMid: string } {
   return { ink, inkMid };
 }
 
+function MarketsTtfStackCard({
+  cardClassName,
+  loading,
+  ttfEur,
+  gasUpdated,
+  showNbpRow,
+}: {
+  cardClassName: string;
+  loading: boolean;
+  ttfEur: number | null;
+  gasUpdated: string | null;
+  showNbpRow: boolean;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 }}
+      className={cardClassName}
+    >
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+        TTF gas · CCGT cost stack
+      </p>
+      <p className="mt-2 font-serif text-3xl tabular-nums text-ink">
+        {loading ? "…" : ttfEur == null ? "—" : `€${ttfEur.toFixed(2)}/MWh`}
+      </p>
+      {ttfEur == null ? (
+        <p className="mt-1 text-[11px] text-ink-light">TTF data unavailable</p>
+      ) : null}
+      <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
+      <p className="mt-1 text-[10px] text-ink-light">
+        &quot;Updated&quot; uses ingestion time from the database (
+        <code className="text-[9px]">fetched_at</code>
+        ), not the gas-day index hour.
+      </p>
+      <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
+        {showNbpRow ? (
+          <div className="flex justify-between gap-4">
+            <dt className="text-ink-mid">NBP equivalent</dt>
+            <dd className="tabular-nums text-ink">
+              {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
+            </dd>
+          </div>
+        ) : null}
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-mid">Gas-to-power (50% eff.)</dt>
+          <dd className="tabular-nums text-ink">
+            {ttfEur == null
+              ? "—"
+              : `£${gasGbpPerMwhElectric(ttfEur).toFixed(2)}/MWh`}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-mid">Carbon adder (UKA+CPS)</dt>
+          <dd className="tabular-nums text-ink">£{CARBON_ADDER.toFixed(2)}/MWh</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-mid">VOM</dt>
+          <dd className="tabular-nums text-ink">£{VOM.toFixed(2)}/MWh</dd>
+        </div>
+        <div className="flex justify-between gap-4 border-t-[0.5px] border-ivory-border pt-2 font-medium">
+          <dt className="text-ink">Full SRMC</dt>
+          <dd className="tabular-nums text-ink">
+            {ttfEur == null ? "—" : `£${srmcGbpMwh(ttfEur).toFixed(2)}/MWh`}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-4 text-[11px] text-ink-light">
+        {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
+      </p>
+    </motion.div>
+  );
+}
+
 function MarketsCarbonSection({
   sectionClassName,
   carbonUpdated,
@@ -1394,14 +1468,14 @@ export default function MarketsPage() {
   const showTtfColumn =
     marketsScope !== "gb_nbp_only" && marketVisibility.ttf;
   const showCarbon = marketVisibility.uka && marketVisibility.eua;
+  const showTwoColumnLayout = showTtfColumn && showCarbon;
   const showSparkColumn = showTtfColumn;
-  const marketsLayoutLeftColClass = showTtfColumn
+  const marketsLayoutLeftColClass = showTwoColumnLayout
     ? "flex min-w-0 flex-1 flex-col gap-4"
     : "flex min-w-0 w-full flex-col gap-4";
-  const ttfStackCardClassName =
-    `flex min-h-[200px] flex-shrink-0 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4${
-      showTtfColumn && !showCarbon ? " min-h-0 flex-1" : ""
-    }`;
+  const ttfStackCardTwoColClass =
+    "flex min-h-[200px] flex-shrink-0 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4";
+  const ttfStackCardFullWidthClass = `${ttfStackCardTwoColClass} w-full`;
 
   return (
     <div className="space-y-6">
@@ -1497,9 +1571,15 @@ export default function MarketsPage() {
         <code className="text-[9px]">storage_levels</code>).
       </p>
 
-      {/* Two independent columns so row height isn’t locked to GB Power (avoids huge gap under TTF vs Spark). */}
+      {/* Two columns only when TTF + Carbon; otherwise GB (+ spark) full width, then stacked TTF/Carbon. */}
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+        <div
+          className={
+            showTwoColumnLayout
+              ? "flex flex-col gap-4 lg:flex-row lg:items-stretch"
+              : "flex flex-col gap-4"
+          }
+        >
           <div className={marketsLayoutLeftColClass}>
         {/* GB Power */}
         <motion.div
@@ -1895,84 +1975,37 @@ export default function MarketsPage() {
         ) : null}
 
           </div>
-          {showTtfColumn ? (
+          {showTwoColumnLayout ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className={ttfStackCardClassName}
-        >
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            TTF gas · CCGT cost stack
-          </p>
-          <p className="mt-2 font-serif text-3xl tabular-nums text-ink">
-            {loading
-              ? "…"
-              : ttfEur == null
-                ? "—"
-              : `€${ttfEur.toFixed(2)}/MWh`}
-          </p>
-          {ttfEur == null ? (
-            <p className="mt-1 text-[11px] text-ink-light">TTF data unavailable</p>
-          ) : null}
-          <p className="mt-1 text-xs text-ink-mid">EEX NGP</p>
-          <p className="mt-1 text-[10px] text-ink-light">
-            &quot;Updated&quot; uses ingestion time from the database (
-            <code className="text-[9px]">fetched_at</code>
-            ), not the gas-day index hour.
-          </p>
-          <dl className="mt-4 space-y-2 border-t-[0.5px] border-ivory-border pt-3 text-sm">
-            {marketVisibility.nbp ? (
-              <div className="flex justify-between gap-4">
-                <dt className="text-ink-mid">NBP equivalent</dt>
-                <dd className="tabular-nums text-ink">
-                  {ttfEur == null ? "—" : `£${nbpGbpMwh(ttfEur).toFixed(2)}/MWh`}
-                </dd>
-              </div>
-            ) : null}
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">Gas-to-power (50% eff.)</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null
-                  ? "—"
-                  : `£${gasGbpPerMwhElectric(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">Carbon adder (UKA+CPS)</dt>
-              <dd className="tabular-nums text-ink">£{CARBON_ADDER.toFixed(2)}/MWh</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-ink-mid">VOM</dt>
-              <dd className="tabular-nums text-ink">£{VOM.toFixed(2)}/MWh</dd>
-            </div>
-            <div className="flex justify-between gap-4 border-t-[0.5px] border-ivory-border pt-2 font-medium">
-              <dt className="text-ink">Full SRMC</dt>
-              <dd className="tabular-nums text-ink">
-                {ttfEur == null ? "—" : `£${srmcGbpMwh(ttfEur).toFixed(2)}/MWh`}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-[11px] text-ink-light">
-            {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
-          </p>
-        </motion.div>
-        {showCarbon ? (
-          <MarketsCarbonSection
-            sectionClassName="flex min-h-0 flex-1 flex-col gap-4"
-            carbonUpdated={carbonUpdated}
-            euaCarbonLine30={euaCarbonLine30}
-            ukaLine30={ukaLine30}
-            inkMid={inkMid}
-            carbonAdderGbpMwh={carbonAdderGbpMwh}
-            carbonAdderChartData={carbonAdderChartData}
-          />
-        ) : null}
+        <MarketsTtfStackCard
+          cardClassName={ttfStackCardTwoColClass}
+          loading={loading}
+          ttfEur={ttfEur}
+          gasUpdated={gasUpdated}
+          showNbpRow={marketVisibility.nbp}
+        />
+        <MarketsCarbonSection
+          sectionClassName="flex min-h-0 flex-1 flex-col gap-4"
+          carbonUpdated={carbonUpdated}
+          euaCarbonLine30={euaCarbonLine30}
+          ukaLine30={ukaLine30}
+          inkMid={inkMid}
+          carbonAdderGbpMwh={carbonAdderGbpMwh}
+          carbonAdderChartData={carbonAdderChartData}
+        />
         </div>
           ) : null}
       </div>
-      {showCarbon && !showTtfColumn ? (
+      {showTtfColumn && !showTwoColumnLayout ? (
+        <MarketsTtfStackCard
+          cardClassName={ttfStackCardFullWidthClass}
+          loading={loading}
+          ttfEur={ttfEur}
+          gasUpdated={gasUpdated}
+          showNbpRow={marketVisibility.nbp}
+        />
+      ) : null}
+      {showCarbon && !showTwoColumnLayout ? (
         <MarketsCarbonSection
           sectionClassName="flex w-full min-h-0 flex-col gap-4"
           carbonUpdated={carbonUpdated}
