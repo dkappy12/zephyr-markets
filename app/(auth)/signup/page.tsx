@@ -77,7 +77,7 @@ export default function SignupPage() {
     );
   }
 
-  function next() {
+  async function next() {
     setError(null);
     setInfo(null);
     if (step === 0 && !canContinueFromAccount) {
@@ -86,13 +86,44 @@ export default function SignupPage() {
       );
       return;
     }
+    if (step === 0) {
+      setLoading(true);
+      try {
+        const supabase = createClient();
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password: "____ZEPHYR_CHECK_ONLY____",
+        });
+        if (!signInError) {
+          setError("An account with this email already exists. Log in instead.");
+          return;
+        }
+        const errMsg = signInError?.message?.toLowerCase() ?? "";
+        if (
+          errMsg.includes("invalid login credentials") ||
+          errMsg.includes("email not confirmed") ||
+          errMsg.includes("invalid credentials")
+        ) {
+          setError("An account with this email already exists. Log in instead.");
+          return;
+        }
+      } catch {
+        // Network error — allow to proceed
+      } finally {
+        setLoading(false);
+      }
+    }
     setStep((s) => Math.min(s + 1, steps.length - 1));
   }
 
   function back() {
     setError(null);
     setInfo(null);
-    setStep((s) => Math.max(s - 1, 0));
+    if (step === 0) {
+      router.push("/");
+      return;
+    }
+    setStep((s) => s - 1);
   }
 
   async function handleCreateAccount() {
@@ -180,8 +211,8 @@ export default function SignupPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-ivory px-4 py-12 sm:py-16">
-      <TopoBackground className="absolute inset-0 h-full w-full" lineOpacity={0.15} />
-      <div className="mx-auto w-full max-w-[520px]">
+      <TopoBackground className="absolute inset-0 z-0 h-full w-full" lineOpacity={0.15} />
+      <div className="relative z-10 mx-auto w-full max-w-[520px]">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

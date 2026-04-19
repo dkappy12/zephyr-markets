@@ -67,12 +67,12 @@ export default function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ivory px-4 py-16">
-      <TopoBackground className="absolute inset-0 h-full w-full" lineOpacity={0.15} />
+      <TopoBackground className="absolute inset-0 z-0 h-full w-full" lineOpacity={0.15} />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-        className="w-full max-w-[400px] rounded-[4px] border-[0.5px] border-ivory-border bg-card px-8 py-9"
+        className="relative z-10 w-full max-w-[400px] rounded-[4px] border-[0.5px] border-ivory-border bg-card px-8 py-9"
       >
         <h1 className="font-serif text-3xl text-ink">Welcome back.</h1>
         <p className="mt-2 text-sm text-ink-mid">
