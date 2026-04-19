@@ -1035,7 +1035,7 @@ export function BookPageClient() {
         </div>
       </TierGate>
 
-      <div className="rounded-[6px] border border-[#D4CCBB] bg-transparent px-5 py-5">
+      <div className="rounded-[6px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
           Auto-update your book
         </p>
