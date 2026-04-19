@@ -88,7 +88,6 @@ async function fetchGbpPerEur(): Promise<number> {
   try {
     const resp = await fetch(
       "https://api.frankfurter.app/latest?from=EUR&to=GBP",
-      { next: { revalidate: 3600 } },
     );
     if (!resp.ok) return 0.86;
     const body = (await resp.json()) as { rates?: { GBP?: number } };
