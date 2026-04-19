@@ -82,3 +82,6 @@ Desktop.ini
 
 # logs (general)
 *.log
+
+# Cursor
+.cursor/
