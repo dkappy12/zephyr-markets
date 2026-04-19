@@ -52,7 +52,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
 from zoneinfo import ZoneInfo
@@ -391,6 +391,8 @@ HTTP_TIMEOUT = 45.0
 # Cooldown between premium-score alert emails per user (module-local; resets on process restart).
 PREMIUM_ALERT_EMAIL_COOLDOWN_SEC = 3600
 _PREMIUM_ALERT_LAST_SENT_AT: dict[str, float] = {}
+# Price-move alerts: at most one email per (user_id, threshold_type) per UTC calendar day (job run date).
+_PRICE_MOVE_ALERT_LAST_SENT_DAY: dict[tuple[str, str], str] = {}
 MAX_RETRIES = 6
 INITIAL_BACKOFF_SEC = 1.0
 MAX_BACKOFF_SEC = 60.0
@@ -3146,6 +3148,299 @@ async def process_premium_score_email_alerts(
             logger.warning("premium_alert: job log failed for %s: %s", uid_key, e)
 
 
+PRICE_MOVE_ALERT_TYPES = frozenset(
+    {"n2ex_daily_move", "ttf_daily_move", "nbp_daily_move"}
+)
+
+
+async def fetch_price_move_email_alerts_http(
+    client: httpx.AsyncClient,
+) -> list[dict[str, Any]]:
+    """Rows in `alerts` for day-on-day price move email delivery."""
+    types_csv = ",".join(sorted(PRICE_MOVE_ALERT_TYPES))
+    r = await client.get(
+        _alerts_rest_url(),
+        headers=_supabase_auth_headers(),
+        params={
+            "threshold_type": f"in.({types_csv})",
+            "delivery_channel": "eq.email",
+            "select": "id,user_id,threshold_type,threshold_value",
+        },
+        timeout=HTTP_TIMEOUT,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data if isinstance(data, list) else []
+
+
+async def _avg_n2ex_apx_price_gbp_for_date(
+    client: httpx.AsyncClient, d: date
+) -> float | None:
+    """Mean N2EX/APX day-ahead £/MWh for settlement date ``d``."""
+    d_s = d.isoformat()
+    url = (
+        f"{_market_prices_rest_url()}"
+        f"?price_date=eq.{d_s}"
+        f"&market=in.(N2EX,APX)"
+        f"&select=price_gbp_mwh"
+    )
+    r = await client.get(url, headers=_supabase_auth_headers(), timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    rows = r.json()
+    if not isinstance(rows, list) or not rows:
+        return None
+    vals: list[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("price_gbp_mwh")
+        try:
+            v = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            v = None
+        if v is not None and v == v:  # not NaN
+            vals.append(v)
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+async def _avg_gas_hub_price_for_date(
+    client: httpx.AsyncClient, hub: str, d: date
+) -> float | None:
+    """Mean hub price for all ``gas_prices`` rows whose ``price_time`` falls on UTC date ``d``."""
+    start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    # hub.eq.TTF,price_time.gte.<iso>,price_time.lt.<iso>
+    and_clause = (
+        f"and=(hub.eq.{hub},price_time.gte.{quote(start.isoformat())},"
+        f"price_time.lt.{quote(end.isoformat())})"
+    )
+    url = f"{_gas_prices_rest_url()}?{and_clause}&select=price_eur_mwh"
+    r = await client.get(url, headers=_supabase_auth_headers(), timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    rows = r.json()
+    if not isinstance(rows, list) or not rows:
+        return None
+    vals: list[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("price_eur_mwh")
+        try:
+            v = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            v = None
+        if v is not None and v == v and v > 0:
+            vals.append(v)
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _price_move_market_label(threshold_type: str) -> tuple[str, str]:
+    """(human market name for body, unit string for formatting)."""
+    if threshold_type == "n2ex_daily_move":
+        return "N2EX day-ahead (N2EX & APX average)", "£/MWh"
+    if threshold_type == "ttf_daily_move":
+        return "TTF", "€/MWh"
+    if threshold_type == "nbp_daily_move":
+        return "NBP", "p/therm"
+    return threshold_type, ""
+
+
+def _price_move_subject_market(threshold_type: str) -> str:
+    """Short market name for email subject line."""
+    if threshold_type == "n2ex_daily_move":
+        return "N2EX day-ahead"
+    if threshold_type == "ttf_daily_move":
+        return "TTF"
+    if threshold_type == "nbp_daily_move":
+        return "NBP"
+    return threshold_type
+
+
+async def insert_price_move_alert_job_log_http(
+    client: httpx.AsyncClient,
+    *,
+    metadata: dict[str, Any],
+) -> None:
+    started_at = datetime.now(timezone.utc).isoformat()
+    headers = {
+        **_supabase_auth_headers(),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    base = {
+        "job_name": "price_move_alert",
+        "status": "sent",
+        "started_at": started_at,
+    }
+    payloads: list[dict[str, Any]] = [
+        {**base, "metadata": metadata},
+        {**base, "error_message": json.dumps(metadata)},
+    ]
+    last_err: str | None = None
+    for payload in payloads:
+        resp = await client.post(_admin_job_log_rest_url(), headers=headers, json=payload)
+        if resp.is_success:
+            return
+        last_err = f"{resp.status_code} {(resp.text or '')[:400]}"
+    logger.warning("price_move_alert: admin_job_log insert failed: %s", last_err)
+
+
+async def run_price_move_alerts() -> None:
+    """
+    Daily ~07:30 UTC: compare UTC calendar today vs yesterday (N2EX: ``price_date``;
+    gas: ``price_time`` falling on each UTC day). Email if |move| >= threshold.
+    """
+    if not RESEND_API_KEY:
+        logger.debug("price_move_alert: RESEND_API_KEY not set; skipping")
+        return
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return
+
+    now_utc = datetime.now(timezone.utc)
+    run_day = now_utc.date().isoformat()
+    today_d = now_utc.date()
+    yesterday_d = today_d - timedelta(days=1)
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+        try:
+            alert_rows = await fetch_price_move_email_alerts_http(client)
+        except Exception as e:
+            logger.warning("price_move_alert: could not query alerts: %s", e)
+            return
+
+        if not alert_rows:
+            return
+
+        cache_key = (today_d.isoformat(), yesterday_d.isoformat())
+        n2ex_cache: dict[tuple[str, str], tuple[float | None, float | None]] = {}
+        gas_cache: dict[tuple[str, str, str], tuple[float | None, float | None]] = {}
+
+        async def n2ex_pair() -> tuple[float | None, float | None]:
+            if cache_key not in n2ex_cache:
+                latest = await _avg_n2ex_apx_price_gbp_for_date(client, today_d)
+                prior = await _avg_n2ex_apx_price_gbp_for_date(client, yesterday_d)
+                n2ex_cache[cache_key] = (latest, prior)
+            return n2ex_cache[cache_key]
+
+        async def gas_pair(hub: str) -> tuple[float | None, float | None]:
+            ck = (cache_key[0], cache_key[1], hub)
+            if ck not in gas_cache:
+                latest = await _avg_gas_hub_price_for_date(client, hub, today_d)
+                prior = await _avg_gas_hub_price_for_date(client, hub, yesterday_d)
+                gas_cache[ck] = (latest, prior)
+            return gas_cache[ck]
+
+        for row in alert_rows:
+            if not isinstance(row, dict):
+                continue
+            tt_raw = row.get("threshold_type")
+            tt = str(tt_raw or "").strip()
+            if tt not in PRICE_MOVE_ALERT_TYPES:
+                continue
+            uid_key = _premium_alert_user_id_key(row.get("user_id"))
+            if not uid_key:
+                continue
+
+            dedupe_key = (uid_key, tt)
+            if _PRICE_MOVE_ALERT_LAST_SENT_DAY.get(dedupe_key) == run_day:
+                continue
+
+            try:
+                th = float(row.get("threshold_value"))
+            except (TypeError, ValueError):
+                continue
+            if th <= 0 or th != th:
+                continue
+
+            latest_avg: float | None
+            prior_avg: float | None
+            if tt == "n2ex_daily_move":
+                latest_avg, prior_avg = await n2ex_pair()
+            elif tt == "ttf_daily_move":
+                latest_avg, prior_avg = await gas_pair(HUB_TTF)
+            else:
+                latest_avg, prior_avg = await gas_pair(HUB_NBP)
+
+            if latest_avg is None or prior_avg is None:
+                continue
+
+            # today vs yesterday (UTC calendar)
+            move = latest_avg - prior_avg
+            if abs(move) < th:
+                continue
+
+            to_email = await fetch_auth_user_email_http(client, uid_key)
+            if not to_email:
+                continue
+
+            mlabel, unit = _price_move_market_label(tt)
+            direction = "up" if move > 0 else "down"
+            subject = (
+                f"Zephyr alert: {_price_move_subject_market(tt)} moved {move:+.2f} {unit} today"
+            )
+            body = "\n".join(
+                [
+                    f"Market: {mlabel}",
+                    "",
+                    f"Today ({today_d.isoformat()} UTC) average: {latest_avg:.4f} {unit}",
+                    f"Yesterday ({yesterday_d.isoformat()} UTC) average: {prior_avg:.4f} {unit}",
+                    "",
+                    f"Move: {move:+.2f} {unit} ({direction} vs yesterday).",
+                    f"Your alert threshold: {th:g} {unit}.",
+                    "",
+                    "Zephyr Meridian",
+                ]
+            )
+
+            try:
+                await send_resend_plain_email_http(
+                    client, to=to_email, subject=subject, text=body
+                )
+            except Exception as e:
+                logger.warning(
+                    "price_move_alert: send failed for %s %s: %s", uid_key, tt, e
+                )
+                continue
+
+            _PRICE_MOVE_ALERT_LAST_SENT_DAY[dedupe_key] = run_day
+            try:
+                await insert_price_move_alert_job_log_http(
+                    client,
+                    metadata={
+                        "user_id": uid_key,
+                        "threshold_type": tt,
+                        "threshold_value": th,
+                        "today_date": today_d.isoformat(),
+                        "yesterday_date": yesterday_d.isoformat(),
+                        "latest_avg": latest_avg,
+                        "prior_avg": prior_avg,
+                        "move": move,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "price_move_alert: job log failed for %s %s: %s", uid_key, tt, e
+                )
+
+        logger.info(
+            "price_move_alert: completed run for %s vs %s",
+            today_d.isoformat(),
+            yesterday_d.isoformat(),
+        )
+
+
+def scheduled_price_move_alerts() -> None:
+    """Daily price-move emails — schedule at 07:30 with TZ=UTC on the host (e.g. Railway)."""
+    try:
+        asyncio.run(run_price_move_alerts())
+    except Exception as e:
+        logger.error("price_move_alert: job aborted: %s", e, exc_info=True)
+
+
 # Supabase (run once): unique constraint required for PostgREST upsert merge-duplicates.
 # ALTER TABLE premium_predictions ADD CONSTRAINT premium_predictions_date_sp_version_key UNIQUE (target_date, target_settlement_period, model_version);
 
@@ -5471,8 +5766,8 @@ def main() -> None:
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
         "| TTF NGP every %s min | NBP NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
-        "| morning brief daily 06:00 (host TZ; use UTC) | accuracy fill daily 02:00 UTC "
-        "| Kalman calibration daily 02:05 UTC",
+        "| morning brief daily 06:00 (host TZ; use UTC) | price move alerts daily 07:30 UTC "
+        "| accuracy fill daily 02:00 UTC | Kalman calibration daily 02:05 UTC",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
         WEATHER_START_DELAY_SECONDS,
@@ -5506,8 +5801,9 @@ def main() -> None:
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
     schedule.every(1).hours.do(scheduled_carbon)
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
-    # 06:00 — use TZ=UTC on the host so this aligns with UTC morning brief.
+    # 06:00 / 07:30 — use TZ=UTC on the host (e.g. Railway) so these align with UTC.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
+    schedule.every().day.at("07:30").do(scheduled_price_move_alerts)
     schedule.every().day.at("02:00").do(scheduled_accuracy_fill)
     schedule.every().day.at("02:05").do(scheduled_kalman_calibration)
 
