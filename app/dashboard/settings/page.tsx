@@ -827,7 +827,7 @@ function MarketsAlertsPanel() {
                   onBlur={() =>
                     setInputValue((v) => clampPremiumScoreThreshold(v))
                   }
-                  className="mt-1 block w-[120px] appearance-none rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-2 font-sans text-sm tabular-nums text-ink shadow-none outline-none transition-colors [-moz-appearance:textfield] focus:border-ink/35 disabled:cursor-not-allowed disabled:opacity-60 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="mt-1 block w-[120px] appearance-none rounded-[4px] bg-[#FDFBF7] px-3 py-2 text-[14px] [font-family:inherit] tabular-nums text-ink [border:0.5px_solid_#D4CCBB] shadow-none outline-none outline-offset-0 ring-0 transition-colors [-moz-appearance:textfield] focus:border-[#D4CCBB] focus:outline-none focus:ring-0 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               </div>
               {valueDirty ? (
