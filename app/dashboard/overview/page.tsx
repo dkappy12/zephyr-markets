@@ -64,6 +64,8 @@ const PREMIUM_HISTORY_MAX_POINTS = 200;
 const PREMIUM_CHART_GOLD_STROKE = "#C9A84C";
 const PREMIUM_CHART_TERRA_STROKE = "#D85A30";
 const PREMIUM_CHART_TICK = "#6b6560";
+const PREMIUM_CHART_Y_DOMAIN: [number, number] = [-12, 12];
+const PREMIUM_CHART_Y_TICKS = [-10, -5, 0, 5, 10];
 
 const TOOLTIP_BOX: CSSProperties = {
   background: "#F5F0E8",
@@ -186,15 +188,6 @@ function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
     [rows],
   );
 
-  const yDomain = useMemo((): [number, number] => {
-    const scores = rows.map((r) => r.normalised_score);
-    const mn = Math.min(0, ...scores);
-    const mx = Math.max(0, ...scores);
-    const span = mx - mn || 1;
-    const pad = span * 0.08;
-    return [mn - pad, mx + pad];
-  }, [rows]);
-
   const xTicks = useMemo(() => {
     if (chartData.length === 0) return [];
     if (chartData.length === 1) return [chartData[0].calculated_at];
@@ -210,7 +203,7 @@ function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
       <ResponsiveContainer width="100%" height={240}>
         <ComposedChart
           data={chartData}
-          margin={{ top: 10, right: 8, bottom: 18, left: 4 }}
+          margin={{ top: 10, right: 28, bottom: 18, left: 4 }}
         >
           <CartesianGrid
             strokeDasharray="3 3"
@@ -233,11 +226,13 @@ function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
             interval={0}
           />
           <YAxis
-            domain={yDomain}
+            domain={PREMIUM_CHART_Y_DOMAIN}
+            ticks={PREMIUM_CHART_Y_TICKS}
             tick={{ fontSize: 10, fill: PREMIUM_CHART_TICK }}
             width={40}
             axisLine={false}
             tickLine={false}
+            allowDecimals={false}
           />
           <Tooltip
             content={(props) => (
