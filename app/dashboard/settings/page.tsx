@@ -511,12 +511,26 @@ function ProfilePanel() {
 }
 
 const PREMIUM_ALERT_TYPE = "premium_score";
+const N2EX_MOVE_ALERT_TYPE = "n2ex_daily_move";
+const TTF_MOVE_ALERT_TYPE = "ttf_daily_move";
+const NBP_MOVE_ALERT_TYPE = "nbp_daily_move";
 const DEFAULT_PREMIUM_THRESHOLD = 3;
+const DEFAULT_N2EX_MOVE = 5;
+const DEFAULT_TTF_MOVE = 2;
+const DEFAULT_NBP_MOVE = 2;
 
 function clampPremiumScoreThreshold(n: number): number {
   const stepped = Math.round(n * 2) / 2;
   return Math.min(10, Math.max(0.5, stepped));
 }
+
+function clampMoveThreshold(n: number): number {
+  return Math.min(10_000, Math.max(0.01, Math.round(n * 100) / 100));
+}
+
+type MarketVisKey = "gb_power" | "nbp" | "ttf" | "uka" | "eua";
+
+type MarketVisibilityState = Record<MarketVisKey, boolean>;
 
 type AlertApiRow = {
   id: string;
@@ -527,6 +541,45 @@ type AlertApiRow = {
   signal_id: string | null;
   created_at: string;
 };
+
+function PrefsSwitch({
+  checked,
+  onClick,
+  disabled,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative inline-flex h-7 w-[46px] shrink-0 items-center rounded-full border-[0.5px] p-[3px] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:cursor-not-allowed ${
+        disabled
+          ? "cursor-not-allowed border-ivory-border bg-ivory-dark/50 opacity-70"
+          : checked
+            ? "border-[#1D6B4E] bg-[#1D6B4E]"
+            : "border-ivory-border bg-ivory-dark/90"
+      }`}
+    >
+      <span
+        className={`pointer-events-none block h-[22px] w-[22px] rounded-full bg-card shadow-[0_1px_2px_rgba(44,42,38,0.14)] ring-0 transition-transform duration-200 ease-out ${
+          checked ? "translate-x-[18px]" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
+const sectionTitleMarketsClass =
+  "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
 function MarketsAlertsPanel() {
   const markets = [
@@ -572,8 +625,32 @@ function MarketsAlertsPanel() {
     },
   ];
 
-  const [alertsLoading, setAlertsLoading] = useState(true);
+  const defaultVis = useMemo(
+    (): MarketVisibilityState => ({
+      gb_power: true,
+      nbp: true,
+      ttf: true,
+      uka: true,
+      eua: true,
+    }),
+    [],
+  );
+
+  const [bootLoading, setBootLoading] = useState(true);
+  const [prefLoadErr, setPrefLoadErr] = useState<string | null>(null);
   const [alertsLoadError, setAlertsLoadError] = useState<string | null>(null);
+  const [marketVisibility, setMarketVisibility] =
+    useState<MarketVisibilityState>(defaultVis);
+  const [visBusy, setVisBusy] = useState(false);
+  const [visMsg, setVisMsg] = useState<string | null>(null);
+  const [visErr, setVisErr] = useState<string | null>(null);
+
+  const [remitMinMwInput, setRemitMinMwInput] = useState("");
+  const [remitUnplannedOnly, setRemitUnplannedOnly] = useState(false);
+  const [remitSaving, setRemitSaving] = useState(false);
+  const [remitMsg, setRemitMsg] = useState<string | null>(null);
+  const [remitErr, setRemitErr] = useState<string | null>(null);
+
   const [enabled, setEnabled] = useState(false);
   const [inputValue, setInputValue] = useState(DEFAULT_PREMIUM_THRESHOLD);
   const [savedValue, setSavedValue] = useState<number | null>(null);
@@ -581,45 +658,141 @@ function MarketsAlertsPanel() {
   const [statusErr, setStatusErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadAlerts = useCallback(async () => {
-    setAlertsLoading(true);
+  const [n2exEn, setN2exEn] = useState(false);
+  const [n2exIn, setN2exIn] = useState(DEFAULT_N2EX_MOVE);
+  const [n2exSv, setN2exSv] = useState<number | null>(null);
+  const [ttfEn, setTtfEn] = useState(false);
+  const [ttfIn, setTtfIn] = useState(DEFAULT_TTF_MOVE);
+  const [ttfSv, setTtfSv] = useState<number | null>(null);
+  const [nbpEn, setNbpEn] = useState(false);
+  const [nbpIn, setNbpIn] = useState(DEFAULT_NBP_MOVE);
+  const [nbpSv, setNbpSv] = useState<number | null>(null);
+  const [moveBusy, setMoveBusy] = useState<string | null>(null);
+
+  function hydrateMoveAlert(
+    rows: AlertApiRow[],
+    type: string,
+    def: number,
+    setEn: (v: boolean) => void,
+    setIn: (v: number) => void,
+    setSv: (v: number | null) => void,
+  ) {
+    const row = rows.find((r) => r.threshold_type === type);
+    if (row) {
+      const raw = Number(row.threshold_value);
+      const v = Number.isFinite(raw) ? clampMoveThreshold(raw) : def;
+      setEn(true);
+      setIn(v);
+      setSv(v);
+    } else {
+      setEn(false);
+      setIn(def);
+      setSv(null);
+    }
+  }
+
+  const loadPanel = useCallback(async () => {
+    setBootLoading(true);
+    setPrefLoadErr(null);
     setAlertsLoadError(null);
     try {
-      const res = await fetch("/api/alerts");
-      const body = (await res.json().catch(() => ({}))) as {
+      const [pr, ar] = await Promise.all([
+        fetch("/api/user-preferences"),
+        fetch("/api/alerts"),
+      ]);
+      const prefBody = (await pr.json().catch(() => ({}))) as {
+        market_visibility?: MarketVisibilityState;
+        remit_min_mw?: number | null;
+        remit_unplanned_only?: boolean;
+        error?: string;
+      };
+      const alertBody = (await ar.json().catch(() => ({}))) as {
         alerts?: AlertApiRow[];
         error?: string;
       };
-      if (!res.ok) {
-        throw new Error(body.error ?? res.statusText);
-      }
-      const rows = body.alerts ?? [];
-      const row = rows.find((r) => r.threshold_type === PREMIUM_ALERT_TYPE);
-      if (row) {
-        const raw = Number(row.threshold_value);
-        const v = Number.isFinite(raw)
-          ? clampPremiumScoreThreshold(raw)
-          : DEFAULT_PREMIUM_THRESHOLD;
-        setEnabled(true);
-        setInputValue(v);
-        setSavedValue(v);
+
+      if (!pr.ok) {
+        setPrefLoadErr(prefBody.error ?? pr.statusText);
       } else {
-        setEnabled(false);
-        setInputValue(DEFAULT_PREMIUM_THRESHOLD);
-        setSavedValue(null);
+        const mv = prefBody.market_visibility;
+        if (mv && typeof mv === "object") {
+          setMarketVisibility({
+            gb_power: true,
+            nbp: Boolean(mv.nbp),
+            ttf: Boolean(mv.ttf),
+            uka: Boolean(mv.uka),
+            eua: Boolean(mv.eua),
+          });
+        } else {
+          setMarketVisibility(defaultVis);
+        }
+        const rmw = prefBody.remit_min_mw;
+        if (rmw != null && Number.isFinite(Number(rmw))) {
+          setRemitMinMwInput(String(rmw));
+        } else {
+          setRemitMinMwInput("");
+        }
+        setRemitUnplannedOnly(Boolean(prefBody.remit_unplanned_only));
+      }
+
+      if (!ar.ok) {
+        setAlertsLoadError(alertBody.error ?? ar.statusText);
+      } else {
+        const rows = alertBody.alerts ?? [];
+        const row = rows.find((r) => r.threshold_type === PREMIUM_ALERT_TYPE);
+        if (row) {
+          const raw = Number(row.threshold_value);
+          const v = Number.isFinite(raw)
+            ? clampPremiumScoreThreshold(raw)
+            : DEFAULT_PREMIUM_THRESHOLD;
+          setEnabled(true);
+          setInputValue(v);
+          setSavedValue(v);
+        } else {
+          setEnabled(false);
+          setInputValue(DEFAULT_PREMIUM_THRESHOLD);
+          setSavedValue(null);
+        }
+        hydrateMoveAlert(
+          rows,
+          N2EX_MOVE_ALERT_TYPE,
+          DEFAULT_N2EX_MOVE,
+          setN2exEn,
+          setN2exIn,
+          setN2exSv,
+        );
+        hydrateMoveAlert(
+          rows,
+          TTF_MOVE_ALERT_TYPE,
+          DEFAULT_TTF_MOVE,
+          setTtfEn,
+          setTtfIn,
+          setTtfSv,
+        );
+        hydrateMoveAlert(
+          rows,
+          NBP_MOVE_ALERT_TYPE,
+          DEFAULT_NBP_MOVE,
+          setNbpEn,
+          setNbpIn,
+          setNbpSv,
+        );
       }
     } catch (e) {
+      setPrefLoadErr(
+        e instanceof Error ? e.message : "Could not load preferences",
+      );
       setAlertsLoadError(
         e instanceof Error ? e.message : "Could not load alerts",
       );
     } finally {
-      setAlertsLoading(false);
+      setBootLoading(false);
     }
-  }, []);
+  }, [defaultVis]);
 
   useEffect(() => {
-    void loadAlerts();
-  }, [loadAlerts]);
+    void loadPanel();
+  }, [loadPanel]);
 
   useEffect(() => {
     if (!statusMsg) return;
@@ -627,11 +800,90 @@ function MarketsAlertsPanel() {
     return () => clearTimeout(t);
   }, [statusMsg]);
 
+  useEffect(() => {
+    if (!visMsg) return;
+    const t = setTimeout(() => setVisMsg(null), 2000);
+    return () => clearTimeout(t);
+  }, [visMsg]);
+
+  useEffect(() => {
+    if (!remitMsg) return;
+    const t = setTimeout(() => setRemitMsg(null), 3200);
+    return () => clearTimeout(t);
+  }, [remitMsg]);
+
   const normalizedInput = clampPremiumScoreThreshold(inputValue);
   const valueDirty =
     enabled &&
     savedValue !== null &&
     normalizedInput !== savedValue;
+
+  const n2exDirty =
+    n2exEn && n2exSv !== null && clampMoveThreshold(n2exIn) !== n2exSv;
+  const ttfDirty =
+    ttfEn && ttfSv !== null && clampMoveThreshold(ttfIn) !== ttfSv;
+  const nbpDirty =
+    nbpEn && nbpSv !== null && clampMoveThreshold(nbpIn) !== nbpSv;
+
+  const patchMarketKey = useCallback(
+    async (key: MarketVisKey, value: boolean) => {
+      if (key === "gb_power") return;
+      const prev = { ...marketVisibility };
+      const next = { ...marketVisibility, [key]: value };
+      setMarketVisibility(next);
+      setVisBusy(true);
+      setVisErr(null);
+      try {
+        const res = await fetch("/api/user-preferences", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ market_visibility: next }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          throw new Error(body.error ?? res.statusText);
+        }
+        setVisMsg("Saved");
+      } catch (e) {
+        setMarketVisibility(prev);
+        setVisErr(e instanceof Error ? e.message : "Save failed");
+      } finally {
+        setVisBusy(false);
+      }
+    },
+    [marketVisibility],
+  );
+
+  const saveRemitPrefs = useCallback(async () => {
+    setRemitSaving(true);
+    setRemitErr(null);
+    setRemitMsg(null);
+    try {
+      const t = remitMinMwInput.trim();
+      const remit_min_mw =
+        t === "" ? null : Number(t);
+      if (remit_min_mw !== null && (!Number.isFinite(remit_min_mw) || remit_min_mw < 0)) {
+        throw new Error("Min MW must be empty or a non-negative number.");
+      }
+      const res = await fetch("/api/user-preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          remit_min_mw,
+          remit_unplanned_only: remitUnplannedOnly,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? res.statusText);
+      }
+      setRemitMsg("Saved");
+    } catch (e) {
+      setRemitErr(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setRemitSaving(false);
+    }
+  }, [remitMinMwInput, remitUnplannedOnly]);
 
   const applyPremiumEnabled = useCallback(
     async (next: boolean) => {
@@ -719,6 +971,123 @@ function MarketsAlertsPanel() {
     }
   }, [enabled, savedValue, inputValue]);
 
+  const applyMoveEnabled = useCallback(
+    async (
+      thresholdType: string,
+      next: boolean,
+      inputVal: number,
+      setEn: (v: boolean) => void,
+      setIn: (v: number) => void,
+      setSv: (v: number | null) => void,
+    ) => {
+      setMoveBusy(thresholdType);
+      setStatusErr(null);
+      setStatusMsg(null);
+      try {
+        if (next) {
+          const v = clampMoveThreshold(inputVal);
+          setIn(v);
+          const res = await fetch("/api/alerts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              threshold_type: thresholdType,
+              threshold_value: v,
+              delivery_channel: "email",
+            }),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (!res.ok) {
+            throw new Error(body.error ?? res.statusText);
+          }
+          setEn(true);
+          setSv(v);
+          setStatusMsg("Saved");
+        } else {
+          const res = await fetch("/api/alerts", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ threshold_type: thresholdType }),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (!res.ok) {
+            throw new Error(body.error ?? res.statusText);
+          }
+          setEn(false);
+          setSv(null);
+        }
+      } catch (e) {
+        setStatusErr(
+          e instanceof Error ? e.message : "Something went wrong",
+        );
+      } finally {
+        setMoveBusy(null);
+      }
+    },
+    [],
+  );
+
+  const saveMoveThreshold = useCallback(
+    async (
+      thresholdType: string,
+      inputVal: number,
+      setIn: (v: number) => void,
+      setSv: (v: number | null) => void,
+    ) => {
+      setMoveBusy(thresholdType);
+      setStatusErr(null);
+      setStatusMsg(null);
+      try {
+        const v = clampMoveThreshold(inputVal);
+        setIn(v);
+        const res = await fetch("/api/alerts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            threshold_type: thresholdType,
+            threshold_value: v,
+            delivery_channel: "email",
+          }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) {
+          throw new Error(body.error ?? res.statusText);
+        }
+        setSv(v);
+        setStatusMsg("Saved");
+      } catch (e) {
+        setStatusErr(
+          e instanceof Error ? e.message : "Could not save",
+        );
+      } finally {
+        setMoveBusy(null);
+      }
+    },
+    [],
+  );
+
+  const visRows: {
+    key: MarketVisKey;
+    label: string;
+    sub: string;
+    lock?: boolean;
+  }[] = [
+    {
+      key: "gb_power",
+      label: "GB Power (N2EX Day-Ahead)",
+      sub: "N2EX Day-Ahead · Elexon BMRS MID",
+      lock: true,
+    },
+    { key: "nbp", label: "NBP Natural Gas", sub: "ICE NF.F via Stooq" },
+    { key: "ttf", label: "TTF Natural Gas", sub: "EEX NGP" },
+    { key: "uka", label: "Carbon (UKA + CPS)", sub: "UKA + CPS" },
+    { key: "eua", label: "EU Gas Storage", sub: "GIE AGSI" },
+  ];
+
   return (
     <motion.div
       key="markets"
@@ -754,107 +1123,433 @@ function MarketsAlertsPanel() {
         </p>
       </div>
 
-      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-          Alert thresholds
-        </p>
-        <p className="mt-1 text-xs text-ink-light">
-          Configure email alerts for key market signals.
-        </p>
+      {bootLoading ? (
+        <p className="text-sm text-ink-mid">Loading settings…</p>
+      ) : (
+        <>
+          {prefLoadErr ? (
+            <p className="text-sm text-bear" role="alert">
+              Preferences: {prefLoadErr}
+            </p>
+          ) : null}
 
-        {alertsLoadError ? (
-          <p className="mt-4 text-sm text-bear" role="alert">
-            {alertsLoadError}
-          </p>
-        ) : alertsLoading ? (
-          <p className="mt-4 text-sm text-ink-mid">Loading alerts…</p>
-        ) : (
-          <div className="mt-5 border-t-[0.5px] border-ivory-border pt-5">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 max-w-xl">
-                <p className="text-sm font-medium text-ink">
-                  Physical premium score alert
-                </p>
-                <p className="mt-1 text-xs text-ink-light">
-                  Email when the physical premium score exceeds your threshold in
-                  either direction
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2.5">
-                <span className="text-[11px] font-medium text-ink-mid">
-                  Enabled
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={enabled}
-                  aria-label="Enable physical premium score email alert"
-                  disabled={busy}
-                  onClick={() => void applyPremiumEnabled(!enabled)}
-                  className={`relative inline-flex h-7 w-[46px] shrink-0 items-center rounded-full border-[0.5px] p-[3px] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:cursor-not-allowed disabled:opacity-60 ${
-                    enabled
-                      ? "border-[#1D6B4E] bg-[#1D6B4E]"
-                      : "border-ivory-border bg-ivory-dark/90"
-                  }`}
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className={sectionTitleMarketsClass}>Market visibility</p>
+            <p className="mt-1 text-xs text-ink-light">
+              Choose which markets appear on your Overview and Markets pages.
+            </p>
+            <div className="mt-5 space-y-4">
+              {visRows.map((row) => (
+                <div
+                  key={row.key}
+                  className="flex flex-col gap-3 border-b-[0.5px] border-ivory-border pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <span
-                    className={`pointer-events-none block h-[22px] w-[22px] rounded-full bg-card shadow-[0_1px_2px_rgba(44,42,38,0.14)] ring-0 transition-transform duration-200 ease-out ${
-                      enabled ? "translate-x-[18px]" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink">{row.label}</p>
+                    <p className="mt-0.5 text-xs text-ink-light">{row.sub}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2.5">
+                    <span className="text-[11px] font-medium text-ink-mid">
+                      Visible
+                    </span>
+                    {row.lock ? (
+                      <span title="GB Power is always shown">
+                        <PrefsSwitch
+                          checked
+                          disabled
+                          ariaLabel="GB Power always visible"
+                          onClick={() => {}}
+                        />
+                      </span>
+                    ) : (
+                      <PrefsSwitch
+                        checked={marketVisibility[row.key]}
+                        disabled={visBusy}
+                        ariaLabel={`Toggle ${row.label} visibility`}
+                        onClick={() =>
+                          void patchMarketKey(row.key, !marketVisibility[row.key])
+                        }
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <div>
-                <label
-                  htmlFor="premium-score-threshold"
-                  className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
-                >
-                  THRESHOLD
-                </label>
-                <input
-                  id="premium-score-threshold"
-                  type="number"
-                  min={0.5}
-                  max={10}
-                  step={0.5}
-                  disabled={!enabled || busy}
-                  value={inputValue}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    setInputValue(Number.isFinite(n) ? n : inputValue);
-                  }}
-                  onBlur={() =>
-                    setInputValue((v) => clampPremiumScoreThreshold(v))
-                  }
-                  className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-              {valueDirty ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void savePremiumThreshold()}
-                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
-                >
-                  {busy ? "Saving…" : "Save"}
-                </button>
-              ) : null}
-            </div>
-            {statusErr ? (
+            {visErr ? (
               <p className="mt-3 text-xs text-bear" role="alert">
-                {statusErr}
+                {visErr}
               </p>
             ) : null}
-            {statusMsg ? (
-              <p className="mt-3 text-xs font-medium text-[#1D6B4E]">
-                {statusMsg}
-              </p>
+            {visMsg ? (
+              <p className="mt-3 text-xs font-medium text-[#1D6B4E]">{visMsg}</p>
             ) : null}
           </div>
-        )}
-      </div>
+
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className={sectionTitleMarketsClass}>REMIT signal filters</p>
+            <p className="mt-1 text-xs text-ink-light">
+              Default filters applied to your signal feed.
+            </p>
+            <div className="mt-5 space-y-4">
+              <div>
+                <p className="text-sm font-medium text-ink">
+                  Only show outages above X MW
+                </p>
+                <p className="mt-1 text-xs text-ink-light">
+                  Leave empty to show all sizes.
+                </p>
+                <label
+                  htmlFor="remit-min-mw"
+                  className="sr-only"
+                >
+                  Minimum outage size in MW
+                </label>
+                <input
+                  id="remit-min-mw"
+                  type="number"
+                  min={0}
+                  step={1}
+                  inputMode="numeric"
+                  value={remitMinMwInput}
+                  onChange={(e) => setRemitMinMwInput(e.target.value)}
+                  placeholder="No minimum"
+                  className="mt-2 block w-full max-w-xs rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40"
+                />
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink">Unplanned outages only</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2.5">
+                  <span className="text-[11px] font-medium text-ink-mid">
+                    Enabled
+                  </span>
+                  <PrefsSwitch
+                    checked={remitUnplannedOnly}
+                    disabled={remitSaving}
+                    ariaLabel="Unplanned REMIT only"
+                    onClick={() => setRemitUnplannedOnly(!remitUnplannedOnly)}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={remitSaving}
+                onClick={() => void saveRemitPrefs()}
+                className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+              >
+                {remitSaving ? "Saving…" : "Save"}
+              </button>
+              {remitMsg ? (
+                <span className="text-xs font-medium text-[#1D6B4E]">{remitMsg}</span>
+              ) : null}
+              {remitErr ? (
+                <span className="text-xs text-bear" role="alert">
+                  {remitErr}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+            <p className={sectionTitleMarketsClass}>Alert thresholds</p>
+            <p className="mt-1 text-xs text-ink-light">
+              Configure email alerts for key market signals.
+            </p>
+
+            {alertsLoadError ? (
+              <p className="mt-4 text-sm text-bear" role="alert">
+                {alertsLoadError}
+              </p>
+            ) : (
+              <div className="mt-5 space-y-8 border-t-[0.5px] border-ivory-border pt-5">
+                <div>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 max-w-xl">
+                      <p className="text-sm font-medium text-ink">
+                        Physical premium score alert
+                      </p>
+                      <p className="mt-1 text-xs text-ink-light">
+                        Email when the physical premium score exceeds your threshold in
+                        either direction
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2.5">
+                      <span className="text-[11px] font-medium text-ink-mid">
+                        Enabled
+                      </span>
+                      <PrefsSwitch
+                        checked={enabled}
+                        disabled={busy || moveBusy !== null}
+                        ariaLabel="Enable physical premium score email alert"
+                        onClick={() => void applyPremiumEnabled(!enabled)}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div>
+                      <label
+                        htmlFor="premium-score-threshold"
+                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                      >
+                        THRESHOLD
+                      </label>
+                      <input
+                        id="premium-score-threshold"
+                        type="number"
+                        min={0.5}
+                        max={10}
+                        step={0.5}
+                        disabled={!enabled || busy || moveBusy !== null}
+                        value={inputValue}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setInputValue(Number.isFinite(n) ? n : inputValue);
+                        }}
+                        onBlur={() =>
+                          setInputValue((v) => clampPremiumScoreThreshold(v))
+                        }
+                        className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </div>
+                    {valueDirty ? (
+                      <button
+                        type="button"
+                        disabled={busy || moveBusy !== null}
+                        onClick={() => void savePremiumThreshold()}
+                        className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                      >
+                        {busy ? "Saving…" : "Save"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 max-w-xl">
+                      <p className="text-sm font-medium text-ink">N2EX daily move alert</p>
+                      <p className="mt-1 text-xs text-ink-light">
+                        Email when N2EX daily average moves more than £X/MWh vs previous day
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2.5">
+                      <span className="text-[11px] font-medium text-ink-mid">Enabled</span>
+                      <PrefsSwitch
+                        checked={n2exEn}
+                        disabled={busy || moveBusy !== null}
+                        ariaLabel="N2EX daily move alert"
+                        onClick={() =>
+                          void applyMoveEnabled(
+                            N2EX_MOVE_ALERT_TYPE,
+                            !n2exEn,
+                            n2exIn,
+                            setN2exEn,
+                            setN2exIn,
+                            setN2exSv,
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div>
+                      <label
+                        htmlFor="n2ex-move-threshold"
+                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                      >
+                        THRESHOLD (£/MWh)
+                      </label>
+                      <input
+                        id="n2ex-move-threshold"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        disabled={!n2exEn || busy || moveBusy !== null}
+                        value={n2exIn}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setN2exIn(Number.isFinite(n) ? n : n2exIn);
+                        }}
+                        onBlur={() => setN2exIn((v) => clampMoveThreshold(v))}
+                        className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </div>
+                    {n2exDirty ? (
+                      <button
+                        type="button"
+                        disabled={busy || moveBusy !== null}
+                        onClick={() =>
+                          void saveMoveThreshold(
+                            N2EX_MOVE_ALERT_TYPE,
+                            n2exIn,
+                            setN2exIn,
+                            setN2exSv,
+                          )
+                        }
+                        className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                      >
+                        {moveBusy === N2EX_MOVE_ALERT_TYPE ? "Saving…" : "Save"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 max-w-xl">
+                      <p className="text-sm font-medium text-ink">TTF daily move alert</p>
+                      <p className="mt-1 text-xs text-ink-light">
+                        Email when TTF moves more than €X/MWh day-on-day
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2.5">
+                      <span className="text-[11px] font-medium text-ink-mid">Enabled</span>
+                      <PrefsSwitch
+                        checked={ttfEn}
+                        disabled={busy || moveBusy !== null}
+                        ariaLabel="TTF daily move alert"
+                        onClick={() =>
+                          void applyMoveEnabled(
+                            TTF_MOVE_ALERT_TYPE,
+                            !ttfEn,
+                            ttfIn,
+                            setTtfEn,
+                            setTtfIn,
+                            setTtfSv,
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div>
+                      <label
+                        htmlFor="ttf-move-threshold"
+                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                      >
+                        THRESHOLD (€/MWh)
+                      </label>
+                      <input
+                        id="ttf-move-threshold"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        disabled={!ttfEn || busy || moveBusy !== null}
+                        value={ttfIn}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setTtfIn(Number.isFinite(n) ? n : ttfIn);
+                        }}
+                        onBlur={() => setTtfIn((v) => clampMoveThreshold(v))}
+                        className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </div>
+                    {ttfDirty ? (
+                      <button
+                        type="button"
+                        disabled={busy || moveBusy !== null}
+                        onClick={() =>
+                          void saveMoveThreshold(
+                            TTF_MOVE_ALERT_TYPE,
+                            ttfIn,
+                            setTtfIn,
+                            setTtfSv,
+                          )
+                        }
+                        className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                      >
+                        {moveBusy === TTF_MOVE_ALERT_TYPE ? "Saving…" : "Save"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 max-w-xl">
+                      <p className="text-sm font-medium text-ink">NBP daily move alert</p>
+                      <p className="mt-1 text-xs text-ink-light">
+                        Email when NBP moves more than Xp/therm day-on-day
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2.5">
+                      <span className="text-[11px] font-medium text-ink-mid">Enabled</span>
+                      <PrefsSwitch
+                        checked={nbpEn}
+                        disabled={busy || moveBusy !== null}
+                        ariaLabel="NBP daily move alert"
+                        onClick={() =>
+                          void applyMoveEnabled(
+                            NBP_MOVE_ALERT_TYPE,
+                            !nbpEn,
+                            nbpIn,
+                            setNbpEn,
+                            setNbpIn,
+                            setNbpSv,
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                    <div>
+                      <label
+                        htmlFor="nbp-move-threshold"
+                        className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                      >
+                        THRESHOLD (p/therm)
+                      </label>
+                      <input
+                        id="nbp-move-threshold"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        disabled={!nbpEn || busy || moveBusy !== null}
+                        value={nbpIn}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setNbpIn(Number.isFinite(n) ? n : nbpIn);
+                        }}
+                        onBlur={() => setNbpIn((v) => clampMoveThreshold(v))}
+                        className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 text-sm text-ink outline-none focus:border-ink/40 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </div>
+                    {nbpDirty ? (
+                      <button
+                        type="button"
+                        disabled={busy || moveBusy !== null}
+                        onClick={() =>
+                          void saveMoveThreshold(
+                            NBP_MOVE_ALERT_TYPE,
+                            nbpIn,
+                            setNbpIn,
+                            setNbpSv,
+                          )
+                        }
+                        className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                      >
+                        {moveBusy === NBP_MOVE_ALERT_TYPE ? "Saving…" : "Save"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {statusErr ? (
+                  <p className="text-xs text-bear" role="alert">
+                    {statusErr}
+                  </p>
+                ) : null}
+                {statusMsg ? (
+                  <p className="text-xs font-medium text-[#1D6B4E]">{statusMsg}</p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }

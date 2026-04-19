@@ -8,8 +8,20 @@ export const dynamic = "force-dynamic";
 const PREMIUM_SCORE_MIN = 0.5;
 const PREMIUM_SCORE_MAX = 10;
 
+const DAILY_MOVE_TYPES = new Set([
+  "n2ex_daily_move",
+  "ttf_daily_move",
+  "nbp_daily_move",
+]);
+const DAILY_MOVE_MIN = 0.01;
+const DAILY_MOVE_MAX = 10_000;
+
 function roundHalfStep(n: number): number {
   return Math.round(n * 2) / 2;
+}
+
+function roundPriceMoveStep(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export async function GET() {
@@ -90,6 +102,17 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             error: `threshold_value must be between ${PREMIUM_SCORE_MIN} and ${PREMIUM_SCORE_MAX}`,
+          },
+          { status: 400 },
+        );
+      }
+      threshold_value = v;
+    } else if (DAILY_MOVE_TYPES.has(threshold_type)) {
+      const v = roundPriceMoveStep(threshold_value);
+      if (v < DAILY_MOVE_MIN || v > DAILY_MOVE_MAX) {
+        return NextResponse.json(
+          {
+            error: `threshold_value must be between ${DAILY_MOVE_MIN} and ${DAILY_MOVE_MAX}`,
           },
           { status: 400 },
         );
