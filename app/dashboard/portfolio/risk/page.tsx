@@ -738,9 +738,20 @@ export default function RiskPage() {
                   {dailyPnLSeries.length} days of history
                 </p>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
-                  <div className="h-full rounded-sm" style={{ width: `${coveragePct}%`, backgroundColor: coverageColor }} />
+                  <div
+                    className="h-full rounded-sm"
+                    style={{
+                      width: dailyPnLSeries.length >= 20 ? "100%" : `${coveragePct}%`,
+                      backgroundColor:
+                        dailyPnLSeries.length >= 20 ? BRAND_GREEN : coverageColor,
+                    }}
+                  />
                 </div>
-                <p className="mt-1 text-xs text-ink-light">{dailyPnLSeries.length} / 20 days to full VaR confidence</p>
+                <p className="mt-1 text-xs text-ink-light">
+                  {dailyPnLSeries.length >= 20
+                    ? `Full confidence · ${dailyPnLSeries.length} days of history`
+                    : `${dailyPnLSeries.length} / 20 days to full confidence`}
+                </p>
               </div>
               <div className="col-span-full space-y-1 text-[10px] text-ink-light">
                 <p>EUR/GBP: {gbpEurRate.toFixed(4)} · via ECB</p>
