@@ -62,6 +62,17 @@ const TAB_LABEL: Record<AssetTab, string> = {
 
 type SortMode = "impact" | "time";
 
+type SeverityFilter = "ALL" | "HIGH" | "MEDIUM" | "LOW";
+
+type PlanFilter = "all" | "planned" | "unplanned";
+
+const filterPillClass = (on: boolean) =>
+  `rounded-[4px] border-[0.5px] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors duration-200 ${
+    on
+      ? "border-ink bg-ivory-dark text-ink"
+      : "border-ivory-border bg-card text-ink-mid hover:border-ink/25"
+  }`;
+
 const sectionLabelClass =
   "text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid";
 
@@ -265,6 +276,10 @@ export default function SignalFeedPage() {
   const [sortMode, setSortMode] = useState<SortMode>("impact");
   const [visibleCount, setVisibleCount] = useState(10);
   const [showCleared, setShowCleared] = useState(false);
+  const [assetSearch, setAssetSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("ALL");
+  const [planFilter, setPlanFilter] = useState<PlanFilter>("all");
+  const [minMwInput, setMinMwInput] = useState("");
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
   const [residualDemandGw, setResidualDemandGw] = useState<number | null>(
@@ -399,6 +414,35 @@ export default function SignalFeedPage() {
     if (activeTab !== "ALL") {
       list = list.filter((d) => classifyAssetType(d.asset) === activeTab);
     }
+    const q = assetSearch.trim().toLowerCase();
+    if (q) {
+      list = list.filter((d) => d.asset.toLowerCase().includes(q));
+    }
+    if (severityFilter !== "ALL") {
+      list = list.filter((d) => {
+        const mw = mwDeratedForRow(d.latest);
+        return severityForRow(d.latest, mw) === severityFilter;
+      });
+    }
+    if (planFilter === "planned") {
+      list = list.filter((d) =>
+        /\bPlanned\b/i.test(d.latest.description ?? ""),
+      );
+    } else if (planFilter === "unplanned") {
+      list = list.filter((d) =>
+        /\bUnplanned\b/i.test(d.latest.description ?? ""),
+      );
+    }
+    const minMwTrim = minMwInput.trim();
+    if (minMwTrim !== "") {
+      const minMw = Number(minMwTrim);
+      if (Number.isFinite(minMw) && minMw >= 0) {
+        list = list.filter((d) => {
+          const mw = mwDeratedForRow(d.latest);
+          return mw != null && mw >= minMw;
+        });
+      }
+    }
     const scored = list.map((d) => {
       const mw = mwDeratedForRow(d.latest);
       const assetType = classifyAssetType(d.asset);
@@ -414,7 +458,15 @@ export default function SignalFeedPage() {
       return b.t - a.t;
     });
     return scored.map((x) => x.d);
-  }, [feedVisible, activeTab, sortMode]);
+  }, [
+    feedVisible,
+    activeTab,
+    sortMode,
+    assetSearch,
+    severityFilter,
+    planFilter,
+    minMwInput,
+  ]);
 
   const paged = useMemo(
     () => filteredSorted.slice(0, visibleCount),
@@ -500,63 +552,149 @@ export default function SignalFeedPage() {
       </p>
 
       {/* Filters + sort */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-2">
-          {ASSET_TABS.map((t) => {
-            const on = activeTab === t;
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => {
-                  setActiveTab(t);
-                  setVisibleCount(10);
-                }}
-                className={`rounded-[4px] border-[0.5px] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors duration-200 ${
-                  on
-                    ? "border-ink bg-ivory-dark text-ink"
-                    : "border-ivory-border bg-card text-ink-mid hover:border-ink/25"
-                }`}
-              >
-                {TAB_LABEL[t]}
-              </button>
-            );
-          })}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 border-b-[0.5px] border-ivory-border pb-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-6 sm:gap-y-3">
+          <div className="w-full min-w-0 sm:w-auto sm:max-w-[220px]">
+            <p className={sectionLabelClass}>Search asset</p>
+            <input
+              type="search"
+              value={assetSearch}
+              onChange={(e) => {
+                setAssetSearch(e.target.value);
+                setVisibleCount(10);
+              }}
+              placeholder="Search asset..."
+              autoComplete="off"
+              className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-xs text-ink placeholder:text-ink-light outline-none transition-colors focus:border-ink/35"
+            />
+          </div>
+          <div>
+            <p className={sectionLabelClass}>Severity</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {(
+                [
+                  ["ALL", "All"],
+                  ["HIGH", "High"],
+                  ["MEDIUM", "Medium"],
+                  ["LOW", "Low"],
+                ] as const
+              ).map(([value, label]) => {
+                const on = severityFilter === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setSeverityFilter(value);
+                      setVisibleCount(10);
+                    }}
+                    className={filterPillClass(on)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <p className={sectionLabelClass}>Outage type</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {(
+                [
+                  ["all", "All"],
+                  ["planned", "Planned"],
+                  ["unplanned", "Unplanned"],
+                ] as const
+              ).map(([value, label]) => {
+                const on = planFilter === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setPlanFilter(value);
+                      setVisibleCount(10);
+                    }}
+                    className={filterPillClass(on)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="w-full min-w-0 sm:w-[100px]">
+            <p className={sectionLabelClass}>Min MW</p>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1}
+              value={minMwInput}
+              onChange={(e) => {
+                setMinMwInput(e.target.value);
+                setVisibleCount(10);
+              }}
+              placeholder="—"
+              className="mt-1 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 py-1.5 text-xs tabular-nums text-ink placeholder:text-ink-light outline-none transition-colors focus:border-ink/35"
+            />
+          </div>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink-mid">
-          <input
-            type="checkbox"
-            checked={showCleared}
-            onChange={(e) => {
-              setShowCleared(e.target.checked);
-              setVisibleCount(10);
-            }}
-            className="rounded border-ivory-border text-ink accent-[#8B3A3A]"
-          />
-          <span>Show cleared outages</span>
-        </label>
-        <div className="flex items-center gap-2 text-[11px] text-ink-mid">
-          <span className="font-medium text-ink-light">Sort by:</span>
-          {(["impact", "time"] as const).map((m) => {
-            const on = sortMode === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => {
-                  setSortMode(m);
-                  setVisibleCount(10);
-                }}
-                className={`rounded-[4px] border-[0.5px] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] ${
-                  on
-                    ? "border-ink bg-ivory-dark text-ink"
-                    : "border-ivory-border bg-card text-ink-mid hover:border-ink/25"
-                }`}
-              >
-                {m === "impact" ? "Impact" : "Time"}
-              </button>
-            );
-          })}
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {ASSET_TABS.map((t) => {
+              const on = activeTab === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(t);
+                    setAssetSearch("");
+                    setVisibleCount(10);
+                  }}
+                  className={`rounded-[4px] border-[0.5px] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors duration-200 ${
+                    on
+                      ? "border-ink bg-ivory-dark text-ink"
+                      : "border-ivory-border bg-card text-ink-mid hover:border-ink/25"
+                  }`}
+                >
+                  {TAB_LABEL[t]}
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink-mid">
+            <input
+              type="checkbox"
+              checked={showCleared}
+              onChange={(e) => {
+                setShowCleared(e.target.checked);
+                setVisibleCount(10);
+              }}
+              className="rounded border-ivory-border text-ink accent-[#8B3A3A]"
+            />
+            <span>Show cleared outages</span>
+          </label>
+          <div className="flex items-center gap-2 text-[11px] text-ink-mid">
+            <span className="font-medium text-ink-light">Sort by:</span>
+            {(["impact", "time"] as const).map((m) => {
+              const on = sortMode === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setSortMode(m);
+                    setVisibleCount(10);
+                  }}
+                  className={filterPillClass(on)}
+                >
+                  {m === "impact" ? "Impact" : "Time"}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
