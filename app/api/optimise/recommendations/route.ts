@@ -267,6 +267,19 @@ export async function GET(req: Request) {
 
     const nbpByDayPth = nbpEurMwhLevelsToPthByDay(nbpByDayEurMwh, fxByDay, gbpPerEur);
 
+    console.log("[optimise-debug] sinceDate:", sinceDate);
+    console.log("[optimise-debug] powerByDay days:", Object.keys(powerByDay).length);
+    console.log("[optimise-debug] ttfByDay days:", Object.keys(ttfByDay).length);
+    console.log("[optimise-debug] nbpByDayEurMwh days:", Object.keys(nbpByDayEurMwh).length);
+    console.log("[optimise-debug] nbpByDayPth days:", Object.keys(nbpByDayPth).length);
+    console.log("[optimise-debug] gasRes rows:", (gasRes.data ?? []).length);
+    console.log("[optimise-debug] powerRes rows:", (powerRes.data ?? []).length);
+    const overlapDates = Object.keys(powerByDay).filter(
+      (d) => d in ttfByDay && d in nbpByDayPth,
+    );
+    console.log("[optimise-debug] overlap dates:", overlapDates.length);
+    console.log("[optimise-debug] first 5 overlap:", overlapDates.slice(0, 5));
+
     const scenarios = [
       ...buildHistoricalScenarios({
         powerByDay,
