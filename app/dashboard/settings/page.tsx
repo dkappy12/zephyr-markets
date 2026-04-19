@@ -1872,8 +1872,9 @@ function PlanApiPanel() {
           API access
         </p>
         <p className="mt-1 text-xs text-ink-light">
-          Full REST API available on the Team plan. Programmatic access to all
-          Zephyr data feeds.
+          {isAdmin
+            ? "REST API access for your administrator account. Use the keys above with the X-API-Key header."
+            : "Full REST API available on the Team plan. Programmatic access to all Zephyr data feeds."}
         </p>
         <div className="mt-5 divide-y-[0.5px] divide-ivory-border">
           {endpoints.map((e) => (
@@ -1889,9 +1890,11 @@ function PlanApiPanel() {
           ))}
         </div>
         <p className="mt-4 text-xs text-ink-light">
-          {currentTierCode === "team"
-            ? "Team API access is enabled. /api/v1/premium is live; additional endpoints are being rolled out."
-            : "API access is unlocked on Team plan and above."}
+          {isAdmin
+            ? "API access is enabled for your account. /api/v1/premium is live; additional endpoints are being rolled out."
+            : currentTierCode === "team"
+              ? "Team API access is enabled. /api/v1/premium is live; additional endpoints are being rolled out."
+              : "API access is unlocked on Team plan and above."}
         </p>
       </div>
     </motion.div>

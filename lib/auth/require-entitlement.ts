@@ -37,6 +37,11 @@ export async function requireEntitlement(
 ) {
   const state = await getEffectiveBillingState(supabase as EntitlementClient, userId);
 
+  /** Platform billing admin (see subscription-state adminOverrideState) — full feature access. */
+  if (state.status === "admin") {
+    return { state, response: null };
+  }
+
   if (!state.canUsePremiumNow) {
     return {
       state,

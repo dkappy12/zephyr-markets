@@ -45,4 +45,19 @@ describe("requireEntitlement", () => {
     });
     expect(result.response).toBeNull();
   });
+
+  it("allows billing admin override without tier or feature gates", async () => {
+    mockGetEffectiveBillingState.mockResolvedValue({
+      effectiveTier: "team",
+      entitlements: { apiAccess: true },
+      canUsePremiumNow: true,
+      status: "admin",
+      teamMemberOfOwnerId: null,
+    });
+    const result = await requireEntitlement({}, "u1", {
+      feature: "apiAccess",
+      minimumTier: "team",
+    });
+    expect(result.response).toBeNull();
+  });
 });
