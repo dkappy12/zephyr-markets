@@ -205,29 +205,6 @@ export default function OptimisePage() {
     ];
   }, [data]);
 
-  const gateChecks = useMemo(() => {
-    if (!data) return [];
-    return [
-      {
-        label: "Historical scenarios ≥ 20",
-        pass: data.diagnostics.historicalScenarioCount >= 20,
-        detail: `${data.diagnostics.historicalScenarioCount} available`,
-      },
-      {
-        label: "Candidate packages ≥ 30",
-        pass: data.diagnostics.candidatePackageCount >= 30,
-        detail: `${data.diagnostics.candidatePackageCount} generated`,
-      },
-      {
-        label: "Independent NBP history (no proxy)",
-        pass: !data.diagnostics.nbpProxyUsed,
-        detail: data.diagnostics.nbpProxyUsed
-          ? "Missing dates detected"
-          : "Independent history available",
-      },
-    ];
-  }, [data]);
-
   const frontierData = useMemo(() => {
     if (!data) return null;
     const riskX = (m: { varLoss: number; cvarLoss: number }) =>
@@ -350,33 +327,6 @@ export default function OptimisePage() {
 
       {!loading && userId && data && (
         <>
-          {data.blocked && (
-            <section className="rounded-[4px] border-[0.5px] border-[#8B3A3A]/40 bg-[#8B3A3A]/5 p-4">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#8B3A3A]">
-                Reliability Gate Active
-              </p>
-              <p className="mt-2 text-sm text-[#8B3A3A]">
-                {data.blockedReason ?? "Recommendations are blocked at current model quality."}
-              </p>
-              {data.qualityWarnings.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {data.qualityWarnings.map((w) => (
-                    <p key={w} className="text-xs text-ink-mid">
-                      {w}
-                    </p>
-                  ))}
-                </div>
-              )}
-              <div className="mt-3 space-y-1">
-                {gateChecks.map((c) => (
-                  <p key={c.label} className="text-xs text-ink-mid">
-                    {c.pass ? "PASS" : "FAIL"} · {c.label} ({c.detail})
-                  </p>
-                ))}
-              </div>
-            </section>
-          )}
-
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Model Quality
@@ -420,7 +370,7 @@ export default function OptimisePage() {
                 ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered by stress guardrail`
                 : ""}
             </p>
-            {data.qualityWarnings.length > 0 && !data.blocked && (
+            {data.qualityWarnings.length > 0 && (
               <div className="mt-2 space-y-1">
                 {data.qualityWarnings.map((w) => (
                   <p key={w} className="text-xs text-ink-mid">
@@ -428,11 +378,6 @@ export default function OptimisePage() {
                   </p>
                 ))}
               </div>
-            )}
-            {data.blocked && data.qualityWarnings.length > 0 && (
-              <p className="mt-2 text-xs text-ink-mid">
-                Warning details are listed in the reliability gate above.
-              </p>
             )}
           </section>
 
@@ -510,11 +455,7 @@ export default function OptimisePage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Recommended Package
             </p>
-            {data.blocked ? (
-              <p className="mt-3 text-sm text-ink-mid">
-                Recommendations are intentionally hidden until reliability improves.
-              </p>
-            ) : data.recommendations.length === 0 ? (
+            {data.recommendations.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 {data.diagnostics.noActionReason ??
                   "No hedge package improves the selected objective under current constraints."}
@@ -583,10 +524,8 @@ export default function OptimisePage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Alternative Packages
             </p>
-            {data.blocked ? (
-              <p className="mt-3 text-sm text-ink-mid">
-                Alternatives hidden while reliability gate is active.
-              </p>
+            {data.alternatives.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-mid">No alternatives available.</p>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-ink-mid">
                 {data.alternatives.map((alt) => (
