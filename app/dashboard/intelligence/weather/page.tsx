@@ -1187,24 +1187,9 @@ export default function WeatherPage() {
                     : "underestimating"}
                   )
                 </p>
-                <p
-                  className={`mt-2 text-sm ${
-                    yesterdayMae.mae < 2
-                      ? "text-[#1D6B4E]"
-                      : yesterdayMae.mae <= 4
-                        ? "text-amber-700"
-                        : "text-[#8B3A3A]"
-                  }`}
-                >
-                  {yesterdayMae.mae < 2
-                    ? "Good accuracy"
-                    : yesterdayMae.mae <= 4
-                      ? "Moderate accuracy"
-                      : "Poor accuracy — treat forecasts with caution"}
-                </p>
                 {yesterdayHourlyComparison.length > 0 ? (
-                  <div className="mt-4 h-[140px] w-full">
-                    <ResponsiveContainer width="100%" height={140}>
+                  <div className="mt-4 h-[200px] w-full">
+                    <ResponsiveContainer width="100%" height={200}>
                       <LineChart
                         data={yesterdayHourlyComparison}
                         margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
