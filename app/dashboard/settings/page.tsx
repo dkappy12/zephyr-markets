@@ -618,6 +618,7 @@ function TeamPanel() {
     isOwner?: boolean;
     viewerRole?: "owner" | "member" | null;
   } | null>(null);
+  const [isAdminAccount, setIsAdminAccount] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -655,7 +656,35 @@ function TeamPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/billing/status");
+        if (cancelled) return;
+        if (!res.ok) {
+          setIsAdminAccount(false);
+          await load();
+          return;
+        }
+        const body = (await res.json()) as { status?: string };
+        if (cancelled) return;
+        if (body.status === "admin") {
+          setIsAdminAccount(true);
+          setLoading(false);
+          return;
+        }
+        setIsAdminAccount(false);
+        await load();
+      } catch {
+        if (!cancelled) {
+          setIsAdminAccount(false);
+          await load();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   useEffect(() => {
@@ -902,6 +931,25 @@ function TeamPanel() {
     if (confirmAction) return;
     lastFocusedRef.current?.focus?.();
   }, [confirmAction]);
+
+  if (isAdminAccount) {
+    return (
+      <motion.div
+        key="team"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.2 }}
+        className="space-y-6"
+      >
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-sm text-ink-mid">
+            Team management is not available on admin accounts.
+          </p>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <>
@@ -1288,6 +1336,7 @@ function PlanApiPanel() {
   const currentTierCode = billingStatus?.effectiveTier ?? "free";
   const currentTier = TIER_ENTITLEMENTS[currentTierCode];
   const statusLabel = billingStatus?.statusLabel ?? "active";
+  const isAdmin = billingStatus?.status === "admin";
   const isPaidTier =
     currentTierCode === "pro" ||
     currentTierCode === "team" ||
@@ -1409,24 +1458,31 @@ function PlanApiPanel() {
         </p>
         <div className="mt-4 flex items-start justify-between">
           <div>
-            <p className="font-serif text-2xl text-ink">{currentTier.label}</p>
-            {isTeamSeat ? (
+            <p className="font-serif text-2xl text-ink">
+              {isAdmin ? "Admin" : currentTier.label}
+            </p>
+            {isAdmin ? (
+              <p className="mt-1 text-xs text-ink-light">
+                Platform administrator account.
+              </p>
+            ) : null}
+            {!isAdmin && isTeamSeat ? (
               <p className="mt-1 text-xs text-ink-light">
                 Team seat — your access follows your team&apos;s subscription.
               </p>
             ) : null}
-            {billingStatus?.interval ? (
+            {!isAdmin && billingStatus?.interval ? (
               <p className="mt-1 text-xs text-ink-light">
                 Billing interval:{" "}
                 {billingStatus.interval === "annual" ? "Annual" : "Monthly"}
               </p>
             ) : null}
-            {periodEndLabel ? (
+            {!isAdmin && periodEndLabel ? (
               <p className="mt-1 text-xs text-ink-light">
                 Current period end: {periodEndLabel}
               </p>
             ) : null}
-            {billingStatus?.cancelAtPeriodEnd ? (
+            {!isAdmin && billingStatus?.cancelAtPeriodEnd ? (
               <p className="mt-1 text-xs text-bear">
                 Subscription will cancel at period end.
               </p>
@@ -1444,15 +1500,17 @@ function PlanApiPanel() {
             <p className="text-xs text-bear">{billingIssueMessage}</p>
           </div>
         ) : null}
-        <p className="mt-3 text-xs text-ink-light">
-          {isTeamSeat
-            ? "Only the team owner can change payment method or subscription. Leave the team if you need your own billing."
-            : isPaidTier
-              ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. You will be sent back to Overview when you finish in Stripe."
-              + " If you decide not to continue, use the Return link in Stripe’s left sidebar."
-              : "Subscribe in the section below to unlock premium."}
-        </p>
-        {isPaidTier && !isTeamSeat ? (
+        {!isAdmin ? (
+          <p className="mt-3 text-xs text-ink-light">
+            {isTeamSeat
+              ? "Only the team owner can change payment method or subscription. Leave the team if you need your own billing."
+              : isPaidTier
+                ? "Manage billing in Stripe for payment method, invoices, and subscription changes available on your account. You will be sent back to Overview when you finish in Stripe."
+                + " If you decide not to continue, use the Return link in Stripe’s left sidebar."
+                : "Subscribe in the section below to unlock premium."}
+          </p>
+        ) : null}
+        {isPaidTier && !isTeamSeat && !isAdmin ? (
           <button
             type="button"
             disabled={openingPortal}
@@ -1464,7 +1522,8 @@ function PlanApiPanel() {
             {openingPortal ? "Opening…" : "Manage billing"}
           </button>
         ) : null}
-        {!isPaidTier &&
+        {!isAdmin &&
+        !isPaidTier &&
         !isTeamSeat &&
         billingStatus?.actionRequired === "payment_method" ? (
           <button
@@ -1480,7 +1539,7 @@ function PlanApiPanel() {
         ) : null}
       </div>
 
-      {currentTierCode === "free" ? (
+      {!isAdmin && currentTierCode === "free" ? (
         <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             Choose a plan
@@ -1552,7 +1611,8 @@ function PlanApiPanel() {
         </div>
       ) : null}
 
-      {(currentTierCode === "team" || currentTierCode === "enterprise") &&
+      {!isAdmin &&
+      (currentTierCode === "team" || currentTierCode === "enterprise") &&
       !isTeamSeat ? (
         <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
