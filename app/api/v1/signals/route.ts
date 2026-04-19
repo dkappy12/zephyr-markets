@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const { data: rows, error } = await admin
       .from("signals")
       .select(
-        "id, asset_id, asset_name, severity, confidence, event_type, mw_lost, planned, implication, price_impact_estimate, created_at",
+        "id, type, title, description, direction, source, confidence, quality_score, created_at, remit_message_id",
       )
       .order("created_at", { ascending: false })
       .limit(limit);

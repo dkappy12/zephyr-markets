@@ -19,9 +19,11 @@ function dateStringToMs(ymd: string): number {
 
 function rowAsOfMs(row: Record<string, unknown> | null | undefined): number | null {
   if (!row) return null;
-  const t =
-    parseTimeMs(row.price_time) ??
-    parseTimeMs(row.fetched_at);
+  const isMarketPricesRow =
+    typeof row.market === "string" && row.market.length > 0;
+  const t = isMarketPricesRow
+    ? parseTimeMs(row.fetched_at)
+    : parseTimeMs(row.price_time) ?? parseTimeMs(row.fetched_at);
   if (t != null) return t;
   const pd = row.price_date;
   if (typeof pd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pd)) {
@@ -55,9 +57,9 @@ export async function GET(request: Request) {
     ] = await Promise.all([
       admin
         .from("market_prices")
-        .select("price_gbp_mwh, price_time, fetched_at, price_date")
+        .select("price_gbp_mwh, fetched_at, price_date, market")
         .eq("market", "N2EX")
-        .order("price_time", { ascending: false })
+        .order("fetched_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
       admin
