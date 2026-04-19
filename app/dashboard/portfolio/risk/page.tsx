@@ -621,11 +621,6 @@ export default function RiskPage() {
 
   const hasPositions = positions.length > 0;
   const noHistory = dailyPnLSeries.length === 0;
-  const anyPositionRiskOver100 =
-    !noHistory &&
-    perPositionRisk.some(
-      ({ worst }) => (Math.abs(worst?.pnl ?? 0) / totalRiskBase) * 100 > 100,
-    );
   const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
   const reliabilityLabel = formatReliabilityConfidenceDesk(
     reliabilityConfidenceFromVaRHistoryDays(dailyPnLSeries.length),
@@ -691,18 +686,14 @@ export default function RiskPage() {
               metrics will appear once price series data is available.
             </p>
           ) : null}
-          <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
-            <p className={sectionLabel}>Reliability</p>
-            <p className="mt-1 text-sm text-ink-mid">
-              Confidence {reliabilityLabel} · coverage {coveragePct.toFixed(0)}% ·
-              data mode historical mark-to-market
-            </p>
-          </div>
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4"
           >
+            <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+              Confidence {reliabilityLabel} · coverage {coveragePct.toFixed(0)}% · historical mark-to-market
+            </p>
             <div className="flex flex-col gap-6 sm:flex-row sm:gap-0">
               <div className="flex-1 min-w-0 sm:border-r-[0.5px] sm:border-ivory-border sm:pr-6 sm:mr-6">
                 <p className={sectionLabel}>95% 1-day VaR</p>
@@ -793,7 +784,8 @@ export default function RiskPage() {
             <p className={sectionLabel}>Position risk</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Risk by position</h2>
             <p className="mt-1 text-sm text-ink-light">Contribution of each position to total portfolio VaR</p>
-            <div className="mt-4 overflow-x-auto rounded-[6px] border border-[#D4CCBB] bg-card">
+            <div className="mt-4 rounded-[6px] border border-[#D4CCBB] bg-card">
+              <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-left text-[13px]">
                 <thead>
                   <tr className="border-b border-ivory-border text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-mid">
@@ -834,20 +826,25 @@ export default function RiskPage() {
                   })}
                 </tbody>
               </table>
+              </div>
+              <div className="border-t-[0.5px] border-ivory-border px-4 pt-3 mt-3 pb-3">
+                <p className="text-[11px] text-ink-light">
+                  Individual positions can exceed 100% when others offset portfolio risk.
+                </p>
+                {diversificationBenefit > 0 ? (
+                  <p className="mt-2 text-[11px] text-ink">
+                    Diversification benefit:{" "}
+                    <span className="font-semibold">{formatGbp(diversificationBenefit)}</span>
+                    <span className="text-ink-light">
+                      {" "}
+                      · your positions partially offset each other&apos;s risk
+                    </span>
+                  </p>
+                ) : null}
+              </div>
             </div>
             {noHistory ? (
               <p className="mt-2 text-xs text-ink-light">Risk metrics accumulate with price history</p>
-            ) : null}
-            {anyPositionRiskOver100 ? (
-              <p className="mt-2 text-xs text-ink-light">
-                Individual positions can exceed 100% when others offset portfolio
-                risk.
-              </p>
-            ) : null}
-            {diversificationBenefit > 0 ? (
-              <p className="mt-3 text-sm text-ink-mid">
-                Diversification benefit: {formatGbp(diversificationBenefit)} (your positions partially offset each other&apos;s risk)
-              </p>
             ) : null}
           </section>
 
