@@ -459,12 +459,7 @@ export default function SignupPage() {
                 <button
                   type="button"
                   onClick={back}
-                  disabled={step === 0}
-                  className={`text-xs font-semibold uppercase tracking-[0.12em] ${
-                    step === 0
-                      ? "text-ink-light"
-                      : "text-ink-mid hover:text-ink"
-                  }`}
+                  className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-mid hover:text-ink"
                 >
                   Back
                 </button>
