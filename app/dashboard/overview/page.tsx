@@ -500,7 +500,6 @@ function OverviewPageInner() {
           label="GB WIND (MODEL)"
           value={windGw === null ? "—" : windGw.toFixed(1)}
           unit="GW"
-          trend={windGw === null ? undefined : "flat"}
           footnote={
             windForecastTimeIso
               ? `Forecast step ${formatDbAge(windForecastTimeIso, relativeNowMs)}`

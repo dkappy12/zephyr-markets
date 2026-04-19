@@ -316,7 +316,7 @@ export default function WeatherPage() {
           .from("physical_premium")
           .select("calculated_at, wind_gw")
           .order("calculated_at", { ascending: false })
-          .limit(48),
+          .limit(576),
         supabase
           .from("physical_premium")
           .select(

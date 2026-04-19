@@ -682,7 +682,7 @@ export default function BriefPage() {
               watchItems.map((item, idx) => (
                 <li
                   key={item}
-                  className={`flex gap-3 border-ivory-border py-3 font-serif text-[15px] leading-relaxed text-ink transition-colors hover:bg-[#f7f2ea] ${
+                  className={`flex gap-3 border-ivory-border py-3 font-serif text-[15px] leading-relaxed text-ink transition-colors hover:bg-ivory-dark ${
                     idx < watchItems.length - 1
                       ? "border-b-[0.5px]"
                       : ""
