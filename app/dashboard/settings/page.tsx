@@ -6,7 +6,20 @@ import { TIER_ENTITLEMENTS } from "@/lib/billing/entitlements";
 import { defaultTeamNameFromUser } from "@/lib/team/default-team-name";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+function normalizeRole(role: string | null | undefined): string | null {
+  if (!role) return null;
+  const normalized = role.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
 
 const baseTabs = ["Profile", "Markets & Alerts", "Plan & API"] as const;
 const teamTab = "Team" as const;
@@ -15,32 +28,90 @@ function SettingsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<string>("Profile");
-  const [showTeamTab, setShowTeamTab] = useState(false);
+  const [billingInfo, setBillingInfo] = useState<{
+    effectiveTier?: string;
+    status?: string;
+  } | null>(null);
+  const [billingFetched, setBillingFetched] = useState(false);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [roleResolved, setRoleResolved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/billing/status")
       .then(async (res) => {
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          effectiveTier?: string;
-          status?: string;
-        };
-        const t = body.effectiveTier;
-        const isAdmin = body.status === "admin";
-        if (
-          !cancelled &&
-          !isAdmin &&
-          (t === "team" || t === "enterprise")
-        ) {
-          setShowTeamTab(true);
+        if (!cancelled) {
+          if (!res.ok) {
+            setBillingInfo(null);
+          } else {
+            const body = (await res.json()) as {
+              effectiveTier?: string;
+              status?: string;
+            };
+            setBillingInfo(body);
+          }
+          setBillingFetched(true);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setBillingInfo(null);
+          setBillingFetched(true);
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    void (async () => {
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        if (cancelled || !userData.user) {
+          setIsPlatformAdmin(false);
+          return;
+        }
+        const appRole = normalizeRole(
+          (userData.user.app_metadata as { role?: string } | undefined)?.role ??
+            null,
+        );
+        const { data } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userData.user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        const profileRole = normalizeRole(
+          (data as { role?: string } | null)?.role,
+        );
+        setIsPlatformAdmin(
+          appRole === "admin" || profileRole === "admin",
+        );
+      } catch {
+        if (!cancelled) setIsPlatformAdmin(false);
+      } finally {
+        if (!cancelled) setRoleResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showTeamTab = useMemo(() => {
+    if (!billingFetched || !roleResolved) return false;
+    if (isPlatformAdmin || billingInfo?.status === "admin") return false;
+    const t = billingInfo?.effectiveTier;
+    return t === "team" || t === "enterprise";
+  }, [
+    billingFetched,
+    roleResolved,
+    billingInfo,
+    isPlatformAdmin,
+  ]);
 
   useEffect(() => {
     if (
