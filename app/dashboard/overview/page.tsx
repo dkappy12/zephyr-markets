@@ -33,6 +33,144 @@ const PREMIUM_DIRECTION_LABEL: Record<string, string> = {
   STABLE: "Stable",
 };
 
+type PremiumHistoryRow = {
+  calculated_at: string;
+  normalised_score: number;
+  direction: string;
+  regime: string | null;
+};
+
+const PREMIUM_HISTORY_MAX_POINTS = 200;
+const CHART_W = 720;
+const CHART_H = 220;
+const CHART_PAD = { l: 8, r: 8, t: 14, b: 30 };
+
+function downsampleHistoryRows(rows: PremiumHistoryRow[], maxPoints: number): PremiumHistoryRow[] {
+  if (rows.length <= maxPoints) return rows;
+  const out: PremiumHistoryRow[] = [];
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.round((i / (maxPoints - 1)) * (rows.length - 1));
+    out.push(rows[idx]);
+  }
+  return out;
+}
+
+function buildSparklineFills(
+  points: { x: number; y: number }[],
+  zeroY: number,
+): { gold: string; terra: string } {
+  if (points.length < 2) return { gold: "", terra: "" };
+  const goldSegs: string[] = [];
+  const terraSegs: string[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const aPos = a.y < zeroY;
+    const bPos = b.y < zeroY;
+    if (aPos && bPos) {
+      goldSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
+    } else if (!aPos && !bPos) {
+      terraSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
+    } else {
+      const dy = b.y - a.y;
+      if (Math.abs(dy) < 1e-9) continue;
+      const tCross = (zeroY - a.y) / dy;
+      const cx = a.x + tCross * (b.x - a.x);
+      if (aPos) {
+        goldSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${cx} ${zeroY} Z`);
+        terraSegs.push(`M ${cx} ${zeroY} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
+      } else {
+        terraSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${cx} ${zeroY} Z`);
+        goldSegs.push(`M ${cx} ${zeroY} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
+      }
+    }
+  }
+  return { gold: goldSegs.join(" "), terra: terraSegs.join(" ") };
+}
+
+function PremiumHistorySparkline({
+  rows,
+}: {
+  rows: PremiumHistoryRow[];
+}) {
+  const times = rows.map((r) => new Date(r.calculated_at).getTime());
+  const scores = rows.map((r) => r.normalised_score);
+  const tMin = Math.min(...times);
+  const tMax = Math.max(...times);
+  const sMinRaw = Math.min(0, ...scores);
+  const sMaxRaw = Math.max(0, ...scores);
+  const span = sMaxRaw - sMinRaw || 1;
+  const padS = span * 0.06;
+  const sMin = sMinRaw - padS;
+  const sMax = sMaxRaw + padS;
+  const sRange = sMax - sMin || 1;
+
+  const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
+  const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b;
+  const xAt = (t: number) =>
+    CHART_PAD.l + ((t - tMin) / (tMax - tMin || 1)) * innerW;
+  const yAt = (s: number) => CHART_PAD.t + ((sMax - s) / sRange) * innerH;
+  const zeroY = yAt(0);
+
+  const pts = rows.map((r, i) => ({
+    x: xAt(times[i]),
+    y: yAt(scores[i]),
+  }));
+
+  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+  const { gold, terra } = buildSparklineFills(pts, zeroY);
+
+  const tickTimes = [0, 1, 2, 3, 4].map((k) => tMin + (k / 4) * (tMax - tMin));
+
+  return (
+    <svg
+      className="mt-4 w-full max-w-full font-sans text-ink-mid"
+      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden
+    >
+      {gold ? (
+        <path d={gold} fill="#8C6D1F" fillOpacity={0.22} stroke="none" />
+      ) : null}
+      {terra ? (
+        <path d={terra} fill="#9B3D20" fillOpacity={0.22} stroke="none" />
+      ) : null}
+      <line
+        x1={CHART_PAD.l}
+        x2={CHART_W - CHART_PAD.r}
+        y1={zeroY}
+        y2={zeroY}
+        stroke="currentColor"
+        strokeOpacity={0.25}
+        strokeWidth={1}
+      />
+      <path
+        d={lineD}
+        fill="none"
+        stroke="#2c2a26"
+        strokeWidth={1.25}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {tickTimes.map((tt, i) => (
+        <text
+          key={i}
+          x={xAt(tt)}
+          y={CHART_H - 6}
+          textAnchor="middle"
+          className="fill-current"
+          style={{ fontSize: 9, fontFamily: "var(--font-dm-sans), DM Sans, sans-serif" }}
+        >
+          {new Date(tt).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+          })}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
 /** PostgREST may return numeric columns as number or string. */
 function parsePhysicalPremiumScore(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -141,6 +279,8 @@ function OverviewPageInner() {
   const [solarDatetimeGmt, setSolarDatetimeGmt] = useState<string | null>(null);
   const [signalDelayMinutes, setSignalDelayMinutes] = useState(0);
   const [hasPositions, setHasPositions] = useState<boolean>(false);
+  const [premiumHistoryAll, setPremiumHistoryAll] = useState<PremiumHistoryRow[]>([]);
+  const [premiumHistoryWindow, setPremiumHistoryWindow] = useState<7 | 14 | 30>(30);
 
   useEffect(() => {
     let active = true;
@@ -200,6 +340,9 @@ function OverviewPageInner() {
       Date.now() - signalDelayMinutes * 60_000,
     ).toISOString();
     const nowIso = new Date().toISOString();
+    const premiumHistorySince = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
     async function load() {
       setLoading(true);
@@ -208,6 +351,7 @@ function OverviewPageInner() {
         countRes,
         windRes,
         premiumRes,
+        premiumHistRes,
         n2exRes,
         ttfRes,
         solarRes,
@@ -241,6 +385,12 @@ function OverviewPageInner() {
           .order("calculated_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
+        supabase
+          .from("physical_premium")
+          .select("normalised_score, calculated_at, direction, regime")
+          .gte("calculated_at", premiumHistorySince)
+          .order("calculated_at", { ascending: true })
+          .limit(5000),
         supabase
           .from("market_prices")
           .select("price_gbp_mwh, price_date, settlement_period, market")
@@ -366,6 +516,31 @@ function OverviewPageInner() {
         setPremiumCalculatedAtIso(null);
       }
 
+      if (!premiumHistRes.error && Array.isArray(premiumHistRes.data)) {
+        const parsed: PremiumHistoryRow[] = [];
+        for (const raw of premiumHistRes.data as Record<string, unknown>[]) {
+          const sc = parsePhysicalPremiumScore(raw.normalised_score);
+          if (!Number.isFinite(sc)) continue;
+          const ca = raw.calculated_at;
+          if (typeof ca !== "string" || !ca.trim()) continue;
+          const dirRaw = raw.direction;
+          const dir =
+            typeof dirRaw === "string" ? dirRaw.trim().toUpperCase() : "";
+          const regRaw = raw.regime;
+          const regimeVal =
+            typeof regRaw === "string" && regRaw.trim() !== "" ? regRaw : null;
+          parsed.push({
+            calculated_at: ca,
+            normalised_score: sc,
+            direction: dir,
+            regime: regimeVal,
+          });
+        }
+        setPremiumHistoryAll(parsed);
+      } else {
+        setPremiumHistoryAll([]);
+      }
+
       if (!n2exRes.error && n2exRes.data) {
         const row = n2exRes.data as {
           price_gbp_mwh?: unknown;
@@ -483,6 +658,18 @@ function OverviewPageInner() {
     if (windGw < mean - 1) return "down";
     return "flat";
   })();
+
+  const premiumHistoryFiltered = useMemo(() => {
+    const cutoff = Date.now() - premiumHistoryWindow * 86_400_000;
+    return premiumHistoryAll.filter(
+      (r) => new Date(r.calculated_at).getTime() >= cutoff,
+    );
+  }, [premiumHistoryAll, premiumHistoryWindow]);
+
+  const premiumHistoryChartRows = useMemo(
+    () => downsampleHistoryRows(premiumHistoryFiltered, PREMIUM_HISTORY_MAX_POINTS),
+    [premiumHistoryFiltered],
+  );
 
   return (
     <div className="space-y-10">
@@ -737,6 +924,47 @@ function OverviewPageInner() {
             </div>
           </div>
         </div>
+      </motion.section>
+
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.32, delay: 0.08 }}
+        className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-5"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+              Premium history
+            </h2>
+            <p className="mt-1 font-sans text-xs text-ink-mid">
+              Normalised score · gold = firming · red = softening
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-0.5 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory p-0.5">
+            {([7, 14, 30] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setPremiumHistoryWindow(d)}
+                className={`rounded-[3px] px-2.5 py-1 font-sans text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors ${
+                  premiumHistoryWindow === d
+                    ? "border-[0.5px] border-ivory-border bg-card text-ink shadow-sm"
+                    : "text-ink-mid hover:text-ink"
+                }`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+        {premiumHistoryFiltered.length < 3 ? (
+          <p className="mt-4 font-sans text-sm text-ink-mid">
+            Not enough history in this window to chart.
+          </p>
+        ) : (
+          <PremiumHistorySparkline rows={premiumHistoryChartRows} />
+        )}
       </motion.section>
 
       <section className="space-y-4">
