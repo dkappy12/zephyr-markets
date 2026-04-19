@@ -35,6 +35,31 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en-GB" className="h-full antialiased">
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+      (function() {
+        try {
+          var path = window.location.pathname;
+          if (!path.startsWith("/dashboard")) {
+            document.documentElement.removeAttribute("data-theme");
+            return;
+          }
+          var saved = localStorage.getItem('zephyr-theme');
+          if (saved === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          } else if (saved === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+          } else {
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+              document.documentElement.setAttribute('data-theme', 'dark');
+            }
+          }
+        } catch(e) {}
+      })();
+    `,
+        }}
+      />
       <body className="min-h-full bg-ivory font-sans text-ink">
         {children}
       </body>

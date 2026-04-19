@@ -37,7 +37,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
     };
     mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    return () => {
+      mq.removeEventListener("change", handler);
+      document.documentElement.removeAttribute("data-theme");
+    };
   }, []);
 
   const setTheme = (t: "light" | "dark") => {
