@@ -189,13 +189,9 @@ export async function GET(req: Request) {
         .select("*")
         .eq("user_id", user.id)
         .eq("is_closed", false),
-      createAdminClient()
-        .from("market_prices")
-        .select("price_date, price_gbp_mwh, market")
-        .or("market.eq.N2EX,market.eq.APX")
-        .gte("price_date", sinceDate)
-        .order("price_date", { ascending: true })
-        .limit(15000),
+      createAdminClient().rpc("get_daily_power_prices", {
+        since_date: sinceDate,
+      }),
       createAdminClient()
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
@@ -234,7 +230,7 @@ export async function GET(req: Request) {
     const powerAgg: Record<string, { sum: number; count: number }> = {};
     for (const row of powerRes.data ?? []) {
       const day = parseDateOnly(row.price_date);
-      const px = parseNum(row.price_gbp_mwh);
+      const px = parseNum(row.avg_price_gbp_mwh);
       if (!day || px == null) continue;
       addDailySample(powerAgg, day, px);
     }
