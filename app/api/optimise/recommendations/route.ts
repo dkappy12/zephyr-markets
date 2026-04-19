@@ -251,6 +251,9 @@ export async function GET(req: Request) {
     const ttfByDay = finaliseDailyAverage(ttfAgg);
     const nbpByDayEurMwh = finaliseDailyAverage(nbpAgg);
     for (const day of Object.keys(ttfByDay)) {
+      const d = new Date(day + "T12:00:00Z");
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
       if (nbpByDayEurMwh[day] == null) nbpProxyUsed = true;
     }
     const fxByDay: Record<string, number> = {};
