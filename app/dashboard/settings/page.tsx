@@ -22,7 +22,14 @@ const teamTab = "Team" as const;
 function SettingsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<string>("Profile");
+  const [tab, setTab] = useState<string>(() => {
+    if (typeof window === "undefined") return "Profile";
+    const p = new URLSearchParams(window.location.search).get("tab")?.toLowerCase();
+    if (p === "plan" || p === "plan & api" || p === "plan%20%26%20api") return "Plan & API";
+    if (p === "markets" || p === "markets & alerts") return "Markets & Alerts";
+    if (p === "team") return "Team";
+    return "Profile";
+  });
   const [billingInfo, setBillingInfo] = useState<{
     effectiveTier?: string;
     status?: string;
