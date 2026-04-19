@@ -1,5 +1,6 @@
 "use client";
 
+import { TierGate } from "@/components/billing/TierGate";
 import { CsvImportFlow } from "@/components/portfolio/CsvImportFlow";
 import { QuickAddModal } from "@/components/portfolio/QuickAddModal";
 import {
@@ -220,16 +221,31 @@ export function BookPageClient() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [billingChecked, setBillingChecked] = useState(false);
   const [portfolioEnabled, setPortfolioEnabled] = useState(false);
+  const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(
+    null,
+  );
+  const [exportLoading, setExportLoading] = useState<
+    null | "positions" | "pnl" | "signals"
+  >(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/billing/status")
       .then((r) => r.json())
-      .then((body: { entitlements?: { portfolioEnabled?: boolean } }) => {
-        setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
-        setBillingChecked(true);
-      })
+      .then(
+        (body: {
+          entitlements?: { portfolioEnabled?: boolean };
+          effectiveTier?: string;
+        }) => {
+          setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
+          const t = body.effectiveTier;
+          setCurrentTier(t === "pro" || t === "team" ? t : "free");
+          setBillingChecked(true);
+        },
+      )
       .catch(() => {
         setPortfolioEnabled(false);
+        setCurrentTier("free");
         setBillingChecked(true);
       });
   }, []);
@@ -238,6 +254,41 @@ export function BookPageClient() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   }, []);
+
+  const downloadExport = useCallback(
+    async (type: "positions" | "pnl" | "signals") => {
+      setExportError(null);
+      setExportLoading(type);
+      try {
+        const res = await fetch(`/api/portfolio/export?type=${type}`);
+        const ct = res.headers.get("content-type") ?? "";
+        if (!res.ok) {
+          if (ct.includes("application/json")) {
+            const j = (await res.json()) as { error?: string };
+            throw new Error(j.error ?? `Export failed (${res.status})`);
+          }
+          throw new Error(`Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get("Content-Disposition");
+        const match = cd?.match(/filename="([^"]+)"/);
+        const filename = match?.[1] ?? `export-${type}.csv`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        setExportError(e instanceof Error ? e.message : "Export failed");
+      } finally {
+        setExportLoading(null);
+      }
+    },
+    [],
+  );
 
   const loadPositions = useCallback(async () => {
     const { data: u } = await supabase.auth.getUser();
@@ -923,6 +974,66 @@ export function BookPageClient() {
           </div>
         </>
       )}
+
+      <TierGate
+        requiredTier="team"
+        currentTier={currentTier}
+        featureName="Data export"
+        description="Download your positions, P&L history, and signals as CSV. Team plan only."
+        mockup={
+          <div className="space-y-3 px-4 py-5 sm:px-5">
+            <div className="h-2.5 w-28 rounded bg-ink/10" />
+            <div className="h-3 max-w-xl rounded bg-ink/8" />
+            <div className="flex flex-wrap gap-2">
+              <div className="h-9 min-w-[120px] flex-1 rounded-[4px] border-[0.5px] border-ivory-border bg-card" />
+              <div className="h-9 min-w-[120px] flex-1 rounded-[4px] border-[0.5px] border-ivory-border bg-card" />
+              <div className="h-9 min-w-[120px] flex-1 rounded-[4px] border-[0.5px] border-ivory-border bg-card" />
+            </div>
+          </div>
+        }
+      >
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-5 sm:px-5">
+          <p className={sectionLabel}>Data export</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-mid">
+            Download your positions, P&L history, and signals as CSV. Team plan only.
+          </p>
+          {exportError ? (
+            <p className="mt-2 text-xs text-[#8B3A3A]" role="alert">
+              {exportError}
+            </p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={exportLoading !== null}
+              onClick={() => void downloadExport("positions")}
+              className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exportLoading === "positions"
+                ? "Exporting…"
+                : "Export positions"}
+            </button>
+            <button
+              type="button"
+              disabled={exportLoading !== null}
+              onClick={() => void downloadExport("pnl")}
+              className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exportLoading === "pnl" ? "Exporting…" : "Export P&L history"}
+            </button>
+            <button
+              type="button"
+              disabled={exportLoading !== null}
+              onClick={() => void downloadExport("signals")}
+              className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink transition-colors duration-200 hover:bg-ivory-dark disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exportLoading === "signals"
+                ? "Exporting…"
+                : "Export signals (90d)"}
+            </button>
+          </div>
+        </div>
+      </TierGate>
 
       <div className="rounded-[6px] border border-[#D4CCBB] bg-transparent px-5 py-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
