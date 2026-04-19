@@ -20,7 +20,16 @@ function toCsv(rows: Record<string, unknown>[]): string {
   return out.join("\n");
 }
 
-export async function GET() {
+function parseExportType(
+  searchParams: URLSearchParams,
+): "positions" | "pnl" | "signals" | null {
+  const raw = searchParams.get("type");
+  const t = raw === null || raw === "" ? "positions" : raw;
+  if (t === "positions" || t === "pnl" || t === "signals") return t;
+  return null;
+}
+
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const auth = await requireUser(supabase, { requireVerifiedEmail: true });
@@ -32,19 +41,62 @@ export async function GET() {
     });
     if (entitlement.response) return entitlement.response;
 
-    const { data, error } = await supabase
-      .from("positions")
-      .select("instrument, market, direction, size, unit, trade_price, tenor, updated_at")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
-    if (error) throw new Error(error.message);
+    const exportType = parseExportType(new URL(request.url).searchParams);
+    if (!exportType) {
+      return NextResponse.json(
+        { error: "Invalid type. Use positions (default), pnl, or signals." },
+        { status: 400 },
+      );
+    }
 
-    const csv = toCsv((data ?? []) as Record<string, unknown>[]);
+    let rows: Record<string, unknown>[] = [];
+    let filename: string;
+
+    if (exportType === "positions") {
+      const { data, error } = await supabase
+        .from("positions")
+        .select(
+          "instrument, market, direction, size, unit, trade_price, tenor, updated_at",
+        )
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      rows = (data ?? []) as Record<string, unknown>[];
+      filename = "positions-export.csv";
+    } else if (exportType === "pnl") {
+      const { data, error } = await supabase
+        .from("portfolio_pnl")
+        .select(
+          "date, total_pnl, wind_attribution_gbp, gas_attribution_gbp, remit_attribution_gbp, residual_gbp, primary_driver",
+        )
+        .eq("user_id", user.id)
+        .order("date", { ascending: false });
+      if (error) throw new Error(error.message);
+      rows = (data ?? []) as Record<string, unknown>[];
+      filename = "pnl-history-export.csv";
+    } else {
+      const since = new Date(
+        Date.now() - 90 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const { data, error } = await supabase
+        .from("signals")
+        .select(
+          "title, description, direction, confidence, source, created_at",
+        )
+        .eq("type", "remit")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      rows = (data ?? []) as Record<string, unknown>[];
+      filename = "signals-export.csv";
+    }
+
+    const csv = toCsv(rows);
     return new Response(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="positions-export.csv"',
+        "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });
   } catch (e: unknown) {
