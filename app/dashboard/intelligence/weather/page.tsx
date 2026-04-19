@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  chartTooltipBoxStyle,
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
   APRIL_TEMP_NORM_C,
@@ -28,13 +34,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import {
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -152,14 +152,6 @@ function negativePriceWindows(
 
 const TEMP_LINE_STROKE = "#9ca3af";
 
-const TOOLTIP_BOX: CSSProperties = {
-  background: "#F5F0E8",
-  border: "1px solid #D4CCBB",
-  borderRadius: 6,
-  padding: "8px 12px",
-  fontSize: 12,
-};
-
 type TooltipPayloadEntry = {
   dataKey?: string | number | ((obj: unknown) => unknown);
   value?: number | string;
@@ -207,11 +199,11 @@ function ChartTooltip({
   });
   if (rows.length === 0) return null;
   return (
-    <div style={TOOLTIP_BOX}>
+    <div style={chartTooltipBoxStyle}>
       <div
         style={{
           marginBottom: 4,
-          color: "#6b6b5a",
+          color: "var(--ink-mid)",
           fontWeight: 500,
         }}
       >
@@ -1215,11 +1207,12 @@ export default function WeatherPage() {
                         />
                         <Tooltip
                           contentStyle={{
-                            background: "var(--ivory)",
-                            border: "0.5px solid var(--ivory-border)",
-                            borderRadius: 4,
+                            ...rechartsTooltipContentStyle,
                             fontSize: 11,
+                            borderRadius: 4,
                           }}
+                          labelStyle={rechartsTooltipLabelStyle}
+                          itemStyle={rechartsTooltipItemStyle}
                           formatter={(v, name) => [
                             `${Number(v).toFixed(1)} GW`,
                             name === "forecast" ? "Forecast" : "Actual",

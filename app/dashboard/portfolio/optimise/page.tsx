@@ -1,6 +1,11 @@
 "use client";
 
 import { TierGate } from "@/components/billing/TierGate";
+import {
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
@@ -479,6 +484,9 @@ export default function OptimisePage() {
                       />
                     </YAxis>
                     <Tooltip
+                      contentStyle={rechartsTooltipContentStyle}
+                      labelStyle={rechartsTooltipLabelStyle}
+                      itemStyle={rechartsTooltipItemStyle}
                       formatter={(v, n) =>
                         n === "x"
                           ? [

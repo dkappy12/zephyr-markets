@@ -1,6 +1,11 @@
 "use client";
 
 import { TierGate } from "@/components/billing/TierGate";
+import {
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 import {
@@ -750,7 +755,9 @@ export default function RiskPage() {
                     <XAxis dataKey="date" tickFormatter={formatDay} tick={{ fontSize: 10, fill: "#6B6760" }} />
                     <YAxis tickFormatter={(v) => `£${Math.round(v).toLocaleString("en-GB")}`} tick={{ fontSize: 10, fill: "#6B6760" }} />
                     <Tooltip
-                      contentStyle={{ background: "#F5F0E8", border: "1px solid #D4CCBB", borderRadius: 6, fontSize: 12 }}
+                      contentStyle={rechartsTooltipContentStyle}
+                      labelStyle={rechartsTooltipLabelStyle}
+                      itemStyle={rechartsTooltipItemStyle}
                       formatter={(v) => [`£${Math.round(Number(v)).toLocaleString("en-GB")}`, "P&L"]}
                       labelFormatter={(d) => formatDay(String(d))}
                     />

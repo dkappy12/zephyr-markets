@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import {
   bookAlignmentCopy,
@@ -1214,6 +1219,9 @@ export function AttributionPageClient() {
                     }
                   />
                   <Tooltip
+                    contentStyle={rechartsTooltipContentStyle}
+                    labelStyle={rechartsTooltipLabelStyle}
+                    itemStyle={rechartsTooltipItemStyle}
                     formatter={(v) =>
                       typeof v === "number"
                         ? formatSignedGbp(v)
@@ -1587,10 +1595,11 @@ export function AttributionPageClient() {
                     />
                     <Tooltip
                       contentStyle={{
-                        fontSize: 12,
+                        ...rechartsTooltipContentStyle,
                         borderRadius: 4,
-                        border: "0.5px solid #e8e4dc",
                       }}
+                      labelStyle={rechartsTooltipLabelStyle}
+                      itemStyle={rechartsTooltipItemStyle}
                       formatter={(v) => [
                         typeof v === "number"
                           ? formatSignedGbp(v)

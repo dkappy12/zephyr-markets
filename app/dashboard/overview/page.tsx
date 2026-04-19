@@ -4,14 +4,7 @@ import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import {
-  type CSSProperties,
-  Suspense,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   CartesianGrid,
@@ -23,6 +16,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { chartTooltipBoxStyle } from "@/lib/charts/recharts-tooltip-styles";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
@@ -69,14 +63,6 @@ const PREMIUM_CHART_SCORE_LINE_STROKE = "rgba(44,42,38,0.52)";
 const PREMIUM_CHART_SCORE_LINE_WIDTH = 0.85;
 const PREMIUM_CHART_Y_DOMAIN: [number, number] = [-12, 12];
 const PREMIUM_CHART_Y_TICKS = [-10, -5, 0, 5, 10];
-
-const TOOLTIP_BOX: CSSProperties = {
-  background: "#F5F0E8",
-  border: "1px solid #D4CCBB",
-  borderRadius: 6,
-  padding: "8px 12px",
-  fontSize: 12,
-};
 
 type TooltipPayloadEntry = {
   dataKey?: string | number | ((obj: unknown) => unknown);
@@ -125,11 +111,11 @@ function ChartTooltip({
   });
   if (rows.length === 0) return null;
   return (
-    <div style={TOOLTIP_BOX}>
+    <div style={chartTooltipBoxStyle}>
       <div
         style={{
           marginBottom: 4,
-          color: "#6b6b5a",
+          color: "var(--ink-mid)",
           fontWeight: 500,
         }}
       >
@@ -962,7 +948,7 @@ function OverviewPageInner() {
                       </span>
                       <span
                         role="tooltip"
-                        className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[min(100vw-2rem,320px)] -translate-x-1/2 rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-[#3D3D2E] opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition-opacity duration-150 group-hover:opacity-100"
+                        className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-max max-w-[min(100vw-2rem,320px)] -translate-x-1/2 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-3 py-[10px] text-left text-[12px] font-normal normal-case leading-snug tracking-normal text-ink opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.12)] transition-opacity duration-150 group-hover:opacity-100"
                       >
                         <span className="block">
                           The physical premium score measures how far the N2EX day-ahead

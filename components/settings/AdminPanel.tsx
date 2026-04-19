@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import { createClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
@@ -360,11 +365,12 @@ export function AdminPanel() {
                       return [`£${safe.toFixed(2)}/MWh`, "MAE"];
                     }}
                     contentStyle={{
+                      ...rechartsTooltipContentStyle,
                       fontSize: 11,
-                      border: "0.5px solid #D4CCBB",
                       borderRadius: 4,
-                      background: "#F5F0E8",
                     }}
+                    labelStyle={rechartsTooltipLabelStyle}
+                    itemStyle={rechartsTooltipItemStyle}
                   />
                   <Bar dataKey="mae" radius={[2, 2, 0, 0]}>
                     {maeByHour.map((entry, i) => (

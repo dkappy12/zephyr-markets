@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  rechartsTooltipContentStyle,
+  rechartsTooltipItemStyle,
+  rechartsTooltipLabelStyle,
+} from "@/lib/charts/recharts-tooltip-styles";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
@@ -498,11 +503,12 @@ function MarketsCarbonSection({
                   />
                   <Tooltip
                     contentStyle={{
-                      background: "var(--color-card)",
-                      border: "0.5px solid var(--color-ivory-border)",
+                      ...rechartsTooltipContentStyle,
                       borderRadius: 4,
                       fontSize: 11,
                     }}
+                    labelStyle={rechartsTooltipLabelStyle}
+                    itemStyle={rechartsTooltipItemStyle}
                     formatter={(v) => [
                       `£${Number(v ?? 0).toFixed(2)}/t`,
                       "UKA",
@@ -574,11 +580,12 @@ function MarketsCarbonSection({
                 />
                 <Tooltip
                   contentStyle={{
-                    background: "var(--color-card)",
-                    border: "0.5px solid var(--color-ivory-border)",
+                    ...rechartsTooltipContentStyle,
                     borderRadius: 4,
                     fontSize: 11,
                   }}
+                  labelStyle={rechartsTooltipLabelStyle}
+                  itemStyle={rechartsTooltipItemStyle}
                   formatter={(v) => [
                     `£${Number(v ?? 0).toFixed(2)}/MWh`,
                     "Carbon adder",
