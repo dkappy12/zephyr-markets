@@ -776,7 +776,8 @@ function MarketsAlertsPanel() {
                   Physical premium score alert
                 </p>
                 <p className="mt-1 text-xs text-ink-light">
-                  Email when |score| crosses your threshold
+                  Email when the physical premium score exceeds your threshold in
+                  either direction
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2.5">
@@ -810,7 +811,7 @@ function MarketsAlertsPanel() {
                   htmlFor="premium-score-threshold"
                   className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
                 >
-                  Threshold (|score|)
+                  THRESHOLD
                 </label>
                 <input
                   id="premium-score-threshold"
