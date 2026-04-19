@@ -242,6 +242,12 @@ export default function Home() {
           </Link>
           <div className="flex items-center gap-6">
             <Link
+              href="/docs"
+              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Docs
+            </Link>
+            <Link
               href="/login"
               className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
             >
@@ -875,6 +881,12 @@ export default function Home() {
               className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
             >
               Terms
+            </Link>
+            <Link
+              href="/docs"
+              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+            >
+              Docs
             </Link>
             <Link
               href="/login"
