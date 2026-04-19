@@ -220,8 +220,6 @@ function normalizeArticleHref(raw: unknown): string | null {
 }
 
 const snippetClampStyle: CSSProperties = {
-  fontSize: "13px",
-  color: "#6b6b5a",
   lineHeight: 1.5,
   display: "-webkit-box",
   WebkitLineClamp: 3,
@@ -251,7 +249,7 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
   const thumb = article.thumbnail_url?.trim();
 
   const cardClass =
-    "flex gap-4 rounded-lg border border-stone-200 p-4 transition-all duration-150 hover:border-stone-400 hover:shadow-md";
+    "flex gap-4 rounded-lg border-[0.5px] border-ivory-border bg-card p-4 transition-colors duration-150 hover:bg-ivory-dark/55";
 
   /** Parent filters with {@link hasDisplayableThumbnail}; if the image still fails to load, hide the whole card. */
   if (!hasDisplayableThumbnail(article) || imgFailed) return null;
@@ -289,7 +287,10 @@ function FurtherReadingArticleCard({ article }: { article: BriefArticle }) {
         >
           {article.headline}
         </p>
-        <p className="text-[11px] leading-relaxed text-ink-mid" style={snippetClampStyle}>
+        <p
+          className="text-[13px] leading-relaxed text-ink-mid"
+          style={snippetClampStyle}
+        >
           {article.snippet}
         </p>
       </div>
