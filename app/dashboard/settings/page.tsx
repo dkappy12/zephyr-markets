@@ -1563,13 +1563,13 @@ function PlanApiPanel() {
       method: "GET",
       path: "/api/v1/signals",
       desc: "REMIT signal feed",
-      status: "planned",
+      status: "live",
     },
     {
       method: "GET",
       path: "/api/v1/markets",
       desc: "Market prices — N2EX, TTF, NBP",
-      status: "planned",
+      status: "live",
     },
     {
       method: "GET",
