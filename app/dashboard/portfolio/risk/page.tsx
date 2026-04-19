@@ -703,49 +703,54 @@ export default function RiskPage() {
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="grid gap-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-4 sm:grid-cols-2 lg:grid-cols-4 sm:px-5"
+            className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4"
           >
-            <div>
-              <p className={sectionLabel}>95% 1-day VaR</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {noHistory ? "—" : formatGbp(Math.abs(var95))}
-              </p>
-              <p className="mt-1 text-xs text-ink-light">
-                {noHistory ? "Accumulating data" : `Based on ${dailyPnLSeries.length} days of data`}
-              </p>
-            </div>
-            <div>
-              <p className={sectionLabel}>99% 1-day VaR</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {dailyPnLSeries.length < 5 ? "—" : formatGbp(Math.abs(var99))}
-              </p>
-              <p className="mt-1 text-xs text-ink-light">
-                {dailyPnLSeries.length < 5
-                  ? "Need 5+ days of data"
-                  : `Historical · ${dailyPnLSeries.length} days`}
-              </p>
-            </div>
-            <div>
-              <p className={sectionLabel}>Worst day</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums text-[#8B3A3A]">
-                {worstDay ? `${formatSignedGbp(worstDay.pnl)} on ${formatDay(worstDay.date)}` : "Accumulating data"}
-              </p>
-            </div>
-            <div>
-              <p className={sectionLabel}>Data coverage</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {dailyPnLSeries.length} days of history
-              </p>
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
-                <div className="h-full rounded-sm" style={{ width: `${coveragePct}%`, backgroundColor: coverageColor }} />
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className={sectionLabel}>95% 1-day VaR</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+                  {noHistory ? "—" : formatGbp(Math.abs(var95))}
+                </p>
+                <p className="mt-1 text-xs text-ink-light">
+                  {noHistory ? "Accumulating data" : `Based on ${dailyPnLSeries.length} days of data`}
+                </p>
               </div>
-              <p className="mt-1 text-xs text-ink-light">{dailyPnLSeries.length} / 20 days to full VaR confidence</p>
+              <div>
+                <p className={sectionLabel}>99% 1-day VaR</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+                  {dailyPnLSeries.length < 5 ? "—" : formatGbp(Math.abs(var99))}
+                </p>
+                <p className="mt-1 text-xs text-ink-light">
+                  {dailyPnLSeries.length < 5
+                    ? "Need 5+ days of data"
+                    : `Historical · ${dailyPnLSeries.length} days`}
+                </p>
+              </div>
+              <div>
+                <p className={sectionLabel}>Worst day</p>
+                <p className="mt-1 text-sm font-semibold tabular-nums text-[#8B3A3A]">
+                  {worstDay ? `${formatSignedGbp(worstDay.pnl)} on ${formatDay(worstDay.date)}` : "Accumulating data"}
+                </p>
+              </div>
+              <div>
+                <p className={sectionLabel}>Data coverage</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+                  {dailyPnLSeries.length} days of history
+                </p>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
+                  <div className="h-full rounded-sm" style={{ width: `${coveragePct}%`, backgroundColor: coverageColor }} />
+                </div>
+                <p className="mt-1 text-xs text-ink-light">{dailyPnLSeries.length} / 20 days to full VaR confidence</p>
+              </div>
+              <div className="col-span-full space-y-1 text-[10px] text-ink-light">
+                <p>EUR/GBP: {gbpEurRate.toFixed(4)} · via ECB</p>
+                <p>
+                  Historical VaR uses date-aligned EUR/GBP from stored `fx_rates` (fallback{" "}
+                  {HISTORICAL_GBP_PER_EUR.toFixed(2)}).
+                </p>
+              </div>
             </div>
           </motion.div>
-          <p className="text-xs text-ink-light text-right">EUR/GBP: {gbpEurRate.toFixed(4)} · via ECB</p>
-          <p className="text-xs text-ink-light text-right">
-            Historical VaR uses date-aligned EUR/GBP from stored `fx_rates` (fallback {HISTORICAL_GBP_PER_EUR.toFixed(2)}).
-          </p>
 
           <section>
             <p className={sectionLabel}>Distribution</p>
