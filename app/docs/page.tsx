@@ -46,7 +46,7 @@ export default function DocsPage() {
               the Team plan.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3 font-mono text-[11px] tabular-nums text-ink-mid">
-              <span>3 endpoints live</span>
+              <span>5 endpoints live</span>
               <span className="hidden h-3 w-[0.5px] bg-ivory-border sm:block" />
               <span>120 req/min rate limit</span>
             </div>
@@ -201,6 +201,97 @@ export default function DocsPage() {
   "meta": {
     "generated_at": "2026-04-19T02:12:18Z",
     "endpoint": "/api/v1/markets"
+  }
+}`}
+              </pre>
+            </div>
+
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6 sm:p-8">
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="font-mono text-sm font-semibold text-ink">
+                  GET /api/v1/weather
+                </h3>
+                <span className="rounded-[3px] border-[0.5px] border-[#1D6B4E]/30 bg-[#1D6B4E]/8 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#1D6B4E]">
+                  Live
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-ink-mid">
+                <span className="font-semibold text-ink">Query params:</span>{" "}
+                hours (integer, 1–168, default 48)
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+                Returns hourly GB weather forecasts with implied wind and solar
+                generation. Useful for anticipating residual demand and regime
+                transitions.
+              </p>
+              <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                Example request
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-[4px] bg-ink px-4 py-3 font-mono text-[10px] leading-relaxed text-ivory sm:text-[11px]">
+                {`curl -H "X-API-Key: zk_live_..." https://zephyr.markets/api/v1/weather?hours=3`}
+              </pre>
+              <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                Example response
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-[4px] bg-ink px-4 py-3 font-mono text-[10px] leading-relaxed text-ivory sm:text-[11px]">
+                {`{
+  "data": [
+    {
+      "forecast_time": "2026-04-19T12:00:00Z",
+      "wind_speed_100m_ms": 4.19,
+      "wind_speed_10m_ms": 3.80,
+      "wind_implied_gw": 8.90,
+      "solar_radiation_wm2": 429.00,
+      "solar_implied_gw": 7.16,
+      "temperature_c": 8.30,
+      "residual_demand_gw": 19.93
+    }
+  ],
+  "meta": {
+    "source": "Open-Meteo ECMWF",
+    "hours": 3,
+    "generated_at": "2026-04-19T11:24:06Z",
+    "endpoint": "/api/v1/weather"
+  }
+}`}
+              </pre>
+            </div>
+
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6 sm:p-8">
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="font-mono text-sm font-semibold text-ink">
+                  GET /api/v1/storage
+                </h3>
+                <span className="rounded-[3px] border-[0.5px] border-[#1D6B4E]/30 bg-[#1D6B4E]/8 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#1D6B4E]">
+                  Live
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+                Returns the latest EU gas storage fill levels by country. Updated
+                daily from GIE AGSI.
+              </p>
+              <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                Example request
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-[4px] bg-ink px-4 py-3 font-mono text-[10px] leading-relaxed text-ivory sm:text-[11px]">
+                {`curl -H "X-API-Key: zk_live_..." https://zephyr.markets/api/v1/storage`}
+              </pre>
+              <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                Example response
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-[4px] bg-ink px-4 py-3 font-mono text-[10px] leading-relaxed text-ivory sm:text-[11px]">
+                {`{
+  "data": [
+    { "location": "DE", "full_pct": 23.42, "report_date": "2026-04-18" },
+    { "location": "FR", "full_pct": 27.50, "report_date": "2026-04-18" },
+    { "location": "IT", "full_pct": 45.91, "report_date": "2026-04-18" },
+    { "location": "NL", "full_pct": 7.39, "report_date": "2026-04-18" },
+    { "location": "AT", "full_pct": 36.06, "report_date": "2026-04-18" }
+  ],
+  "meta": {
+    "source": "GIE AGSI",
+    "generated_at": "2026-04-19T11:24:14Z",
+    "endpoint": "/api/v1/storage"
   }
 }`}
               </pre>
