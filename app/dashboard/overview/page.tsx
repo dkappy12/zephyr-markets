@@ -1,9 +1,28 @@
 "use client";
 
+import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { SignalCard, type SignalCardProps } from "@/components/ui/SignalCard";
 import { TopoBackground } from "@/components/ui/TopoBackground";
@@ -41,9 +60,106 @@ type PremiumHistoryRow = {
 };
 
 const PREMIUM_HISTORY_MAX_POINTS = 200;
-const CHART_W = 720;
-const CHART_H = 220;
-const CHART_PAD = { l: 8, r: 8, t: 14, b: 30 };
+
+const PREMIUM_CHART_GOLD_STROKE = "#C9A84C";
+const PREMIUM_CHART_TERRA_STROKE = "#D85A30";
+const PREMIUM_CHART_TICK = "#6b6560";
+
+const TOOLTIP_BOX: CSSProperties = {
+  background: "#F5F0E8",
+  border: "1px solid #D4CCBB",
+  borderRadius: 6,
+  padding: "8px 12px",
+  fontSize: 12,
+};
+
+type TooltipPayloadEntry = {
+  dataKey?: string | number | ((obj: unknown) => unknown);
+  value?: number | string;
+  color?: string;
+};
+
+function formatChartTooltipTime(label: unknown): string {
+  try {
+    const d = new Date(String(label));
+    if (Number.isNaN(d.getTime())) return String(label ?? "");
+    return (
+      d.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      }) +
+      " " +
+      d.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+  } catch {
+    return String(label ?? "");
+  }
+}
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  series,
+}: {
+  active?: boolean;
+  payload?: readonly TooltipPayloadEntry[];
+  label?: string | number;
+  series: Record<string, string>;
+}) {
+  if (!active || !payload?.length) return null;
+  const allowed = new Set(Object.keys(series));
+  const rows = [...payload].filter((e) => {
+    const dk = e.dataKey;
+    if (typeof dk === "function") return false;
+    return allowed.has(String(dk ?? ""));
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div style={TOOLTIP_BOX}>
+      <div
+        style={{
+          marginBottom: 4,
+          color: "#6b6b5a",
+          fontWeight: 500,
+        }}
+      >
+        {formatChartTooltipTime(label)}
+      </div>
+      {rows.map((entry, i) => {
+        const key = String(entry.dataKey ?? "");
+        const text = series[key] ?? key;
+        const raw = entry.value;
+        const value =
+          typeof raw === "number"
+            ? raw.toFixed(1)
+            : raw != null
+              ? String(raw)
+              : "";
+        return (
+          <div key={i} style={{ color: entry.color, marginBottom: 2 }}>
+            {text}: {value}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function tooltipPayload(p: { payload?: unknown } | undefined) {
+  return p?.payload as readonly TooltipPayloadEntry[] | undefined;
+}
+
+type PremiumChartPoint = {
+  calculated_at: string;
+  score: number;
+  scorePos: number;
+  scoreNeg: number;
+};
 
 function downsampleHistoryRows(rows: PremiumHistoryRow[], maxPoints: number): PremiumHistoryRow[] {
   if (rows.length <= maxPoints) return rows;
@@ -55,119 +171,118 @@ function downsampleHistoryRows(rows: PremiumHistoryRow[], maxPoints: number): Pr
   return out;
 }
 
-function buildSparklineFills(
-  points: { x: number; y: number }[],
-  zeroY: number,
-): { gold: string; terra: string } {
-  if (points.length < 2) return { gold: "", terra: "" };
-  const goldSegs: string[] = [];
-  const terraSegs: string[] = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-    const aPos = a.y < zeroY;
-    const bPos = b.y < zeroY;
-    if (aPos && bPos) {
-      goldSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
-    } else if (!aPos && !bPos) {
-      terraSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
-    } else {
-      const dy = b.y - a.y;
-      if (Math.abs(dy) < 1e-9) continue;
-      const tCross = (zeroY - a.y) / dy;
-      const cx = a.x + tCross * (b.x - a.x);
-      if (aPos) {
-        goldSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${cx} ${zeroY} Z`);
-        terraSegs.push(`M ${cx} ${zeroY} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
-      } else {
-        terraSegs.push(`M ${a.x} ${zeroY} L ${a.x} ${a.y} L ${cx} ${zeroY} Z`);
-        goldSegs.push(`M ${cx} ${zeroY} L ${b.x} ${b.y} L ${b.x} ${zeroY} Z`);
-      }
-    }
-  }
-  return { gold: goldSegs.join(" "), terra: terraSegs.join(" ") };
-}
+function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
+  const chartData: PremiumChartPoint[] = useMemo(
+    () =>
+      rows.map((r) => {
+        const s = r.normalised_score;
+        return {
+          calculated_at: r.calculated_at,
+          score: s,
+          scorePos: Math.max(0, s),
+          scoreNeg: Math.min(0, s),
+        };
+      }),
+    [rows],
+  );
 
-function PremiumHistorySparkline({
-  rows,
-}: {
-  rows: PremiumHistoryRow[];
-}) {
-  const times = rows.map((r) => new Date(r.calculated_at).getTime());
-  const scores = rows.map((r) => r.normalised_score);
-  const tMin = Math.min(...times);
-  const tMax = Math.max(...times);
-  const sMinRaw = Math.min(0, ...scores);
-  const sMaxRaw = Math.max(0, ...scores);
-  const span = sMaxRaw - sMinRaw || 1;
-  const padS = span * 0.06;
-  const sMin = sMinRaw - padS;
-  const sMax = sMaxRaw + padS;
-  const sRange = sMax - sMin || 1;
+  const yDomain = useMemo((): [number, number] => {
+    const scores = rows.map((r) => r.normalised_score);
+    const mn = Math.min(0, ...scores);
+    const mx = Math.max(0, ...scores);
+    const span = mx - mn || 1;
+    const pad = span * 0.08;
+    return [mn - pad, mx + pad];
+  }, [rows]);
 
-  const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
-  const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b;
-  const xAt = (t: number) =>
-    CHART_PAD.l + ((t - tMin) / (tMax - tMin || 1)) * innerW;
-  const yAt = (s: number) => CHART_PAD.t + ((sMax - s) / sRange) * innerH;
-  const zeroY = yAt(0);
-
-  const pts = rows.map((r, i) => ({
-    x: xAt(times[i]),
-    y: yAt(scores[i]),
-  }));
-
-  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-  const { gold, terra } = buildSparklineFills(pts, zeroY);
-
-  const tickTimes = [0, 1, 2, 3, 4].map((k) => tMin + (k / 4) * (tMax - tMin));
+  const xTicks = useMemo(() => {
+    if (chartData.length === 0) return [];
+    if (chartData.length === 1) return [chartData[0].calculated_at];
+    const picks = [0, 1, 2, 3, 4].map((k) => {
+      const idx = Math.round((k / 4) * (chartData.length - 1));
+      return chartData[idx].calculated_at;
+    });
+    return [...new Set(picks)];
+  }, [chartData]);
 
   return (
-    <svg
-      className="mt-4 w-full max-w-full font-sans text-ink-mid"
-      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-      preserveAspectRatio="xMidYMid meet"
-      aria-hidden
-    >
-      {gold ? (
-        <path d={gold} fill="#8C6D1F" fillOpacity={0.22} stroke="none" />
-      ) : null}
-      {terra ? (
-        <path d={terra} fill="#9B3D20" fillOpacity={0.22} stroke="none" />
-      ) : null}
-      <line
-        x1={CHART_PAD.l}
-        x2={CHART_W - CHART_PAD.r}
-        y1={zeroY}
-        y2={zeroY}
-        stroke="currentColor"
-        strokeOpacity={0.25}
-        strokeWidth={1}
-      />
-      <path
-        d={lineD}
-        fill="none"
-        stroke="#2c2a26"
-        strokeWidth={1.25}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {tickTimes.map((tt, i) => (
-        <text
-          key={i}
-          x={xAt(tt)}
-          y={CHART_H - 6}
-          textAnchor="middle"
-          className="fill-current"
-          style={{ fontSize: 9, fontFamily: "var(--font-dm-sans), DM Sans, sans-serif" }}
+    <div className="mt-5 h-[240px] w-full min-h-[240px] min-w-0 pl-0 pr-3 pb-2">
+      <ResponsiveContainer width="100%" height={240}>
+        <ComposedChart
+          data={chartData}
+          margin={{ top: 10, right: 8, bottom: 18, left: 4 }}
         >
-          {new Date(tt).toLocaleDateString("en-GB", {
-            day: "numeric",
-            month: "short",
-          })}
-        </text>
-      ))}
-    </svg>
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="rgba(44,42,38,0.08)"
+            vertical={false}
+          />
+          <XAxis
+            dataKey="calculated_at"
+            ticks={xTicks.length ? xTicks : undefined}
+            tickFormatter={(iso) => {
+              try {
+                return format(parseISO(String(iso)), "d MMM");
+              } catch {
+                return "";
+              }
+            }}
+            tick={{ fontSize: 10, fill: PREMIUM_CHART_TICK }}
+            axisLine={false}
+            tickLine={false}
+            interval={0}
+          />
+          <YAxis
+            domain={yDomain}
+            tick={{ fontSize: 10, fill: PREMIUM_CHART_TICK }}
+            width={40}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip
+            content={(props) => (
+              <ChartTooltip
+                active={props.active}
+                payload={tooltipPayload(props)}
+                label={props.label}
+                series={{
+                  score: "Normalised score",
+                }}
+              />
+            )}
+          />
+          <Area
+            type="monotone"
+            dataKey="scoreNeg"
+            stroke={PREMIUM_CHART_TERRA_STROKE}
+            strokeWidth={1}
+            fill={PREMIUM_CHART_TERRA_STROKE}
+            fillOpacity={0.14}
+            baseLine={0}
+            isAnimationActive={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="scorePos"
+            stroke={PREMIUM_CHART_GOLD_STROKE}
+            strokeWidth={1}
+            fill={PREMIUM_CHART_GOLD_STROKE}
+            fillOpacity={0.16}
+            baseLine={0}
+            isAnimationActive={false}
+          />
+          <ReferenceLine y={0} stroke="rgba(44,42,38,0.25)" strokeWidth={1} />
+          <Line
+            type="monotone"
+            dataKey="score"
+            stroke="#2c2a26"
+            strokeWidth={1.25}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -930,7 +1045,7 @@ function OverviewPageInner() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.32, delay: 0.08 }}
-        className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-5"
+        className="overflow-visible rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 pb-7 pt-5"
       >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
@@ -963,7 +1078,7 @@ function OverviewPageInner() {
             Not enough history in this window to chart.
           </p>
         ) : (
-          <PremiumHistorySparkline rows={premiumHistoryChartRows} />
+          <PremiumHistoryChart rows={premiumHistoryChartRows} />
         )}
       </motion.section>
 
