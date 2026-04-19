@@ -249,13 +249,13 @@ function MarketImplicationBox({
 }) {
   return (
     <div
-      className={`bg-transparent rounded-[6px] border border-solid border-[#D4CCBB] border-l-[3px] border-l-[#1D6B4E] ${className}`}
+      className={`bg-transparent rounded-[6px] border border-ivory-border border-l-[3px] border-l-[#1D6B4E] ${className}`}
       style={{ padding: "16px 20px" }}
     >
-      <p className="text-[9px] font-normal uppercase tracking-[0.1em] text-[#9ca3af]">
+      <p className="text-[9px] font-normal uppercase tracking-[0.1em] text-ink-light">
         MARKET IMPLICATION
       </p>
-      <div className="mt-2 text-[13px] leading-[1.6] text-[#3D3D2E]">
+      <div className="mt-2 text-[13px] leading-[1.6] text-ink-mid">
         {children}
       </div>
     </div>
