@@ -338,6 +338,16 @@ export default function BriefPage() {
   const [touchpointCheckoutLoading, setTouchpointCheckoutLoading] = useState(false);
 
   useEffect(() => {
+    function onPageShow(e: PageTransitionEvent) {
+      if (e.persisted) {
+        setTouchpointCheckoutLoading(false);
+      }
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     void fetch("/api/billing/status")
       .then(async (res) => {

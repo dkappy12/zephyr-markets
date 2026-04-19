@@ -3,7 +3,7 @@
 import { startStripeSubscriptionCheckout } from "@/lib/billing/start-stripe-checkout";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type TierGateProps = {
   requiredTier: "pro" | "team";
@@ -50,6 +50,16 @@ export function TierGate({
       setCheckoutLoading(false);
     }
   }
+
+  useEffect(() => {
+    function onPageShow(e: PageTransitionEvent) {
+      if (e.persisted) {
+        setCheckoutLoading(false);
+      }
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   // Still loading billing — show nothing to prevent flash
   if (currentTier === null) {
