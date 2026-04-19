@@ -22,9 +22,17 @@ function SettingsPageInner() {
     void fetch("/api/billing/status")
       .then(async (res) => {
         if (!res.ok) return;
-        const body = (await res.json()) as { effectiveTier?: string };
+        const body = (await res.json()) as {
+          effectiveTier?: string;
+          status?: string;
+        };
         const t = body.effectiveTier;
-        if (!cancelled && (t === "team" || t === "enterprise")) {
+        const isAdmin = body.status === "admin";
+        if (
+          !cancelled &&
+          !isAdmin &&
+          (t === "team" || t === "enterprise")
+        ) {
           setShowTeamTab(true);
         }
       })
@@ -34,9 +42,26 @@ function SettingsPageInner() {
     };
   }, []);
 
+  useEffect(() => {
+    if (
+      !showTeamTab &&
+      searchParams.get("tab")?.toLowerCase() === "team"
+    ) {
+      const sp = new URLSearchParams(searchParams.toString());
+      sp.delete("tab");
+      const q = sp.toString();
+      router.replace(q ? `/dashboard/settings?${q}` : "/dashboard/settings");
+    }
+  }, [showTeamTab, searchParams, router]);
+
   const urlWantsTeam =
     showTeamTab && searchParams.get("tab")?.toLowerCase() === "team";
-  const activeTab = urlWantsTeam ? "Team" : tab;
+  const activeTab =
+    urlWantsTeam
+      ? "Team"
+      : !showTeamTab && tab === "Team"
+        ? "Profile"
+        : tab;
 
   function selectTab(next: string) {
     setTab(next);
@@ -618,7 +643,6 @@ function TeamPanel() {
     isOwner?: boolean;
     viewerRole?: "owner" | "member" | null;
   } | null>(null);
-  const [isAdminAccount, setIsAdminAccount] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -656,35 +680,7 @@ function TeamPanel() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/billing/status");
-        if (cancelled) return;
-        if (!res.ok) {
-          setIsAdminAccount(false);
-          await load();
-          return;
-        }
-        const body = (await res.json()) as { status?: string };
-        if (cancelled) return;
-        if (body.status === "admin") {
-          setIsAdminAccount(true);
-          setLoading(false);
-          return;
-        }
-        setIsAdminAccount(false);
-        await load();
-      } catch {
-        if (!cancelled) {
-          setIsAdminAccount(false);
-          await load();
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void load();
   }, [load]);
 
   useEffect(() => {
@@ -931,25 +927,6 @@ function TeamPanel() {
     if (confirmAction) return;
     lastFocusedRef.current?.focus?.();
   }, [confirmAction]);
-
-  if (isAdminAccount) {
-    return (
-      <motion.div
-        key="team"
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{ duration: 0.2 }}
-        className="space-y-6"
-      >
-        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
-          <p className="text-sm text-ink-mid">
-            Team management is not available on admin accounts.
-          </p>
-        </div>
-      </motion.div>
-    );
-  }
 
   return (
     <>
