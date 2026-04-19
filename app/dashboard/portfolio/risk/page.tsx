@@ -123,7 +123,7 @@ function LimitStatusBadge({ severity }: { severity: LimitSeverity | null }) {
       className={`inline-flex shrink-0 items-center rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${
         over
           ? "border-[#8B3A3A]/40 bg-[#8B3A3A]/10 text-[#8B3A3A]"
-          : "border-amber-700/35 bg-amber-50/90 text-amber-900"
+          : "border-watch/40 bg-watch/12 text-watch"
       }`}
     >
       {over ? "Over limit" : "Near limit"}
@@ -647,15 +647,15 @@ export default function RiskPage() {
           <div className="h-4 w-60 rounded bg-ink/8" />
           <div className="grid grid-cols-3 gap-3">
             {["VAR 95", "CVAR 95", "WORST STRESS"].map((l) => (
-              <div key={l} className="rounded-[4px] border border-ivory-border bg-card p-4">
+              <div key={l} className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
                 <div className="mb-3 h-3 w-16 rounded bg-ink/10" />
                 <div className="mb-2 h-8 w-24 rounded bg-ink/15" />
                 <div className="h-3 w-20 rounded bg-ink/8" />
               </div>
             ))}
           </div>
-          <div className="h-48 rounded-[4px] border border-ivory-border bg-card p-4" />
-          <div className="h-32 rounded-[4px] border border-ivory-border bg-card p-4" />
+          <div className="h-48 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4" />
+          <div className="h-32 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4" />
         </div>
       }
     >
@@ -749,11 +749,18 @@ export default function RiskPage() {
                 No price history available yet. P&amp;L tracking begins once prices are recorded across multiple days.
               </p>
             ) : (
-              <div className="mt-4 rounded-[6px] border border-[#D4CCBB] bg-card px-3 py-3">
+              <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-3 py-3">
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={dailyPnLSeries}>
-                    <XAxis dataKey="date" tickFormatter={formatDay} tick={{ fontSize: 10, fill: "#6B6760" }} />
-                    <YAxis tickFormatter={(v) => `£${Math.round(v).toLocaleString("en-GB")}`} tick={{ fontSize: 10, fill: "#6B6760" }} />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDay}
+                      tick={{ fontSize: 10, fill: "var(--ink-mid)" }}
+                    />
+                    <YAxis
+                      tickFormatter={(v) => `£${Math.round(v).toLocaleString("en-GB")}`}
+                      tick={{ fontSize: 10, fill: "var(--ink-mid)" }}
+                    />
                     <Tooltip
                       contentStyle={rechartsTooltipContentStyle}
                       labelStyle={rechartsTooltipLabelStyle}
@@ -791,7 +798,7 @@ export default function RiskPage() {
             <p className={sectionLabel}>Position risk</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Risk by position</h2>
             <p className="mt-1 text-sm text-ink-light">Contribution of each position to total portfolio VaR</p>
-            <div className="mt-4 rounded-[6px] border border-[#D4CCBB] bg-card">
+            <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card">
               <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-left text-[13px]">
                 <thead>
@@ -875,7 +882,7 @@ export default function RiskPage() {
                 return (
                   <article
                     key={scenario.name}
-                    className="rounded-lg border border-[#D4CCBB] p-5"
+                    className="rounded-lg border-[0.5px] border-ivory-border bg-card p-5"
                     style={{
                       borderLeft: `3px solid ${total >= 0 ? BRAND_GREEN : TERRACOTTA}`,
                     }}
@@ -948,7 +955,7 @@ export default function RiskPage() {
             <p className={sectionLabel}>Concentration</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Concentration analysis</h2>
             <p className="mt-1 text-sm text-ink-light">Diversification across markets, tenors, and directions</p>
-            <div className="mt-4 space-y-6 rounded-[6px] border border-[#D4CCBB] bg-card px-5 py-5">
+            <div className="mt-4 space-y-6 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-mid">Market concentration</p>
                 <div className="mt-3 space-y-3">
@@ -1017,7 +1024,7 @@ export default function RiskPage() {
             </div>
           </section>
 
-          <section className="rounded-[6px] border border-[#D4CCBB] bg-card px-5 py-5">
+          <section className="rounded-[6px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
             <p className={sectionLabel}>Risk limits</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Configure limits</h2>
             <p className="mt-1 text-sm text-ink-light">
