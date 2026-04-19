@@ -1172,6 +1172,17 @@ export default function MarketsPage() {
     }));
   }, [carbonHistory]);
 
+  const showMarketsRightColumn =
+    (marketsScope !== "gb_nbp_only" && marketVisibility.ttf) ||
+    (marketVisibility.uka && marketVisibility.eua);
+  const showSparkColumn =
+    marketsScope !== "gb_nbp_only" && marketVisibility.ttf;
+  const marketsLayoutLeftColClass = !showMarketsRightColumn
+    ? "flex min-w-0 w-full flex-col gap-4"
+    : showSparkColumn
+      ? "flex min-w-0 flex-1 flex-col gap-4"
+      : "flex min-w-0 flex-[2] flex-col gap-4";
+
   return (
     <div className="space-y-6">
       <div>
@@ -1269,7 +1280,7 @@ export default function MarketsPage() {
       {/* Two independent columns so row height isn’t locked to GB Power (avoids huge gap under TTF vs Spark). */}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
-          <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <div className={marketsLayoutLeftColClass}>
         {/* GB Power */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -1664,6 +1675,7 @@ export default function MarketsPage() {
         ) : null}
 
           </div>
+          {showMarketsRightColumn ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         {/* TTF stack */}
         {marketsScope !== "gb_nbp_only" && marketVisibility.ttf ? (
@@ -1935,6 +1947,7 @@ export default function MarketsPage() {
         </section>
         ) : null}
         </div>
+          ) : null}
       </div>
 
         {/* EU Storage — full width below the two columns */}
