@@ -455,7 +455,9 @@ export default function OptimisePage() {
                               `£${Math.round(Number(v)).toLocaleString("en-GB")}`,
                               tailRiskAxisLabel,
                             ]
-                          : [Math.round(Number(v)), "Trades"]
+                          : n === "y" && Number(v) === 0
+                            ? ["Current (unhedged)", "Position"]
+                            : [Math.round(Number(v)), "Trades"]
                       }
                     />
                     <ReferenceLine
@@ -471,6 +473,7 @@ export default function OptimisePage() {
                     >
                       <LabelList
                         position="bottom"
+                        offset={12}
                         fontSize={10}
                         fill="#6b6560"
                         valueAccessor={() => "Current book"}
