@@ -1125,16 +1125,17 @@ export default function MarketsPage() {
       }));
   }, [carbonChartData]);
 
-  const carbonSpreadLine30 = useMemo(() => {
-    return carbonChartData
-      .filter((d) => d.spread != null)
-      .slice(-30)
-      .map((d) => ({
-        date: d.date,
-        label: d.date.length >= 10 ? d.date.slice(5, 10) : d.date,
-        spread: Number(Number(d.spread).toFixed(2)),
-      }));
-  }, [carbonChartData]);
+  const ukaLine30 = useMemo(() => {
+    const rows = carbonHistory
+      .filter((r) => r.hub === "UKA" && r.price_gbp_per_t != null)
+      .sort((a, b) => a.price_date.localeCompare(b.price_date));
+    const last30 = rows.slice(-30);
+    return last30.map((r) => ({
+      date: r.price_date,
+      label: r.price_date.length >= 10 ? r.price_date.slice(5, 10) : r.price_date,
+      price: Number(r.price_gbp_per_t),
+    }));
+  }, [carbonHistory]);
 
   return (
     <div className="space-y-6">
@@ -1750,16 +1751,16 @@ export default function MarketsPage() {
             </div>
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
               <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
-                UKA / EUA spread (£/t) · last 30 days
+                UKA (£/T) · LAST 30 DAYS
               </p>
               <p className="mt-0.5 text-[10px] text-ink-light">
-                EUA (£) − UKA (£) by date
+                UK Emissions Trading Scheme allowance price
               </p>
-              <div className="mt-2 h-[140px] w-full">
-                {carbonSpreadLine30.length > 0 ? (
+              <div className="mt-3 h-[140px] w-full">
+                {ukaLine30.length > 0 ? (
                   <ResponsiveContainer width="100%" height={140}>
                     <LineChart
-                      data={carbonSpreadLine30}
+                      data={ukaLine30}
                       margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
@@ -1776,7 +1777,9 @@ export default function MarketsPage() {
                         tickLine={false}
                         width={36}
                         domain={["auto", "auto"]}
-                        tickFormatter={(v) => Number(v).toFixed(2)}
+                        tickFormatter={(v) =>
+                          `£${Number(v).toFixed(2)}`
+                        }
                       />
                       <Tooltip
                         contentStyle={{
@@ -1786,15 +1789,15 @@ export default function MarketsPage() {
                           fontSize: 11,
                         }}
                         formatter={(v) => [
-                          `${Number(v ?? 0).toFixed(2)} £/t`,
-                          "Spread",
+                          `£${Number(v ?? 0).toFixed(2)}/t`,
+                          "UKA",
                         ]}
                         labelFormatter={(l) => `Date: ${l}`}
                       />
                       <Line
                         type="monotone"
-                        dataKey="spread"
-                        stroke={ink}
+                        dataKey="price"
+                        stroke={BRAND_GREEN}
                         strokeWidth={2}
                         dot={false}
                         isAnimationActive={false}
@@ -1803,7 +1806,7 @@ export default function MarketsPage() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex h-[140px] items-center text-xs text-ink-light">
-                    Need overlapping UKA &amp; EUA dates for spread
+                    No UKA history in range
                   </div>
                 )}
               </div>
