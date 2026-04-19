@@ -9,6 +9,7 @@ import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { requireUser } from "@/lib/auth/require-user";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
@@ -188,14 +189,14 @@ export async function GET(req: Request) {
         .select("*")
         .eq("user_id", user.id)
         .eq("is_closed", false),
-      supabase
+      createAdminClient()
         .from("market_prices")
         .select("price_date, price_gbp_mwh, market")
         .or("market.eq.N2EX,market.eq.APX")
         .gte("price_date", sinceDate)
         .order("price_date", { ascending: true })
-        .range(0, 14999),
-      supabase
+        .limit(15000),
+      createAdminClient()
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
         .in("hub", ["TTF", "NBP"])
