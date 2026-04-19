@@ -660,11 +660,11 @@ function OverviewPageInner() {
   })();
 
   const premiumHistoryFiltered = useMemo(() => {
-    const cutoff = Date.now() - premiumHistoryWindow * 86_400_000;
+    const cutoff = relativeNowMs - premiumHistoryWindow * 86_400_000;
     return premiumHistoryAll.filter(
       (r) => new Date(r.calculated_at).getTime() >= cutoff,
     );
-  }, [premiumHistoryAll, premiumHistoryWindow]);
+  }, [premiumHistoryAll, premiumHistoryWindow, relativeNowMs]);
 
   const premiumHistoryChartRows = useMemo(
     () => downsampleHistoryRows(premiumHistoryFiltered, PREMIUM_HISTORY_MAX_POINTS),
