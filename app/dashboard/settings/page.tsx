@@ -1317,6 +1317,39 @@ function TeamPanel() {
   );
 }
 
+type ApiKeyRow = {
+  id: string;
+  keyPrefix: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  requestCount: number;
+};
+
+function formatApiKeyWhen(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatApiKeyCreated(iso: string | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function PlanApiPanel() {
   const pro = TIER_ENTITLEMENTS.pro;
   const team = TIER_ENTITLEMENTS.team;
@@ -1336,6 +1369,17 @@ function PlanApiPanel() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [startingCheckout, setStartingCheckout] = useState<string | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [keysError, setKeysError] = useState<string | null>(null);
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [revealKeyModal, setRevealKeyModal] = useState<{
+    rawKey: string;
+    keyPrefix: string;
+    createdAt: string;
+  } | null>(null);
+  const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null);
+  const [copyKeyFlash, setCopyKeyFlash] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1458,6 +1502,110 @@ function PlanApiPanel() {
     }
   }
 
+  const canManageApiKeys =
+    !isAdmin &&
+    (currentTierCode === "team" || currentTierCode === "enterprise");
+
+  const loadApiKeys = useCallback(async () => {
+    if (!canManageApiKeys) return;
+    setKeysLoading(true);
+    setKeysError(null);
+    try {
+      const res = await fetch("/api/v1/keys");
+      const data: unknown = await res.json();
+      if (!res.ok) {
+        const errBody = data as { error?: string };
+        throw new Error(errBody.error ?? "Could not load API keys");
+      }
+      setApiKeys(Array.isArray(data) ? (data as ApiKeyRow[]) : []);
+    } catch (e: unknown) {
+      setKeysError(
+        e instanceof Error ? e.message : "Could not load API keys",
+      );
+      setApiKeys([]);
+    } finally {
+      setKeysLoading(false);
+    }
+  }, [canManageApiKeys]);
+
+  useEffect(() => {
+    if (loadingStatus || !canManageApiKeys) return;
+    void loadApiKeys();
+  }, [loadingStatus, canManageApiKeys, loadApiKeys]);
+
+  async function generateApiKey() {
+    setGeneratingKey(true);
+    setKeysError(null);
+    try {
+      const res = await fetch("/api/v1/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = (await res.json()) as {
+        rawKey?: string;
+        keyPrefix?: string;
+        createdAt?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.rawKey) {
+        throw new Error(body.error ?? "Could not create API key");
+      }
+      setRevealKeyModal({
+        rawKey: body.rawKey,
+        keyPrefix: body.keyPrefix ?? "",
+        createdAt: body.createdAt ?? new Date().toISOString(),
+      });
+    } catch (e: unknown) {
+      setKeysError(
+        e instanceof Error ? e.message : "Could not create API key",
+      );
+    } finally {
+      setGeneratingKey(false);
+    }
+  }
+
+  async function revokeApiKey(id: string) {
+    if (
+      !confirm(
+        "Revoke this API key? Clients using it will stop working immediately. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setRevokingKeyId(id);
+    setKeysError(null);
+    try {
+      const res = await fetch("/api/v1/keys", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const body = (await res.json()) as { error?: string; ok?: boolean };
+      if (!res.ok) {
+        throw new Error(body.error ?? "Could not revoke API key");
+      }
+      await loadApiKeys();
+    } catch (e: unknown) {
+      setKeysError(
+        e instanceof Error ? e.message : "Could not revoke API key",
+      );
+    } finally {
+      setRevokingKeyId(null);
+    }
+  }
+
+  async function copyRevealKeyToClipboard() {
+    if (!revealKeyModal) return;
+    try {
+      await navigator.clipboard.writeText(revealKeyModal.rawKey);
+      setCopyKeyFlash(true);
+      window.setTimeout(() => setCopyKeyFlash(false), 2000);
+    } catch {
+      setKeysError("Could not copy to clipboard.");
+    }
+  }
+
   const endpoints = [
     {
       method: "GET",
@@ -1492,6 +1640,7 @@ function PlanApiPanel() {
   ];
 
   return (
+    <>
     <motion.div
       key="plan"
       initial={{ opacity: 0, y: 6 }}
@@ -1681,6 +1830,101 @@ function PlanApiPanel() {
         </div>
       ) : null}
 
+      {!isAdmin ? (
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            API keys
+          </p>
+          {canManageApiKeys ? (
+            <>
+              <p className="mt-1 text-xs text-ink-light">
+                Create and revoke keys for the REST API. Send the{" "}
+                <span className="font-mono text-[10px] text-ink-mid">
+                  X-API-Key
+                </span>{" "}
+                header on each request.
+              </p>
+              <div className="mt-4">
+                <button
+                  type="button"
+                  disabled={generatingKey}
+                  onClick={() => void generateApiKey()}
+                  className="inline-flex h-9 items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark disabled:opacity-60"
+                >
+                  {generatingKey ? "Generating…" : "Generate API key"}
+                </button>
+              </div>
+              {keysLoading ? (
+                <p className="mt-4 text-xs text-ink-light">Loading keys…</p>
+              ) : null}
+              {keysError ? (
+                <p className="mt-3 text-xs text-bear" role="alert">
+                  {keysError}
+                </p>
+              ) : null}
+              {!keysLoading && !keysError && apiKeys.length === 0 ? (
+                <p className="mt-4 text-sm text-ink-mid">No API keys yet.</p>
+              ) : null}
+              {apiKeys.length > 0 ? (
+                <ul className="mt-4 divide-y-[0.5px] divide-ivory-border">
+                  {apiKeys.map((k) => (
+                    <li
+                      key={k.id}
+                      className="flex flex-wrap items-start justify-between gap-3 py-4"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-[11px] text-ink">
+                          {k.keyPrefix}…
+                          {k.name && k.name !== "Default" ? (
+                            <span className="ml-2 font-sans text-[10px] text-ink-light">
+                              ({k.name})
+                            </span>
+                          ) : null}
+                        </p>
+                        <div className="mt-2 grid gap-1 text-[11px] text-ink-mid sm:grid-cols-2">
+                          <p>
+                            <span className="text-ink-light">Created</span>{" "}
+                            {formatApiKeyCreated(k.createdAt)}
+                          </p>
+                          <p>
+                            <span className="text-ink-light">Last used</span>{" "}
+                            {formatApiKeyWhen(k.lastUsedAt)}
+                          </p>
+                          <p className="sm:col-span-2">
+                            <span className="text-ink-light">Requests</span>{" "}
+                            {k.requestCount}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={revokingKeyId === k.id}
+                        onClick={() => void revokeApiKey(k.id)}
+                        className="shrink-0 rounded-[4px] border-[0.5px] border-bear/40 bg-card px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-bear transition-colors hover:bg-bear/10 disabled:opacity-60"
+                      >
+                        {revokingKeyId === k.id ? "Revoking…" : "Revoke"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-ink-mid">
+              API access is available on the Team plan.{" "}
+              <button
+                type="button"
+                onClick={() => startCheckout("team", "monthly")}
+                disabled={startingCheckout != null}
+                className="font-semibold text-gold underline decoration-gold/40 underline-offset-2 transition-colors hover:opacity-90 disabled:opacity-60"
+              >
+                Upgrade to Team
+              </button>
+            </p>
+          )}
+        </div>
+      ) : null}
+
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
           API access
@@ -1709,5 +1953,51 @@ function PlanApiPanel() {
         </p>
       </div>
     </motion.div>
+    {revealKeyModal ? (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-api-key-title"
+      >
+        <div className="w-full max-w-lg rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6 shadow-none outline-none">
+          <p
+            id="new-api-key-title"
+            className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+          >
+            Save your API key
+          </p>
+          <p className="mt-2 text-sm font-medium text-bear">
+            This key will not be shown again. Copy it now and store it securely.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <input
+              readOnly
+              value={revealKeyModal.rawKey}
+              className="min-w-0 flex-1 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2.5 font-mono text-[11px] text-ink"
+              aria-label="New API key"
+            />
+            <button
+              type="button"
+              onClick={() => void copyRevealKeyToClipboard()}
+              className="shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-4 py-2.5 text-xs font-semibold tracking-[0.08em] text-ink transition-colors hover:bg-ivory-dark"
+            >
+              {copyKeyFlash ? "Copied" : "Copy to clipboard"}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRevealKeyModal(null);
+              void loadApiKeys();
+            }}
+            className="mt-5 inline-flex h-9 items-center justify-center rounded-[4px] bg-ink px-5 text-xs font-semibold tracking-[0.08em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
