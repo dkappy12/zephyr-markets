@@ -266,12 +266,12 @@ function PremiumHistoryChart({ rows }: { rows: PremiumHistoryRow[] }) {
             baseLine={0}
             isAnimationActive={false}
           />
-          <ReferenceLine y={0} stroke="rgba(44,42,38,0.25)" strokeWidth={1} />
+          <ReferenceLine y={0} stroke="rgba(44,42,38,0.15)" strokeWidth={1} />
           <Line
             type="monotone"
             dataKey="score"
             stroke="#2c2a26"
-            strokeWidth={1.25}
+            strokeWidth={1}
             dot={false}
             isAnimationActive={false}
           />
