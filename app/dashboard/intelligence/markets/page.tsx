@@ -470,7 +470,7 @@ function MarketsCarbonSection({
           </p>
         ) : (
           <div className="min-h-[200px] w-full flex-1">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={200}>
               <LineChart
                 data={carbonAdderChartData}
                 margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
