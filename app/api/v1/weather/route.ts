@@ -91,25 +91,32 @@ export async function GET(request: Request) {
           (solar_implied_gw ?? 0),
       );
 
+      const wind_speed_100m_ms = Number.isFinite(w100) ? w100 : 0;
+      const wind_speed_10m_ms = Number.isFinite(w10) ? w10 : 0;
+      const wind_implied_gw_out = wind_implied_gw ?? 0;
+      const solar_radiation_wm2 =
+        typeof radRaw === "number" && Number.isFinite(radRaw)
+          ? radRaw
+          : radRaw != null && Number.isFinite(Number(radRaw))
+            ? Number(radRaw)
+            : 0;
+      const solar_implied_gw_out = solar_implied_gw ?? 0;
+      const temperature_c =
+        typeof tempRaw === "number" && Number.isFinite(tempRaw)
+          ? tempRaw
+          : tempRaw != null && Number.isFinite(Number(tempRaw))
+            ? Number(tempRaw)
+            : 0;
+
       return {
         forecast_time: forecastTime,
-        wind_speed_100m_ms: Number.isFinite(w100) ? w100 : 0,
-        wind_speed_10m_ms: Number.isFinite(w10) ? w10 : 0,
-        wind_implied_gw: wind_implied_gw ?? 0,
-        solar_radiation_wm2:
-          typeof radRaw === "number" && Number.isFinite(radRaw)
-            ? radRaw
-            : radRaw != null && Number.isFinite(Number(radRaw))
-              ? Number(radRaw)
-              : 0,
-        solar_implied_gw: solar_implied_gw ?? 0,
-        temperature_c:
-          typeof tempRaw === "number" && Number.isFinite(tempRaw)
-            ? tempRaw
-            : tempRaw != null && Number.isFinite(Number(tempRaw))
-              ? Number(tempRaw)
-              : 0,
-        residual_demand_gw,
+        wind_speed_100m_ms: Number(wind_speed_100m_ms.toFixed(2)),
+        wind_speed_10m_ms: Number(wind_speed_10m_ms.toFixed(2)),
+        wind_implied_gw: Number(wind_implied_gw_out.toFixed(2)),
+        solar_radiation_wm2: Number(solar_radiation_wm2.toFixed(2)),
+        solar_implied_gw: Number(solar_implied_gw_out.toFixed(2)),
+        temperature_c: Number(temperature_c.toFixed(2)),
+        residual_demand_gw: Number(residual_demand_gw.toFixed(2)),
       };
     });
 
