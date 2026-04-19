@@ -1450,7 +1450,7 @@ function PlanApiPanel() {
     }
   }
 
-  const canManageApiKeys = !isAdmin && currentTierCode === "team";
+  const canManageApiKeys = currentTierCode === "team" || isAdmin;
 
   const loadApiKeys = useCallback(async () => {
     if (!canManageApiKeys) return;
@@ -1774,8 +1774,7 @@ function PlanApiPanel() {
         </div>
       ) : null}
 
-      {!isAdmin ? (
-        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
+      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             API keys
           </p>
@@ -1866,8 +1865,7 @@ function PlanApiPanel() {
               </button>
             </p>
           )}
-        </div>
-      ) : null}
+      </div>
 
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
