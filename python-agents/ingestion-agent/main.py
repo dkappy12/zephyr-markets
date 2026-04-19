@@ -51,6 +51,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
@@ -2938,6 +2939,19 @@ async def fetch_premium_score_email_alerts_http(
     return data if isinstance(data, list) else []
 
 
+def _premium_alert_user_id_key(uid_raw: Any) -> str | None:
+    """Canonical user id for cooldown dict + auth URL (PostgREST UUID casing varies)."""
+    if uid_raw is None:
+        return None
+    s = str(uid_raw).strip()
+    if not s:
+        return None
+    try:
+        return str(uuid.UUID(s)).lower()
+    except (ValueError, TypeError, AttributeError):
+        return s.lower()
+
+
 async def fetch_auth_user_email_http(
     client: httpx.AsyncClient, user_id: str
 ) -> str | None:
@@ -3005,6 +3019,7 @@ async def insert_premium_alert_job_log_http(
     threshold_value: float,
 ) -> None:
     """Audit row for each premium alert email sent."""
+    started_at = datetime.now(timezone.utc).isoformat()
     meta = {
         "user_id": user_id,
         "normalised_score": normalised_score,
@@ -3019,11 +3034,13 @@ async def insert_premium_alert_job_log_http(
         {
             "job_name": "premium_alert",
             "status": "sent",
+            "started_at": started_at,
             "metadata": meta,
         },
         {
             "job_name": "premium_alert",
             "status": "sent",
+            "started_at": started_at,
             "error_message": json.dumps(meta),
         },
     ]
@@ -3072,23 +3089,22 @@ async def process_premium_score_email_alerts(
     )
 
     for row in alert_rows:
-        uid_raw = row.get("user_id")
-        if not uid_raw:
+        uid_key = _premium_alert_user_id_key(row.get("user_id"))
+        if not uid_key:
             continue
-        uid_str = str(uid_raw).strip()
         try:
             th = float(row.get("threshold_value"))
         except (TypeError, ValueError):
             continue
         if abs_score < th:
             continue
-        if (
-            now_ts - _PREMIUM_ALERT_LAST_SENT_AT.get(uid_str, 0.0)
-            < PREMIUM_ALERT_EMAIL_COOLDOWN_SEC
+        last_sent = _PREMIUM_ALERT_LAST_SENT_AT.get(uid_key)
+        if last_sent is not None and (
+            now_ts - last_sent < PREMIUM_ALERT_EMAIL_COOLDOWN_SEC
         ):
             continue
 
-        to_email = await fetch_auth_user_email_http(client, uid_str)
+        to_email = await fetch_auth_user_email_http(client, uid_key)
         if not to_email:
             continue
 
@@ -3105,7 +3121,7 @@ async def process_premium_score_email_alerts(
                 "",
                 f"Model run (UTC): {calculated_at}",
                 "",
-                f"Your alert threshold is |score| ≥ {th:g}. This run met or exceeded that level.",
+                f"Your alert threshold is set to {th:g}. The score has exceeded this level.",
                 "",
                 "Zephyr Meridian",
             ]
@@ -3115,19 +3131,19 @@ async def process_premium_score_email_alerts(
                 client, to=to_email, subject=subject, text=body
             )
         except Exception as e:
-            logger.warning("premium_alert: send failed for %s: %s", uid_str, e)
+            logger.warning("premium_alert: send failed for %s: %s", uid_key, e)
             continue
 
-        _PREMIUM_ALERT_LAST_SENT_AT[uid_str] = now_ts
+        _PREMIUM_ALERT_LAST_SENT_AT[uid_key] = time.time()
         try:
             await insert_premium_alert_job_log_http(
                 client,
-                user_id=uid_str,
+                user_id=uid_key,
                 normalised_score=score,
                 threshold_value=th,
             )
         except Exception as e:
-            logger.warning("premium_alert: job log failed for %s: %s", uid_str, e)
+            logger.warning("premium_alert: job log failed for %s: %s", uid_key, e)
 
 
 # Supabase (run once): unique constraint required for PostgREST upsert merge-duplicates.
