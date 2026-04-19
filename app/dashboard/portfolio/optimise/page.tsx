@@ -1,14 +1,15 @@
 "use client";
 
 import type { HedgeTrade } from "@/lib/portfolio/optimise";
-import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
+  Label,
   LabelList,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -264,35 +265,41 @@ export default function OptimisePage() {
         </p>
       </div>
 
-      <section className="grid gap-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-4">
         <label className="text-xs text-ink-mid">
-          Objective
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Objective
+          </span>
           <select
             value={objective}
             onChange={(e) => setObjective(e.target.value as "cvar" | "var")}
-            className="mt-1 w-full rounded border border-ivory-border bg-paper px-2 py-1 text-sm text-ink"
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
           >
             <option value="cvar">Minimise CVaR 95</option>
             <option value="var">Minimise VaR 95</option>
           </select>
         </label>
         <label className="text-xs text-ink-mid">
-          Confidence
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Confidence
+          </span>
           <select
             value={confidence}
             onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-1 w-full rounded border border-ivory-border bg-paper px-2 py-1 text-sm text-ink"
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
           >
             <option value={0.95}>95%</option>
             <option value={0.99}>99%</option>
           </select>
         </label>
         <label className="text-xs text-ink-mid">
-          Max Trades
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Max trades
+          </span>
           <select
             value={maxTrades}
             onChange={(e) => setMaxTrades(Number(e.target.value))}
-            className="mt-1 w-full rounded border border-ivory-border bg-paper px-2 py-1 text-sm text-ink"
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
           >
             <option value={1}>1</option>
             <option value={2}>2</option>
@@ -300,14 +307,19 @@ export default function OptimisePage() {
             <option value={4}>4</option>
           </select>
         </label>
-        <label className="flex items-center gap-2 text-sm text-ink">
-          <input
-            type="checkbox"
-            checked={includeStress}
-            onChange={(e) => setIncludeStress(e.target.checked)}
-          />
-          Include stress scenarios
-        </label>
+        <div className="flex items-end">
+          <label className="flex w-full items-center justify-between gap-3 rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Stress scenarios
+            </span>
+            <input
+              type="checkbox"
+              checked={includeStress}
+              onChange={(e) => setIncludeStress(e.target.checked)}
+              className="h-5 w-9 appearance-none rounded-full border border-ivory-border bg-ivory transition-colors checked:border-[#1D6B4E]/40 checked:bg-[#1D6B4E]/25"
+            />
+          </label>
+        </div>
       </section>
 
       {userId === null && !loading && (
@@ -327,58 +339,83 @@ export default function OptimisePage() {
 
       {!loading && userId && data && (
         <>
-          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Model Quality
-            </p>
-            <p
-              className={`mt-2 text-sm ${
-                data.quality === "high"
-                  ? "text-[#1D6B4E]"
-                  : data.quality === "medium"
-                    ? "text-amber-700"
-                    : "text-[#8B3A3A]"
-              }`}
-            >
-              {data.quality.toUpperCase()}
-            </p>
-            <p className="mt-1 text-xs text-ink-mid">
-              Historical return scenarios {data.diagnostics.historicalScenarioCount} · Candidate
-              packages {data.diagnostics.candidatePackageCount}
-            </p>
-            {(data.diagnostics.fallbackUsed || data.diagnostics.historicalScenarioCount === 0) && (
-              <p className="mt-1 text-xs text-ink-mid">
-                With no aligned historical window, empirical tail uses the same stress baseline as
-                the Risk tab; total scenario count still includes stress tests.
-              </p>
-            )}
-            <p className="mt-1 text-[10px] leading-snug text-ink-light">
-              {PREMIUM_VS_TAPE} Optimiser quality gates mirror the reliability
-              contract (coverage, fallback, freshness).
-            </p>
-            {data.reliability ? (
-              <p className="mt-1 text-xs text-ink-mid">
-                Reliability: {data.reliability.confidence.toUpperCase()} · Coverage{" "}
-                {Math.round(data.reliability.coverage * 100)}% ·{" "}
-                {data.reliability.fallback_used ? "Fallback active" : "Model mode"}
-              </p>
-            ) : null}
-            <p className="mt-1 text-xs text-ink-mid">
-              Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · Index{" "}
-              {data.diagnostics.stabilityIndex.toFixed(3)}
-              {data.diagnostics.guardrailFilteredCount > 0
-                ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered by stress guardrail`
-                : ""}
-            </p>
-            {data.qualityWarnings.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {data.qualityWarnings.map((w) => (
-                  <p key={w} className="text-xs text-ink-mid">
-                    {w}
-                  </p>
-                ))}
+          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                  Model quality
+                </p>
+                <p
+                  className={`mt-2 font-serif text-3xl tracking-tight ${
+                    data.quality === "high"
+                      ? "text-[#1D6B4E]"
+                      : data.quality === "medium"
+                        ? "text-amber-700"
+                        : "text-[#8B3A3A]"
+                  }`}
+                >
+                  {data.quality.toUpperCase()}
+                </p>
+                <div className="mt-3 flex w-full max-w-[240px] gap-1">
+                  {(["low", "medium", "high"] as const).map((level) => {
+                    const isActive = data.quality === level;
+                    const activeColor =
+                      level === "high"
+                        ? "bg-[#1D6B4E]"
+                        : level === "medium"
+                          ? "bg-amber-700"
+                          : "bg-[#8B3A3A]";
+                    return (
+                      <div
+                        key={level}
+                        className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
+                          isActive ? activeColor : "bg-ivory-border/40"
+                        }`}
+                        aria-hidden
+                      />
+                    );
+                  })}
+                </div>
               </div>
-            )}
+
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                    Scenarios
+                  </p>
+                  <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                    {data.diagnostics.scenarioCount}
+                  </p>
+                </div>
+                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                    Coverage
+                  </p>
+                  <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                    {data.reliability ? `${Math.round(data.reliability.coverage * 100)}%` : "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-1">
+              <p className="text-xs text-ink-mid">
+                Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · Index{" "}
+                {data.diagnostics.stabilityIndex.toFixed(3)}
+                {data.diagnostics.guardrailFilteredCount > 0
+                  ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered`
+                  : ""}
+              </p>
+              {data.qualityWarnings.length > 0 ? (
+                <div className="mt-2 space-y-1">
+                  {data.qualityWarnings.map((w) => (
+                    <p key={w} className="text-xs text-ink-light">
+                      {w}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </section>
 
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
@@ -394,7 +431,7 @@ export default function OptimisePage() {
                 No alternatives available yet for this view.
               </p>
             ) : (
-              <div className="mt-2 h-[200px]">
+              <div className="mt-3 h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ScatterChart margin={{ top: 10, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(44,42,38,0.08)" />
@@ -403,13 +440,31 @@ export default function OptimisePage() {
                       dataKey="x"
                       tick={{ fontSize: 10, fill: "#6b6560" }}
                       tickFormatter={(v) => `£${Math.round(Number(v)).toLocaleString("en-GB")}`}
-                    />
+                      axisLine={false}
+                      tickLine={false}
+                    >
+                      <Label
+                        value={`${tailRiskAxisLabel} (£)`}
+                        position="insideBottom"
+                        offset={-2}
+                        style={{ fill: "#6b6560", fontSize: 10 }}
+                      />
+                    </XAxis>
                     <YAxis
                       type="number"
                       dataKey="y"
                       allowDecimals={false}
                       tick={{ fontSize: 10, fill: "#6b6560" }}
-                    />
+                      axisLine={false}
+                      tickLine={false}
+                    >
+                      <Label
+                        value="Trades"
+                        angle={-90}
+                        position="insideLeft"
+                        style={{ fill: "#6b6560", fontSize: 10 }}
+                      />
+                    </YAxis>
                     <Tooltip
                       formatter={(v, n) =>
                         n === "x"
@@ -420,11 +475,30 @@ export default function OptimisePage() {
                           : [Math.round(Number(v)), "Trades"]
                       }
                     />
+                    <ReferenceLine
+                      x={frontierData.recommended[0]?.x}
+                      stroke="rgba(29,107,78,0.35)"
+                      strokeDasharray="4 4"
+                    />
                     <Scatter data={frontierData.alternatives} fill="#6b6560" />
-                    <Scatter data={frontierData.current} fill="#8B3A3A" shape="circle">
+                    <Scatter
+                      data={frontierData.current}
+                      fill="#8B3A3A"
+                      shape={(props) => <circle {...props} r={8} />}
+                    >
                       <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
+                      <LabelList
+                        position="bottom"
+                        fontSize={10}
+                        fill="#6b6560"
+                        valueAccessor={() => "Current book"}
+                      />
                     </Scatter>
-                    <Scatter data={frontierData.recommended} fill="#1D6B4E" shape="circle">
+                    <Scatter
+                      data={frontierData.recommended}
+                      fill="#1D6B4E"
+                      shape={(props) => <circle {...props} r={6} />}
+                    >
                       <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
                     </Scatter>
                   </ScatterChart>
@@ -437,15 +511,40 @@ export default function OptimisePage() {
             {cards.map((c) => (
               <article
                 key={c.label}
-                className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4"
+                className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
               >
                 <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
                   {c.label}
                 </p>
-                <p className="mt-2 text-sm text-ink-mid">Before {formatGbp(c.before)}</p>
-                <p className="text-sm text-ink-mid">After {formatGbp(c.after)}</p>
-                <p className="mt-2 font-serif text-2xl text-[#1D6B4E]">
+                <div className="mt-3 space-y-1">
+                  <p className="text-xs text-ink-mid">Before {formatGbp(c.before)}</p>
+                  <p className="text-xs text-ink-mid">After {formatGbp(c.after)}</p>
+                </div>
+                <div className="mt-4">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-ivory-border/50">
+                    <div
+                      className="h-full rounded-full bg-[#1D6B4E]/70"
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            c.before > 0 ? (1 - c.after / c.before) * 100 : 0,
+                          ),
+                        )}%`,
+                      }}
+                      aria-hidden
+                    />
+                  </div>
+                </div>
+                <p className="mt-4 font-serif text-2xl text-[#1D6B4E]">
                   {formatGbp(c.delta)}
+                </p>
+                <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                  {Math.round(
+                    Math.max(0, Math.min(100, c.before > 0 ? (1 - c.after / c.before) * 100 : 0)),
+                  )}
+                  % reduction
                 </p>
               </article>
             ))}
@@ -465,22 +564,60 @@ export default function OptimisePage() {
                 {data.recommendations.map((r, i) => (
                   <div
                     key={`${r.instrument}-${i}`}
-                    className="rounded border border-ivory-border bg-paper p-3"
+                    className="relative overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border bg-paper p-4"
                   >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${
+                          r.direction === "BUY"
+                            ? "bg-[#1D6B4E]/10 text-[#1D6B4E]"
+                            : "bg-[#8B3A3A]/10 text-[#8B3A3A]"
+                        }`}
+                      >
+                        {r.direction}
+                      </span>
+                      <span
+                        className={`rounded-[3px] border-[0.5px] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                          r.confidence === "High"
+                            ? "border-[#1D6B4E]/25 bg-[#1D6B4E]/10 text-[#1D6B4E]"
+                            : r.confidence === "Low"
+                              ? "border-amber-700/25 bg-amber-700/10 text-amber-800"
+                              : "border-ivory-border bg-ivory text-ink-mid"
+                        }`}
+                      >
+                        {r.confidence.toUpperCase()}
+                      </span>
+                    </div>
                     <p className="font-serif text-lg text-ink">
                       {r.direction} {r.size.toLocaleString("en-GB")} {r.unit} {r.instrument}
                     </p>
-                    <p className="mt-1 text-sm text-ink-mid">{r.rationale}</p>
-                    <p className="mt-1 text-xs text-ink-mid">
-                      CVaR impact {formatGbp(r.impact.cvar95Reduction)} · VaR impact{" "}
-                      {formatGbp(r.impact.var95Reduction)} · Confidence {r.confidence}
+                    <p className="mt-2 text-[13px] italic leading-relaxed text-ink-mid">
+                      {r.rationale}
                     </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                          CVaR impact
+                        </p>
+                        <p className="mt-1 font-serif text-lg text-[#1D6B4E]">
+                          {formatGbp(r.impact.cvar95Reduction)}
+                        </p>
+                      </div>
+                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                          VaR impact
+                        </p>
+                        <p className="mt-1 font-serif text-lg text-[#1D6B4E]">
+                          {formatGbp(r.impact.var95Reduction)}
+                        </p>
+                      </div>
+                    </div>
                     <p className="mt-1 text-xs text-ink-mid">
                       Constraints: {r.constraintsApplied.join(" · ")}
                     </p>
                     <button
                       type="button"
-                      className="mt-2 text-xs text-ink-mid"
+                      className="mt-3 inline-flex items-center gap-2 rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:bg-ivory-dark hover:text-ink"
                       onClick={() =>
                         setOpenScenarios((prev) => ({
                           ...prev,
@@ -488,7 +625,10 @@ export default function OptimisePage() {
                         }))
                       }
                     >
-                      {openScenarios[`${r.instrument}-${i}`] ? "Hide scenarios ▴" : "Show scenarios ▾"}
+                      {openScenarios[`${r.instrument}-${i}`] ? "Hide scenarios" : "Show scenarios"}
+                      <span className="text-xs">
+                        {openScenarios[`${r.instrument}-${i}`] ? "▴" : "▾"}
+                      </span>
                     </button>
                     {openScenarios[`${r.instrument}-${i}`] ? (
                       <div className="mt-2 overflow-x-auto">
@@ -527,31 +667,89 @@ export default function OptimisePage() {
             {data.alternatives.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">No alternatives available.</p>
             ) : (
-              <div className="mt-3 space-y-2 text-sm text-ink-mid">
+              <div className="mt-3 grid gap-2">
                 {data.alternatives.map((alt) => (
-                  <p key={alt.rank}>
-                    #{alt.rank}: {alt.trades.length} trade(s) · CVaR improvement{" "}
-                    {formatGbp(alt.deltas.cvar95Reduction)} · Worst stress improvement{" "}
-                    {formatGbp(alt.deltas.worstStressReduction)}
-                  </p>
+                  <div
+                    key={alt.rank}
+                    className="group flex flex-wrap items-center justify-between gap-4 rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3 transition-colors hover:bg-ivory-dark"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full border-[0.5px] border-ivory-border bg-ivory font-mono text-[11px] text-ink">
+                        #{alt.rank}
+                      </span>
+                      <div>
+                        <p className="text-sm text-ink">
+                          {alt.trades.length} trade{alt.trades.length === 1 ? "" : "s"}
+                        </p>
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-ink-light">
+                          Alternative package
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                          CVaR
+                        </p>
+                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                          {formatGbp(alt.deltas.cvar95Reduction)}
+                        </p>
+                      </div>
+                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                          Worst stress
+                        </p>
+                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                          {formatGbp(alt.deltas.worstStressReduction)}
+                        </p>
+                      </div>
+                      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                          VaR
+                        </p>
+                        <p className="mt-1 font-serif text-sm text-[#1D6B4E]">
+                          {formatGbp(alt.deltas.var95Reduction)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
           </section>
 
-          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4 text-xs text-ink-mid">
-            Scenarios: {data.diagnostics.scenarioCount} total (
-            {data.diagnostics.historicalScenarioCount} historical,{" "}
-            {data.diagnostics.stressScenarioCount} stress) · FX EUR/GBP{" "}
-            {data.gbpPerEur.toFixed(4)} · Generated {new Date(data.generatedAt).toLocaleString()}
-            {data.diagnostics.fallbackUsed && " · Fallback scenario set used"}
-            <p className="mt-2">
-              Provenance: Power {data.provenance.power} · Gas {data.provenance.gas} · FX{" "}
-              {data.provenance.fx}
-              {data.provenance.sinceDate != null && data.provenance.windowDays != null
-                ? ` · Data window: ${data.provenance.windowDays} days from ${data.provenance.sinceDate}`
-                : ""}
-            </p>
+          <section className="border-t-[0.5px] border-ivory-border pt-4 text-[11px] text-ink-light">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>
+                Scenarios {data.diagnostics.scenarioCount} (hist {data.diagnostics.historicalScenarioCount} ·
+                stress {data.diagnostics.stressScenarioCount})
+              </span>
+              <span className="text-ink-light/50">·</span>
+              <span>FX EUR/GBP {data.gbpPerEur.toFixed(4)}</span>
+              <span className="text-ink-light/50">·</span>
+              <span>Generated {new Date(data.generatedAt).toLocaleString()}</span>
+              {data.diagnostics.fallbackUsed ? (
+                <>
+                  <span className="text-ink-light/50">·</span>
+                  <span>Fallback scenario set</span>
+                </>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>Power {data.provenance.power}</span>
+              <span className="text-ink-light/50">·</span>
+              <span>Gas {data.provenance.gas}</span>
+              <span className="text-ink-light/50">·</span>
+              <span>FX {data.provenance.fx}</span>
+              {data.provenance.sinceDate != null && data.provenance.windowDays != null ? (
+                <>
+                  <span className="text-ink-light/50">·</span>
+                  <span>
+                    Window {data.provenance.windowDays}d from {data.provenance.sinceDate}
+                  </span>
+                </>
+              ) : null}
+            </div>
           </section>
         </>
       )}
