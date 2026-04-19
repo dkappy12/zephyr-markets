@@ -1558,31 +1558,26 @@ function PlanApiPanel() {
       method: "GET",
       path: "/api/v1/premium",
       desc: "Latest physical premium score",
-      status: "live",
     },
     {
       method: "GET",
       path: "/api/v1/signals",
       desc: "REMIT signal feed",
-      status: "live",
     },
     {
       method: "GET",
       path: "/api/v1/markets",
       desc: "Market prices — N2EX, TTF, NBP",
-      status: "live",
     },
     {
       method: "GET",
       path: "/api/v1/storage",
       desc: "EU gas storage levels",
-      status: "planned",
     },
     {
       method: "GET",
       path: "/api/v1/weather",
       desc: "GB wind and solar forecast",
-      status: "planned",
     },
   ];
 
@@ -1892,18 +1887,38 @@ function PlanApiPanel() {
                 {e.method}
               </span>
               <span className="font-mono text-[11px] text-ink">{e.path}</span>
-              <span className="ml-auto text-xs text-ink-light">
-                {e.desc} {e.status === "live" ? "· Live" : "· Planned"}
-              </span>
+              <span className="ml-auto text-xs text-ink-light">{e.desc}</span>
             </div>
           ))}
         </div>
         <p className="mt-4 text-xs text-ink-light">
-          {isAdmin
-            ? "API access is enabled for your account. /api/v1/premium is live; additional endpoints are being rolled out."
-            : currentTierCode === "team"
-              ? "Team API access is enabled. /api/v1/premium is live; additional endpoints are being rolled out."
-              : "API access is unlocked on Team plan and above."}
+          {isAdmin ? (
+            <>
+              5 endpoints live. Full documentation at{" "}
+              <Link
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+              >
+                zephyr.markets/docs
+              </Link>
+            </>
+          ) : currentTierCode === "team" ? (
+            <>
+              5 endpoints live. Full documentation at{" "}
+              <Link
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+              >
+                zephyr.markets/docs
+              </Link>
+            </>
+          ) : (
+            "API access is unlocked on Team plan and above."
+          )}
         </p>
       </div>
     </motion.div>
