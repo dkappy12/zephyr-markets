@@ -15,12 +15,6 @@ import {
   useState,
 } from "react";
 
-function normalizeRole(role: string | null | undefined): string | null {
-  if (!role) return null;
-  const normalized = role.trim().toLowerCase();
-  return normalized.length > 0 ? normalized : null;
-}
-
 const baseTabs = ["Profile", "Markets & Alerts", "Plan & API"] as const;
 const teamTab = "Team" as const;
 
@@ -33,8 +27,6 @@ function SettingsPageInner() {
     status?: string;
   } | null>(null);
   const [billingFetched, setBillingFetched] = useState(false);
-  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
-  const [roleResolved, setRoleResolved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,54 +56,12 @@ function SettingsPageInner() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const supabase = createClient();
-    void (async () => {
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (cancelled || !userData.user) {
-          setIsPlatformAdmin(false);
-          return;
-        }
-        const appRole = normalizeRole(
-          (userData.user.app_metadata as { role?: string } | undefined)?.role ??
-            null,
-        );
-        const { data } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", userData.user.id)
-          .maybeSingle();
-        if (cancelled) return;
-        const profileRole = normalizeRole(
-          (data as { role?: string } | null)?.role,
-        );
-        setIsPlatformAdmin(
-          appRole === "admin" || profileRole === "admin",
-        );
-      } catch {
-        if (!cancelled) setIsPlatformAdmin(false);
-      } finally {
-        if (!cancelled) setRoleResolved(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const showTeamTab = useMemo(() => {
-    if (!billingFetched || !roleResolved) return false;
-    if (isPlatformAdmin || billingInfo?.status === "admin") return false;
+    if (!billingFetched) return false;
     const t = billingInfo?.effectiveTier;
-    return t === "team" || t === "enterprise";
-  }, [
-    billingFetched,
-    roleResolved,
-    billingInfo,
-    isPlatformAdmin,
-  ]);
+    const status = billingInfo?.status;
+    return t === "team" && status !== "admin";
+  }, [billingFetched, billingInfo]);
 
   useEffect(() => {
     if (
@@ -196,7 +146,7 @@ function SettingsPageInner() {
           <MarketsAlertsPanel key="markets" />
         ) : activeTab === "Plan & API" ? (
           <PlanApiPanel key="plan" />
-        ) : activeTab === "Team" ? (
+        ) : showTeamTab && activeTab === "Team" ? (
           <TeamPanel key="team" />
         ) : null}
       </AnimatePresence>
@@ -1354,7 +1304,7 @@ function PlanApiPanel() {
   const pro = TIER_ENTITLEMENTS.pro;
   const team = TIER_ENTITLEMENTS.team;
   const [billingStatus, setBillingStatus] = useState<{
-    effectiveTier: "free" | "pro" | "team" | "enterprise";
+    effectiveTier: "free" | "pro" | "team";
     status: string;
     statusLabel: string;
     interval: "monthly" | "annual" | null;
@@ -1393,7 +1343,7 @@ function PlanApiPanel() {
           throw new Error(body.error ?? "Failed to load billing status");
         }
         const body = (await res.json()) as {
-          effectiveTier: "free" | "pro" | "team" | "enterprise";
+          effectiveTier: "free" | "pro" | "team";
           status: string;
           statusLabel: string;
           interval: "monthly" | "annual" | null;
@@ -1430,9 +1380,7 @@ function PlanApiPanel() {
   const statusLabel = billingStatus?.statusLabel ?? "active";
   const isAdmin = billingStatus?.status === "admin";
   const isPaidTier =
-    currentTierCode === "pro" ||
-    currentTierCode === "team" ||
-    currentTierCode === "enterprise";
+    currentTierCode === "pro" || currentTierCode === "team";
   const isTeamSeat = Boolean(billingStatus?.teamMemberOfOwnerId);
   const periodEndLabel =
     billingStatus?.currentPeriodEnd != null
@@ -1502,9 +1450,7 @@ function PlanApiPanel() {
     }
   }
 
-  const canManageApiKeys =
-    !isAdmin &&
-    (currentTierCode === "team" || currentTierCode === "enterprise");
+  const canManageApiKeys = !isAdmin && currentTierCode === "team";
 
   const loadApiKeys = useCallback(async () => {
     if (!canManageApiKeys) return;
@@ -1808,9 +1754,7 @@ function PlanApiPanel() {
         </div>
       ) : null}
 
-      {!isAdmin &&
-      (currentTierCode === "team" || currentTierCode === "enterprise") &&
-      !isTeamSeat ? (
+      {!isAdmin && currentTierCode === "team" && !isTeamSeat ? (
         <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-6">
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             Plan changes
@@ -1947,7 +1891,7 @@ function PlanApiPanel() {
           ))}
         </div>
         <p className="mt-4 text-xs text-ink-light">
-          {currentTierCode === "team" || currentTierCode === "enterprise"
+          {currentTierCode === "team"
             ? "Team API access is enabled. /api/v1/premium is live; additional endpoints are being rolled out."
             : "API access is unlocked on Team plan and above."}
         </p>

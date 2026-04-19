@@ -48,7 +48,7 @@ function normalizeRole(role: string | null | undefined): string | null {
 }
 
 export function tierBadgeLabel(
-  tier: "free" | "pro" | "team" | "enterprise" | null,
+  tier: "free" | "pro" | "team" | null,
 ): "pro" | "team" | null {
   if (tier === "pro" || tier === "team") return tier;
   return null;
@@ -61,7 +61,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
   const [avatarInitials, setAvatarInitials] = useState("U");
   const [profileRole, setProfileRole] = useState<string | null>(null);
   const [effectiveTier, setEffectiveTier] = useState<
-    "free" | "pro" | "team" | "enterprise" | null
+    "free" | "pro" | "team" | null
   >(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -92,7 +92,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
       .then(async (res) => {
         if (!res.ok) return null;
         const body = (await res.json()) as {
-          effectiveTier?: "free" | "pro" | "team" | "enterprise";
+          effectiveTier?: "free" | "pro" | "team";
         };
         return body.effectiveTier ?? null;
       })

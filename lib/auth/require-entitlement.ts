@@ -28,7 +28,6 @@ const TIER_RANK: Record<TierCode, number> = {
   free: 0,
   pro: 1,
   team: 2,
-  enterprise: 3,
 };
 
 export async function requireEntitlement(

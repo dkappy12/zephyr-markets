@@ -1,4 +1,4 @@
-export type TierCode = "free" | "pro" | "team" | "enterprise";
+export type TierCode = "free" | "pro" | "team";
 
 export type TierEntitlement = {
   code: TierCode;
@@ -47,18 +47,6 @@ export const TIER_ENTITLEMENTS: Record<TierCode, TierEntitlement> = {
     portfolioEnabled: true,
     maxPositions: "unlimited",
     seats: 5,
-    dataExport: true,
-    apiAccess: true,
-  },
-  enterprise: {
-    code: "enterprise",
-    label: "Enterprise",
-    monthlyPriceGbp: null,
-    realtimeSignals: true,
-    signalDelayMinutes: 0,
-    portfolioEnabled: true,
-    maxPositions: "unlimited",
-    seats: "unlimited",
     dataExport: true,
     apiAccess: true,
   },

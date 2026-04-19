@@ -57,9 +57,8 @@ const ACTION_REQUIRED_STATUSES = new Set([
 const BLOCKED_STATUSES = new Set(["unpaid", "incomplete", "incomplete_expired"]);
 
 function normalizeTier(value: string | null | undefined): TierCode {
-  if (value === "pro" || value === "team" || value === "enterprise") {
-    return value;
-  }
+  if (value === "pro" || value === "team") return value;
+  if (value === "enterprise") return "team";
   return "free";
 }
 
@@ -99,8 +98,8 @@ async function isAdminUser(userId: string): Promise<boolean> {
 
 function adminOverrideState(): EffectiveBillingState {
   return {
-    effectiveTier: "enterprise",
-    entitlements: TIER_ENTITLEMENTS.enterprise,
+    effectiveTier: "team",
+    entitlements: { ...TIER_ENTITLEMENTS.team, seats: 1 },
     status: "admin",
     interval: null,
     currentPeriodEnd: null,
