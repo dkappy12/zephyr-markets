@@ -13,6 +13,8 @@ import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
 
+export const dynamic = "force-dynamic";
+
 function parseDateOnly(v: string | null): string | null {
   if (!v) return null;
   return v.slice(0, 10);
