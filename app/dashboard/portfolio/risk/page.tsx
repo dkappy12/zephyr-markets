@@ -45,6 +45,8 @@ type PositionRow = {
   tenor: string | null;
   instrument_type: string | null;
   is_closed: boolean | null;
+  entry_date: string | null;
+  created_at: string;
 };
 
 type PowerPriceRow = {
@@ -87,6 +89,23 @@ function asNum(v: unknown): number {
 
 function asDateOnly(iso: string): string {
   return iso.slice(0, 10);
+}
+
+/** Earliest calendar day the user had any row in `positions` (Book), for trimming tape-backed history. */
+function earliestBookActivityDate(
+  rows: readonly { entry_date?: string | null; created_at?: string | null }[],
+): string | null {
+  let minD: string | null = null;
+  for (const r of rows) {
+    const rawEntry = r.entry_date?.trim() ?? "";
+    const fromCreated = r.created_at ? asDateOnly(String(r.created_at)) : "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(rawEntry)
+      ? rawEntry
+      : fromCreated || null;
+    if (!d) continue;
+    if (minD == null || d < minD) minD = d;
+  }
+  return minD;
 }
 
 function formatGbp(v: number): string {
@@ -152,7 +171,9 @@ const calculateDailyPnL = (
   ttfPricesByDay: Record<string, number>,
   nbpPricesByDay: Record<string, number>,
   fxByDay: Record<string, number>,
+  options?: { minResultDate?: string | null },
 ): DailyPnL[] => {
+  const minResultDate = options?.minResultDate ?? null;
   const dateUniverse = new Set<string>([
     ...Object.keys(powerPricesByDay),
     ...Object.keys(ttfPricesByDay),
@@ -164,6 +185,9 @@ const calculateDailyPnL = (
   for (let i = 1; i < dates.length; i++) {
     const prevDate = dates[i - 1];
     const currDate = dates[i];
+    if (minResultDate && currDate < minResultDate) {
+      continue;
+    }
     let dayPnL = 0;
     let hasContributingSeries = false;
 
@@ -260,6 +284,8 @@ export default function RiskPage() {
   const [limitsMessage, setLimitsMessage] = useState<string | null>(null);
   const [limitsError, setLimitsError] = useState<string | null>(null);
   const [riskLimitsFetchError, setRiskLimitsFetchError] = useState<string | null>(null);
+  /** First day the user had any position in Book (all rows); trims global price backfill from charts/VaR. */
+  const [bookStartDate, setBookStartDate] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/billing/status")
@@ -289,6 +315,7 @@ export default function RiskPage() {
         setPositions([]);
         setPowerPrices([]);
         setGasPrices([]);
+        setBookStartDate(null);
         setMaxPositionMwInput("");
         setMaxVarGbpInput("");
         setMaxDrawdownGbpInput("");
@@ -305,6 +332,7 @@ export default function RiskPage() {
 
       const [
         { data: positionsData, error: positionsError },
+        { data: bookActivityRows, error: bookActivityError },
         { data: powerData, error: powerError },
         { data: gasData, error: gasError },
         { data: fxData, error: fxError },
@@ -315,6 +343,10 @@ export default function RiskPage() {
             .select("*")
             .eq("user_id", user.id)
             .eq("is_closed", false),
+          supabase
+            .from("positions")
+            .select("entry_date, created_at")
+            .eq("user_id", user.id),
           supabase
             .from("market_prices")
             .select(
@@ -366,6 +398,11 @@ export default function RiskPage() {
       }
 
       setPositions((positionsData ?? []) as PositionRow[]);
+      setBookStartDate(
+        bookActivityError
+          ? earliestBookActivityDate(positionsData ?? [])
+          : earliestBookActivityDate(bookActivityRows ?? []),
+      );
       setPowerPrices((powerData ?? []) as PowerPriceRow[]);
       setGasPrices((gasData ?? []) as GasPriceRow[]);
       setFxRates((fxData ?? []) as FxRateRow[]);
@@ -483,8 +520,11 @@ export default function RiskPage() {
   }, [fxRates]);
 
   const dailyPnLSeries = useMemo(
-    () => calculateDailyPnL(positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay),
-    [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay],
+    () =>
+      calculateDailyPnL(positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, {
+        minResultDate: bookStartDate,
+      }),
+    [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, bookStartDate],
   );
 
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
@@ -508,11 +548,18 @@ export default function RiskPage() {
 
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
-      const series = calculateDailyPnL([p], powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay);
+      const series = calculateDailyPnL(
+        [p],
+        powerPricesByDay,
+        ttfPricesByDay,
+        nbpPricesByDay,
+        fxByDay,
+        { minResultDate: bookStartDate },
+      );
       const worst = series.length > 0 ? series.reduce((min, d) => (d.pnl < min.pnl ? d : min), series[0]) : null;
       return { position: p, worst };
     });
-  }, [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay]);
+  }, [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, bookStartDate]);
 
   const sumIndividualVaRs = perPositionRisk.reduce(
     (sum, r) => sum + Math.abs(r.worst?.pnl ?? 0),
