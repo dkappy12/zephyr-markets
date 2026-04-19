@@ -510,6 +510,24 @@ function ProfilePanel() {
   );
 }
 
+const PREMIUM_ALERT_TYPE = "premium_score";
+const DEFAULT_PREMIUM_THRESHOLD = 3;
+
+function clampPremiumScoreThreshold(n: number): number {
+  const stepped = Math.round(n * 2) / 2;
+  return Math.min(10, Math.max(0.5, stepped));
+}
+
+type AlertApiRow = {
+  id: string;
+  user_id: string;
+  threshold_type: string;
+  threshold_value: number | string;
+  delivery_channel: string;
+  signal_id: string | null;
+  created_at: string;
+};
+
 function MarketsAlertsPanel() {
   const markets = [
     {
@@ -554,11 +572,152 @@ function MarketsAlertsPanel() {
     },
   ];
 
-  const alerts = [
-    { label: "Physical premium score", value: "Alert when |score| ≥ 4.0" },
-    { label: "REMIT severity", value: "HIGH notices only" },
-    { label: "Wind drought threshold", value: "GB wind < 5 GW for 3+ hours" },
-  ];
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsLoadError, setAlertsLoadError] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [inputValue, setInputValue] = useState(DEFAULT_PREMIUM_THRESHOLD);
+  const [savedValue, setSavedValue] = useState<number | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [statusErr, setStatusErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadAlerts = useCallback(async () => {
+    setAlertsLoading(true);
+    setAlertsLoadError(null);
+    try {
+      const res = await fetch("/api/alerts");
+      const body = (await res.json().catch(() => ({}))) as {
+        alerts?: AlertApiRow[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(body.error ?? res.statusText);
+      }
+      const rows = body.alerts ?? [];
+      const row = rows.find((r) => r.threshold_type === PREMIUM_ALERT_TYPE);
+      if (row) {
+        const raw = Number(row.threshold_value);
+        const v = Number.isFinite(raw)
+          ? clampPremiumScoreThreshold(raw)
+          : DEFAULT_PREMIUM_THRESHOLD;
+        setEnabled(true);
+        setInputValue(v);
+        setSavedValue(v);
+      } else {
+        setEnabled(false);
+        setInputValue(DEFAULT_PREMIUM_THRESHOLD);
+        setSavedValue(null);
+      }
+    } catch (e) {
+      setAlertsLoadError(
+        e instanceof Error ? e.message : "Could not load alerts",
+      );
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAlerts();
+  }, [loadAlerts]);
+
+  useEffect(() => {
+    if (!statusMsg) return;
+    const t = setTimeout(() => setStatusMsg(null), 3200);
+    return () => clearTimeout(t);
+  }, [statusMsg]);
+
+  const normalizedInput = clampPremiumScoreThreshold(inputValue);
+  const valueDirty =
+    enabled &&
+    savedValue !== null &&
+    normalizedInput !== savedValue;
+
+  const applyPremiumEnabled = useCallback(
+    async (next: boolean) => {
+      setBusy(true);
+      setStatusErr(null);
+      setStatusMsg(null);
+      try {
+        if (next) {
+          const v = clampPremiumScoreThreshold(inputValue);
+          setInputValue(v);
+          const res = await fetch("/api/alerts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              threshold_type: PREMIUM_ALERT_TYPE,
+              threshold_value: v,
+              delivery_channel: "email",
+            }),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (!res.ok) {
+            throw new Error(body.error ?? res.statusText);
+          }
+          setEnabled(true);
+          setSavedValue(v);
+          setStatusMsg("Saved");
+        } else {
+          const res = await fetch("/api/alerts", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ threshold_type: PREMIUM_ALERT_TYPE }),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (!res.ok) {
+            throw new Error(body.error ?? res.statusText);
+          }
+          setEnabled(false);
+          setSavedValue(null);
+          setStatusMsg(null);
+        }
+      } catch (e) {
+        setStatusErr(
+          e instanceof Error ? e.message : "Something went wrong",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [inputValue],
+  );
+
+  const savePremiumThreshold = useCallback(async () => {
+    if (!enabled || savedValue === null) return;
+    setBusy(true);
+    setStatusErr(null);
+    setStatusMsg(null);
+    try {
+      const v = clampPremiumScoreThreshold(inputValue);
+      setInputValue(v);
+      const res = await fetch("/api/alerts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threshold_type: PREMIUM_ALERT_TYPE,
+          threshold_value: v,
+          delivery_channel: "email",
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error ?? res.statusText);
+      }
+      setSavedValue(v);
+      setStatusMsg("Saved");
+    } catch (e) {
+      setStatusErr(
+        e instanceof Error ? e.message : "Could not save",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [enabled, savedValue, inputValue]);
 
   return (
     <motion.div
@@ -600,19 +759,86 @@ function MarketsAlertsPanel() {
           Alert thresholds
         </p>
         <p className="mt-1 text-xs text-ink-light">
-          Current default thresholds. Configurable alert preferences coming
-          soon.
+          Configure email alerts for key market signals.
         </p>
-        <div className="mt-5 divide-y-[0.5px] divide-ivory-border">
-          {alerts.map((a) => (
-            <div key={a.label} className="flex items-center justify-between py-3">
-              <p className="text-sm text-ink">{a.label}</p>
-              <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-2.5 py-1 font-mono text-[10px] text-ink-mid">
-                {a.value}
-              </span>
+
+        {alertsLoadError ? (
+          <p className="mt-4 text-sm text-bear" role="alert">
+            {alertsLoadError}
+          </p>
+        ) : alertsLoading ? (
+          <p className="mt-4 text-sm text-ink-mid">Loading alerts…</p>
+        ) : (
+          <div className="mt-5 border-t-[0.5px] border-ivory-border pt-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 max-w-xl">
+                <p className="text-sm font-medium text-ink">
+                  Physical premium score alert
+                </p>
+                <p className="mt-1 text-xs text-ink-light">
+                  Email when |score| crosses your threshold
+                </p>
+              </div>
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[11px] text-ink-mid">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={busy}
+                  onChange={(e) => void applyPremiumEnabled(e.target.checked)}
+                  className="rounded border-ivory-border text-ink accent-[#1D6B4E]"
+                />
+                <span className="font-medium text-ink">Enabled</span>
+              </label>
             </div>
-          ))}
-        </div>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div>
+                <label
+                  htmlFor="premium-score-threshold"
+                  className="text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+                >
+                  Threshold (|score|)
+                </label>
+                <input
+                  id="premium-score-threshold"
+                  type="number"
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                  disabled={!enabled || busy}
+                  value={inputValue}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setInputValue(Number.isFinite(n) ? n : inputValue);
+                  }}
+                  onBlur={() =>
+                    setInputValue((v) => clampPremiumScoreThreshold(v))
+                  }
+                  className="mt-1 block w-[120px] rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-3 py-2 text-sm tabular-nums text-ink outline-none transition-colors focus:border-ink/35 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+              {valueDirty ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void savePremiumThreshold()}
+                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink/25 disabled:opacity-60"
+                >
+                  {busy ? "Saving…" : "Save"}
+                </button>
+              ) : null}
+            </div>
+            {statusErr ? (
+              <p className="mt-3 text-xs text-bear" role="alert">
+                {statusErr}
+              </p>
+            ) : null}
+            {statusMsg ? (
+              <p className="mt-3 text-xs font-medium text-[#1D6B4E]">
+                {statusMsg}
+              </p>
+            ) : null}
+          </div>
+        )}
       </div>
     </motion.div>
   );
