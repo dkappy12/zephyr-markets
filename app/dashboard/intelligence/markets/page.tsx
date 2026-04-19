@@ -1053,7 +1053,9 @@ export default function MarketsPage() {
       const ukaGbp = uka?.price_gbp_per_t ? Number(uka.price_gbp_per_t) : null;
       const euaGbp = eua?.price_gbp_per_t ? Number(eua.price_gbp_per_t) : null;
       const spread =
-        euaGbp != null && ukaGbp != null ? euaGbp - ukaGbp : null;
+        euaGbp != null && ukaGbp != null
+          ? Number((euaGbp - ukaGbp).toFixed(2))
+          : null;
       return { date, euaEur, ukaGbp, spread };
     });
   }, [carbonHistory]);
@@ -1100,7 +1102,7 @@ export default function MarketsPage() {
       .map((d) => ({
         date: d.date,
         label: d.date.length >= 10 ? d.date.slice(5, 10) : d.date,
-        spread: d.spread as number,
+        spread: Number(Number(d.spread).toFixed(2)),
       }));
   }, [carbonChartData]);
 
@@ -1744,6 +1746,20 @@ export default function MarketsPage() {
                         tickLine={false}
                         width={36}
                         domain={["auto", "auto"]}
+                        tickFormatter={(v) => Number(v).toFixed(2)}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "var(--color-card)",
+                          border: "0.5px solid var(--color-ivory-border)",
+                          borderRadius: 4,
+                          fontSize: 11,
+                        }}
+                        formatter={(v) => [
+                          `${Number(v ?? 0).toFixed(2)} £/t`,
+                          "Spread",
+                        ]}
+                        labelFormatter={(l) => `Date: ${l}`}
                       />
                       <Line
                         type="monotone"
