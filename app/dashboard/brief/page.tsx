@@ -9,6 +9,7 @@ import {
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -333,24 +334,30 @@ export default function BriefPage() {
   const [bookTouchpointLoading, setBookTouchpointLoading] = useState(false);
   const [bookTouchpointError, setBookTouchpointError] = useState<string | null>(null);
   const [briefDelayMinutes, setBriefDelayMinutes] = useState(0);
+  const [portfolioEnabled, setPortfolioEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     let active = true;
     void fetch("/api/billing/status")
       .then(async (res) => {
-        if (!res.ok) return 0;
-        const body = (await res.json()) as {
-          entitlements?: { signalDelayMinutes?: number };
-        };
-        return Number(body.entitlements?.signalDelayMinutes ?? 0);
-      })
-      .then((delay) => {
         if (!active) return;
+        if (!res.ok) {
+          setBriefDelayMinutes(0);
+          setPortfolioEnabled(false);
+          return;
+        }
+        const body = (await res.json()) as {
+          entitlements?: { signalDelayMinutes?: number; portfolioEnabled?: boolean };
+          effectiveTier?: string;
+        };
+        const delay = Number(body.entitlements?.signalDelayMinutes ?? 0);
         setBriefDelayMinutes(Number.isFinite(delay) ? Math.max(0, delay) : 0);
+        setPortfolioEnabled(body.entitlements?.portfolioEnabled ?? false);
       })
       .catch(() => {
         if (!active) return;
         setBriefDelayMinutes(0);
+        setPortfolioEnabled(false);
       });
     return () => {
       active = false;
@@ -705,7 +712,30 @@ export default function BriefPage() {
 
         <section>
           <p className={bookTouchpointsLabelClass}>BOOK TOUCHPOINTS</p>
-          {bookTouchpointLoading ? (
+          {portfolioEnabled === false ? (
+            <div className="relative mt-3 overflow-hidden rounded-[4px]">
+              <div className="pointer-events-none select-none space-y-2 p-3 blur-[2px] opacity-60">
+                <div className="h-4 w-full rounded bg-ink/10" />
+                <div className="h-4 w-[80%] rounded bg-ink/10" />
+                <div className="h-4 w-[60%] rounded bg-ink/10" />
+                <div className="mt-3 h-3 w-48 rounded bg-ink/8" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/95 px-5 py-4 text-center shadow-md">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                    Pro plan required
+                  </p>
+                  <p className="mt-1 text-xs text-ink-mid">Personalised position touchpoints</p>
+                  <Link
+                    href="/dashboard/settings?tab=plan"
+                    className="mt-3 inline-flex items-center rounded-[4px] bg-ink px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+                  >
+                    Get Pro →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : bookTouchpointLoading ? (
             <div className="mt-3 space-y-2">
               <div className="h-4 w-full rounded bg-ivory-dark animate-pulse" />
               <div className="h-4 w-3/4 rounded bg-ivory-dark animate-pulse" />
