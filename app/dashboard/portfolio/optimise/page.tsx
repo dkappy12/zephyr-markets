@@ -381,7 +381,7 @@ export default function OptimisePage() {
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
                   <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                    Scenarios
+                    Total scenarios
                   </p>
                   <p className="mt-1 font-serif text-xl text-ink tabular-nums">
                     {data.diagnostics.scenarioCount}
@@ -589,7 +589,7 @@ export default function OptimisePage() {
                       </span>
                     </div>
                     <p className="font-serif text-lg text-ink">
-                      {r.direction} {r.size.toLocaleString("en-GB")} {r.unit} {r.instrument}
+                      {r.size.toLocaleString("en-GB")} {r.unit} {r.instrument}
                     </p>
                     <p className="mt-2 text-[13px] italic leading-relaxed text-ink-mid">
                       {r.rationale}
