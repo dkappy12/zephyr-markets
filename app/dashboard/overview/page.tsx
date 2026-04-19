@@ -847,12 +847,11 @@ function OverviewPageInner() {
           Physical premium, GB power fundamentals, and the signals that move your
           book today.
         </p>
+        <p className="mt-1.5 max-w-2xl text-[11px] leading-relaxed text-ink-light">
+          Staleness is per series below. N2EX and TTF are market tape where
+          available; wind is forecast-derived (not Elexon outturn).
+        </p>
       </div>
-
-      <p className="text-[11px] leading-relaxed text-ink-light">
-        Staleness is per series below. N2EX and TTF are market tape where
-        available; wind is forecast-derived (not Elexon outturn).
-      </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
