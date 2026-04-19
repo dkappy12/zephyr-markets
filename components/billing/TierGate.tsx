@@ -49,12 +49,12 @@ export function TierGate({
   return (
     <div className="relative min-h-[600px]">
       {/* Static blurred mockup behind */}
-      <div className="pointer-events-none select-none blur-md opacity-50">
+      <div className="pointer-events-none select-none blur-[3px] opacity-75">
         {mockup ?? <GenericMockup />}
       </div>
 
-      {/* Gate panel — fixed to viewport centre */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Gate panel — within page flow so dashboard nav stays clickable */}
+      <div className="absolute inset-0 z-40 flex items-center justify-center pt-16">
         <div className="mx-auto max-w-sm rounded-[6px] border-[0.5px] border-ivory-border bg-ivory/98 px-8 py-10 text-center shadow-xl backdrop-blur-sm">
           <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-ink/5">
             <svg
