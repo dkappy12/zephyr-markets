@@ -319,6 +319,225 @@ function readInkCssVars(): { ink: string; inkMid: string } {
   return { ink, inkMid };
 }
 
+function MarketsCarbonSection({
+  sectionClassName,
+  carbonUpdated,
+  euaCarbonLine30,
+  ukaLine30,
+  inkMid,
+  carbonAdderGbpMwh,
+  carbonAdderChartData,
+}: {
+  sectionClassName: string;
+  carbonUpdated: string | null;
+  euaCarbonLine30: { date: string; label: string; euaEur: number }[];
+  ukaLine30: { date: string; label: string; price: number }[];
+  inkMid: string;
+  carbonAdderGbpMwh: number | null;
+  carbonAdderChartData: { date: string; adder: number }[];
+}) {
+  return (
+    <section className={sectionClassName}>
+      <div className="flex shrink-0 items-baseline gap-3">
+        <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
+          Carbon
+        </h2>
+        {carbonUpdated ? (
+          <span className="font-mono text-[10px] text-ink-light">
+            {carbonUpdated}
+          </span>
+        ) : null}
+      </div>
+      <div className="grid shrink-0 gap-4 sm:grid-cols-2">
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+            EUA (€/t) · last 30 days
+          </p>
+          <div className="mt-3 h-[140px] w-full">
+            {euaCarbonLine30.length > 0 ? (
+              <ResponsiveContainer width="100%" height={140}>
+                <LineChart
+                  data={euaCarbonLine30}
+                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: inkMid, fontSize: 9 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fill: inkMid, fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={36}
+                    domain={["auto", "auto"]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="euaEur"
+                    stroke={BRAND_GREEN}
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-[140px] items-center text-xs text-ink-light">
+                No EUA history in range
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+            UKA (£/T) · LAST 30 DAYS
+          </p>
+          <p className="mt-0.5 text-[10px] text-ink-light">
+            UK Emissions Trading Scheme allowance price
+          </p>
+          <div className="mt-3 h-[140px] w-full">
+            {ukaLine30.length > 0 ? (
+              <ResponsiveContainer width="100%" height={140}>
+                <LineChart
+                  data={ukaLine30}
+                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: inkMid, fontSize: 9 }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fill: inkMid, fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={36}
+                    domain={["auto", "auto"]}
+                    tickFormatter={(v) => `£${Number(v).toFixed(2)}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--color-card)",
+                      border: "0.5px solid var(--color-ivory-border)",
+                      borderRadius: 4,
+                      fontSize: 11,
+                    }}
+                    formatter={(v) => [
+                      `£${Number(v ?? 0).toFixed(2)}/t`,
+                      "UKA",
+                    ]}
+                    labelFormatter={(l) => `Date: ${l}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke={BRAND_GREEN}
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-[140px] items-center text-xs text-ink-light">
+                No UKA history in range
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+        <p className="mb-1 shrink-0 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+          Carbon adder to SRMC (£/MWh)
+        </p>
+        <p className="mb-3 shrink-0 text-[10px] text-ink-light">
+          (UKA + CPS £18/t) × 0.366 tCO₂/MWh · current:{" "}
+          {carbonAdderGbpMwh != null
+            ? `£${carbonAdderGbpMwh.toFixed(2)}/MWh`
+            : "—"}
+        </p>
+        {carbonAdderChartData.length === 0 ? (
+          <p className="flex flex-1 items-center justify-center py-6 text-center text-[10px] text-ink-light">
+            No UKA history yet — chart appears once carbon_prices has UKA rows.
+          </p>
+        ) : (
+          <div className="min-h-[200px] w-full flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={carbonAdderChartData}
+                margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="rgba(44,42,38,0.08)"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 9, fill: "#888" }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(d) =>
+                    typeof d === "string" ? d.slice(5) : String(d)
+                  }
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: "#888" }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v) => `£${v}`}
+                  domain={["auto", "auto"]}
+                  width={40}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "var(--color-card)",
+                    border: "0.5px solid var(--color-ivory-border)",
+                    borderRadius: 4,
+                    fontSize: 11,
+                  }}
+                  formatter={(v) => [
+                    `£${Number(v ?? 0).toFixed(2)}/MWh`,
+                    "Carbon adder",
+                  ]}
+                  labelFormatter={(l) => `Date: ${l}`}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="adder"
+                  stroke="#5c6b2e"
+                  strokeWidth={1.5}
+                  dot={
+                    carbonAdderChartData.length < 3
+                      ? { r: 4, fill: "#5c6b2e", strokeWidth: 0 }
+                      : false
+                  }
+                  connectNulls
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <p className="shrink-0 text-[10px] text-ink-light">
+        UKA trades ~£18/t below EUA reflecting the Carbon Price Support mechanism.
+        Both are direct inputs to the CCGT SRMC stack.
+      </p>
+    </section>
+  );
+}
+
 export default function MarketsPage() {
   const [{ ink, inkMid }, setInkVars] = useState(() => readInkCssVars());
 
@@ -1172,16 +1391,17 @@ export default function MarketsPage() {
     }));
   }, [carbonHistory]);
 
-  const showMarketsRightColumn =
-    (marketsScope !== "gb_nbp_only" && marketVisibility.ttf) ||
-    (marketVisibility.uka && marketVisibility.eua);
-  const showSparkColumn =
+  const showTtfColumn =
     marketsScope !== "gb_nbp_only" && marketVisibility.ttf;
-  const marketsLayoutLeftColClass = !showMarketsRightColumn
-    ? "flex min-w-0 w-full flex-col gap-4"
-    : showSparkColumn
-      ? "flex min-w-0 flex-1 flex-col gap-4"
-      : "flex min-w-0 flex-[2] flex-col gap-4";
+  const showCarbon = marketVisibility.uka && marketVisibility.eua;
+  const showSparkColumn = showTtfColumn;
+  const marketsLayoutLeftColClass = showTtfColumn
+    ? "flex min-w-0 flex-1 flex-col gap-4"
+    : "flex min-w-0 w-full flex-col gap-4";
+  const ttfStackCardClassName =
+    `flex min-h-[200px] flex-shrink-0 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4${
+      showTtfColumn && !showCarbon ? " min-h-0 flex-1" : ""
+    }`;
 
   return (
     <div className="space-y-6">
@@ -1546,7 +1766,7 @@ export default function MarketsPage() {
         </motion.div>
 
         {/* Spark — same column as GB Power so it aligns with Carbon, not with TTF’s row */}
-        {marketsScope !== "gb_nbp_only" && marketVisibility.ttf ? (
+        {showSparkColumn ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1675,15 +1895,13 @@ export default function MarketsPage() {
         ) : null}
 
           </div>
-          {showMarketsRightColumn ? (
+          {showTtfColumn ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-        {/* TTF stack */}
-        {marketsScope !== "gb_nbp_only" && marketVisibility.ttf ? (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="flex min-h-[200px] flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card px-5 py-4"
+          className={ttfStackCardClassName}
         >
           <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
             TTF gas · CCGT cost stack
@@ -1740,215 +1958,31 @@ export default function MarketsPage() {
             {gasUpdated != null ? `Updated ${gasUpdated}` : "—"}
           </p>
         </motion.div>
-        ) : null}
-
-        {/* Carbon — flex-1 so the adder chart can grow to match the Spark card height */}
-        {marketVisibility.uka && marketVisibility.eua ? (
-        <section className="flex min-h-0 flex-1 flex-col gap-4">
-          <div className="flex shrink-0 items-baseline gap-3">
-            <h2 className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-mid">
-              Carbon
-            </h2>
-            {carbonUpdated && (
-              <span className="font-mono text-[10px] text-ink-light">
-                {carbonUpdated}
-              </span>
-            )}
-          </div>
-          <div className="grid shrink-0 gap-4 sm:grid-cols-2">
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
-                EUA (€/t) · last 30 days
-              </p>
-              <div className="mt-3 h-[140px] w-full">
-                {euaCarbonLine30.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={140}>
-                    <LineChart
-                      data={euaCarbonLine30}
-                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fill: inkMid, fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        tick={{ fill: inkMid, fontSize: 10 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={36}
-                        domain={["auto", "auto"]}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="euaEur"
-                        stroke={BRAND_GREEN}
-                        strokeWidth={2}
-                        dot={false}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-[140px] items-center text-xs text-ink-light">
-                    No EUA history in range
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
-                UKA (£/T) · LAST 30 DAYS
-              </p>
-              <p className="mt-0.5 text-[10px] text-ink-light">
-                UK Emissions Trading Scheme allowance price
-              </p>
-              <div className="mt-3 h-[140px] w-full">
-                {ukaLine30.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={140}>
-                    <LineChart
-                      data={ukaLine30}
-                      margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fill: inkMid, fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis
-                        tick={{ fill: inkMid, fontSize: 10 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={36}
-                        domain={["auto", "auto"]}
-                        tickFormatter={(v) =>
-                          `£${Number(v).toFixed(2)}`
-                        }
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "var(--color-card)",
-                          border: "0.5px solid var(--color-ivory-border)",
-                          borderRadius: 4,
-                          fontSize: 11,
-                        }}
-                        formatter={(v) => [
-                          `£${Number(v ?? 0).toFixed(2)}/t`,
-                          "UKA",
-                        ]}
-                        labelFormatter={(l) => `Date: ${l}`}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="price"
-                        stroke={BRAND_GREEN}
-                        strokeWidth={2}
-                        dot={false}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-[140px] items-center text-xs text-ink-light">
-                    No UKA history in range
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Carbon adder chart */}
-          <div className="flex min-h-0 flex-1 flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-            <p className="mb-1 shrink-0 text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-              Carbon adder to SRMC (£/MWh)
-            </p>
-            <p className="mb-3 shrink-0 text-[10px] text-ink-light">
-              (UKA + CPS £18/t) × 0.366 tCO₂/MWh · current:{" "}
-              {carbonAdderGbpMwh != null
-                ? `£${carbonAdderGbpMwh.toFixed(2)}/MWh`
-                : "—"}
-            </p>
-            {carbonAdderChartData.length === 0 ? (
-              <p className="flex flex-1 items-center justify-center py-6 text-center text-[10px] text-ink-light">
-                No UKA history yet — chart appears once carbon_prices has UKA rows.
-              </p>
-            ) : (
-              <div className="min-h-[200px] w-full flex-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={carbonAdderChartData}
-                    margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke="rgba(44,42,38,0.08)"
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 9, fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(d) =>
-                        typeof d === "string" ? d.slice(5) : String(d)
-                      }
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 9, fill: "#888" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `£${v}`}
-                      domain={["auto", "auto"]}
-                      width={40}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "var(--color-card)",
-                        border: "0.5px solid var(--color-ivory-border)",
-                        borderRadius: 4,
-                        fontSize: 11,
-                      }}
-                      formatter={(v) => [
-                        `£${Number(v ?? 0).toFixed(2)}/MWh`,
-                        "Carbon adder",
-                      ]}
-                      labelFormatter={(l) => `Date: ${l}`}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="adder"
-                      stroke="#5c6b2e"
-                      strokeWidth={1.5}
-                      dot={
-                        carbonAdderChartData.length < 3
-                          ? { r: 4, fill: "#5c6b2e", strokeWidth: 0 }
-                          : false
-                      }
-                      connectNulls
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          <p className="shrink-0 text-[10px] text-ink-light">
-            UKA trades ~£18/t below EUA reflecting the Carbon Price Support mechanism.
-            Both are direct inputs to the CCGT SRMC stack.
-          </p>
-        </section>
+        {showCarbon ? (
+          <MarketsCarbonSection
+            sectionClassName="flex min-h-0 flex-1 flex-col gap-4"
+            carbonUpdated={carbonUpdated}
+            euaCarbonLine30={euaCarbonLine30}
+            ukaLine30={ukaLine30}
+            inkMid={inkMid}
+            carbonAdderGbpMwh={carbonAdderGbpMwh}
+            carbonAdderChartData={carbonAdderChartData}
+          />
         ) : null}
         </div>
           ) : null}
       </div>
+      {showCarbon && !showTtfColumn ? (
+        <MarketsCarbonSection
+          sectionClassName="flex w-full min-h-0 flex-col gap-4"
+          carbonUpdated={carbonUpdated}
+          euaCarbonLine30={euaCarbonLine30}
+          ukaLine30={ukaLine30}
+          inkMid={inkMid}
+          carbonAdderGbpMwh={carbonAdderGbpMwh}
+          carbonAdderChartData={carbonAdderChartData}
+        />
+      ) : null}
 
         {/* EU Storage — full width below the two columns */}
         {marketsScope !== "gb_nbp_only" && marketVisibility.eua ? (

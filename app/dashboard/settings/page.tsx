@@ -1094,7 +1094,11 @@ function MarketsAlertsPanel() {
       sub: "N2EX Day-Ahead · Elexon BMRS MID",
       lock: true,
     },
-    { key: "nbp", label: "NBP Natural Gas", sub: "ICE NF.F via Stooq" },
+    {
+      key: "nbp",
+      label: "NBP Natural Gas",
+      sub: "NBP equivalent shown in the TTF cost stack",
+    },
     { key: "ttf", label: "TTF Natural Gas", sub: "EEX NGP" },
     { key: "uka", label: "Carbon (UKA + CPS)", sub: "UKA + CPS" },
     { key: "eua", label: "EU Gas Storage", sub: "GIE AGSI" },
