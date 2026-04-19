@@ -1,6 +1,7 @@
 "use client";
 
 import { ManuscriptMarginalia } from "@/components/ui/ManuscriptMarginalia";
+import { startStripeSubscriptionCheckout } from "@/lib/billing/start-stripe-checkout";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
   formatReliabilityConfidenceDesk,
@@ -9,7 +10,6 @@ import {
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
@@ -335,6 +335,7 @@ export default function BriefPage() {
   const [bookTouchpointError, setBookTouchpointError] = useState<string | null>(null);
   const [briefDelayMinutes, setBriefDelayMinutes] = useState(0);
   const [portfolioEnabled, setPortfolioEnabled] = useState<boolean | null>(null);
+  const [touchpointCheckoutLoading, setTouchpointCheckoutLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -726,12 +727,22 @@ export default function BriefPage() {
                     Pro plan required
                   </p>
                   <p className="mt-1 text-xs text-ink-mid">Personalised position touchpoints</p>
-                  <Link
-                    href="/dashboard/settings?tab=plan"
-                    className="mt-3 inline-flex items-center rounded-[4px] bg-ink px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+                  <button
+                    type="button"
+                    disabled={touchpointCheckoutLoading}
+                    onClick={() => {
+                      setTouchpointCheckoutLoading(true);
+                      void startStripeSubscriptionCheckout({
+                        tier: "pro",
+                        interval: "monthly",
+                      }).catch(() => {
+                        setTouchpointCheckoutLoading(false);
+                      });
+                    }}
+                    className="mt-3 inline-flex items-center rounded-[4px] bg-ink px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ivory transition-colors hover:bg-[#1f1d1a] disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Get Pro →
-                  </Link>
+                    {touchpointCheckoutLoading ? "Redirecting…" : "Get Pro →"}
+                  </button>
                 </div>
               </div>
             </div>

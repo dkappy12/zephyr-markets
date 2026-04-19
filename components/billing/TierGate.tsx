@@ -1,7 +1,9 @@
 "use client";
 
+import { startStripeSubscriptionCheckout } from "@/lib/billing/start-stripe-checkout";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useState } from "react";
 
 export type TierGateProps = {
   requiredTier: "pro" | "team";
@@ -35,6 +37,20 @@ export function TierGate({
   children,
   mockup,
 }: TierGateProps) {
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  async function handleGetPaidPlan() {
+    setCheckoutLoading(true);
+    try {
+      await startStripeSubscriptionCheckout({
+        tier: requiredTier,
+        interval: "monthly",
+      });
+    } catch {
+      setCheckoutLoading(false);
+    }
+  }
+
   // Still loading billing — show nothing to prevent flash
   if (currentTier === null) {
     return null;
@@ -79,12 +95,16 @@ export function TierGate({
 
           <p className="mt-3 text-sm leading-relaxed text-ink-mid">{description}</p>
 
-          <Link
-            href="/dashboard/settings?tab=plan"
-            className="mt-6 inline-flex items-center rounded-[4px] bg-ink px-6 py-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-ivory transition-colors hover:bg-[#1f1d1a]"
+          <button
+            type="button"
+            disabled={checkoutLoading}
+            onClick={() => void handleGetPaidPlan()}
+            className="mt-6 inline-flex items-center rounded-[4px] bg-ink px-6 py-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-ivory transition-colors hover:bg-[#1f1d1a] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {requiredTier === "pro" ? "Get Pro" : "Get Team"} →
-          </Link>
+            {checkoutLoading
+              ? "Redirecting…"
+              : `${requiredTier === "pro" ? "Get Pro" : "Get Team"} →`}
+          </button>
 
           <p className="mt-3 text-xs text-ink-light">
             Already subscribed?{" "}
