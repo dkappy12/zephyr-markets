@@ -4,7 +4,7 @@ import { createBrowserClient } from "@/lib/supabase/client";
 import { parseISO } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   Bar,
@@ -23,8 +23,6 @@ import {
 
 const LOC_ORDER = ["DE", "FR", "NL", "AT"] as const;
 const BRAND_GREEN = "#1D6B4E";
-const INK = "#2C2A26";
-const INK_MID = "#6B6760";
 const SPARK_NEG = "#8B3A3A";
 /** Currency bridge € → £ for TTF (€/MWh). */
 const GBP_PER_EUR = 0.86;
@@ -304,7 +302,39 @@ function formatStorageInjectionTwhDay(twhPerDay: number): string {
   return `${(twhPerDay * 1000).toFixed(0)} GWh/d (${twhPerDay.toFixed(3)} TWh/d)`;
 }
 
+const INK_FALLBACK_LIGHT = "#2C2A26";
+const INK_MID_FALLBACK_LIGHT = "#6B6760";
+
+function readInkCssVars(): { ink: string; inkMid: string } {
+  if (typeof window === "undefined") {
+    return { ink: INK_FALLBACK_LIGHT, inkMid: INK_MID_FALLBACK_LIGHT };
+  }
+  const root = document.documentElement;
+  const ink =
+    getComputedStyle(root).getPropertyValue("--ink").trim() ||
+    INK_FALLBACK_LIGHT;
+  const inkMid =
+    getComputedStyle(root).getPropertyValue("--ink-mid").trim() ||
+    INK_MID_FALLBACK_LIGHT;
+  return { ink, inkMid };
+}
+
 export default function MarketsPage() {
+  const [{ ink, inkMid }, setInkVars] = useState(() => readInkCssVars());
+
+  useLayoutEffect(() => {
+    setInkVars(readInkCssVars());
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setInkVars(readInkCssVars());
+    });
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -899,12 +929,12 @@ export default function MarketsPage() {
 
   /** vs 5-year April reference: green above ref, amber within 10% below ref, red well below. */
   const storageSeasonalBarColor = useMemo(() => {
-    if (storageAvg == null) return INK_MID;
+    if (storageAvg == null) return inkMid;
     const ref = REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT;
     if (storageAvg >= ref) return BRAND_GREEN;
     if (storageAvg >= ref * 0.9) return "#D97706";
     return "#8B3A3A";
-  }, [storageAvg]);
+  }, [storageAvg, inkMid]);
 
   const injectionRateTwhDay = useMemo(() => {
     const inj = LOC_ORDER.map((l) => storageByLoc[l]?.injection_twh).filter(
@@ -1261,13 +1291,13 @@ export default function MarketsPage() {
                       const mm = m % 60;
                       return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
                     }}
-                    tick={{ fontSize: 10, fill: INK_MID }}
+                    tick={{ fontSize: 10, fill: inkMid }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
                     yAxisId="left"
-                    tick={{ fontSize: 10, fill: INK_MID }}
+                    tick={{ fontSize: 10, fill: inkMid }}
                     tickFormatter={(v) => `£${v}`}
                     axisLine={false}
                     tickLine={false}
@@ -1277,14 +1307,14 @@ export default function MarketsPage() {
                       value: "£/MWh",
                       angle: -90,
                       position: "insideLeft",
-                      fill: INK_MID,
+                      fill: inkMid,
                       fontSize: 10,
                     }}
                   />
                   <YAxis
                     yAxisId="right"
                     orientation="right"
-                    tick={{ fontSize: 10, fill: INK_MID }}
+                    tick={{ fontSize: 10, fill: inkMid }}
                     tickFormatter={(v) =>
                       typeof v === "number" ? v.toFixed(1) : `${v}`
                     }
@@ -1296,7 +1326,7 @@ export default function MarketsPage() {
                       value: "GW",
                       angle: 90,
                       position: "insideRight",
-                      fill: INK_MID,
+                      fill: inkMid,
                       fontSize: 10,
                     }}
                   />
@@ -1304,7 +1334,7 @@ export default function MarketsPage() {
                     <ReferenceLine
                       yAxisId="left"
                       y={srmcRef}
-                      stroke={INK_MID}
+                      stroke={inkMid}
                       strokeDasharray="4 4"
                       strokeOpacity={0.85}
                     />
@@ -1355,7 +1385,7 @@ export default function MarketsPage() {
                       label={{
                         value: `£${gbHighDot.price.toFixed(0)} · SP${gbHighDot.sp}`,
                         position: "top",
-                        fill: INK,
+                        fill: ink,
                         fontSize: 10,
                       }}
                     />
@@ -1561,7 +1591,7 @@ export default function MarketsPage() {
                 >
                   <XAxis dataKey="sp" hide />
                   <YAxis hide domain={["auto", "auto"]} />
-                  <ReferenceLine y={0} stroke={INK_MID} strokeDasharray="3 3" />
+                  <ReferenceLine y={0} stroke={inkMid} strokeDasharray="3 3" />
                   <Line
                     type="monotone"
                     dataKey="sparkPos"
@@ -1689,13 +1719,13 @@ export default function MarketsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
                       <XAxis
                         dataKey="label"
-                        tick={{ fill: INK_MID, fontSize: 9 }}
+                        tick={{ fill: inkMid, fontSize: 9 }}
                         axisLine={false}
                         tickLine={false}
                         interval="preserveStartEnd"
                       />
                       <YAxis
-                        tick={{ fill: INK_MID, fontSize: 10 }}
+                        tick={{ fill: inkMid, fontSize: 10 }}
                         axisLine={false}
                         tickLine={false}
                         width={36}
@@ -1735,13 +1765,13 @@ export default function MarketsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#E8E4DC" />
                       <XAxis
                         dataKey="label"
-                        tick={{ fill: INK_MID, fontSize: 9 }}
+                        tick={{ fill: inkMid, fontSize: 9 }}
                         axisLine={false}
                         tickLine={false}
                         interval="preserveStartEnd"
                       />
                       <YAxis
-                        tick={{ fill: INK_MID, fontSize: 10 }}
+                        tick={{ fill: inkMid, fontSize: 10 }}
                         axisLine={false}
                         tickLine={false}
                         width={36}
@@ -1764,7 +1794,7 @@ export default function MarketsPage() {
                       <Line
                         type="monotone"
                         dataKey="spread"
-                        stroke={INK}
+                        stroke={ink}
                         strokeWidth={2}
                         dot={false}
                         isAnimationActive={false}
@@ -1918,7 +1948,7 @@ export default function MarketsPage() {
                     type="category"
                     dataKey="label"
                     width={28}
-                    tick={{ fill: INK_MID, fontSize: 10 }}
+                    tick={{ fill: inkMid, fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -1953,13 +1983,13 @@ export default function MarketsPage() {
                   key: "swly",
                   label: "Same week last year (5yr reference)",
                   pct: REF_STORAGE_SAME_WEEK_LAST_YEAR_PCT,
-                  barColor: INK_MID,
+                  barColor: inkMid,
                 },
                 {
                   key: "apr5",
                   label: "5-year April average (reference)",
                   pct: REF_STORAGE_FIVE_YEAR_APRIL_AVG_PCT,
-                  barColor: INK_MID,
+                  barColor: inkMid,
                 },
               ].map((row) => (
                 <div key={row.key}>
