@@ -528,7 +528,7 @@ export default function Home() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-40px" }}
               transition={{ duration: 0.45, delay: 0.05 }}
-              className="flex flex-col lg:col-span-2 lg:self-stretch"
+              className="flex flex-col lg:col-span-2"
             >
               <p className="mb-3 font-serif text-[15px] italic text-ink-mid">
                 From this&hellip;
@@ -1104,65 +1104,90 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
   },
 ];
 
+const LANDING_FEED_TICKS: string[] = [
+  "05:47:03  BMRS/MID   batch_close   n=46   lag=82ms",
+  "05:46:11  REMIT      ingest        q=3    dedupe=on",
+  "05:45:52  OPEN-METEO pull          hrs=168 model=IFS",
+  "05:44:18  EEX/NGP    front_roll    TTF_Apr26",
+  "05:43:06  SYNC       checkpoint    rows=412 merge=06:00:02",
+];
+
 function LandingSourceGrid() {
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Header bar — mirrors the brief's header for symmetry */}
-      <div className="flex items-center justify-between rounded-t-[4px] border-[0.5px] border-b-0 border-ivory-border bg-ivory-dark/70 px-4 py-3">
-        <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-light">
+    <div className="w-full overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark/55">
+      {/* Terminal-style header — darker register than the brief column */}
+      <div className="flex items-center justify-between border-b-[0.5px] border-ivory-border bg-ivory-dark px-3 py-2.5 sm:px-4">
+        <span className="font-mono text-[8.5px] uppercase tracking-[0.18em] text-ink-light">
           06:00 GMT · 18 APR
         </span>
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 animate-live-dot-pulse rounded-full bg-bull" />
-          <span className="font-mono text-[9px] text-ink-light">Live</span>
+          <span className="font-mono text-[8.5px] text-ink-light">Live</span>
         </div>
       </div>
 
-      {/* 3x3 grid — cramped mono readout to contrast with the brief */}
-      <div className="grid flex-1 grid-cols-3 gap-1 rounded-b-[4px] border-[0.5px] border-ivory-border bg-ivory-dark/30 p-1">
-        {LANDING_SOURCE_TILES.map((tile, i) => (
-          <motion.div
-            key={tile.meta}
-            initial={{ opacity: 0, y: 8 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{
-              duration: 0.4,
-              delay: 0.15 + i * 0.06,
-              ease: [0.22, 1, 0.36, 1],
-            }}
-            className="min-h-0 rounded-[3px] border-[0.5px] border-ivory-border bg-card px-2 py-1.5"
-          >
-            <p className="font-mono text-[8px] uppercase leading-tight tracking-[0.12em] text-ink-light">
-              {tile.meta}
-            </p>
-            <p
-              className="mt-0.5 truncate font-mono text-[7px] leading-tight tracking-tight text-ink-light/65"
-              title={tile.rawLine}
+      {/* Clipped grid: implies more feed below the fold */}
+      <div className="relative max-h-[min(42rem,62svh)] overflow-hidden">
+        <div className="grid grid-cols-3 items-start gap-1 bg-ivory-dark/40 p-1">
+          {LANDING_SOURCE_TILES.map((tile, i) => (
+            <motion.div
+              key={tile.meta}
+              initial={{ opacity: 0, y: 8 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-40px" }}
+              transition={{
+                duration: 0.4,
+                delay: 0.15 + i * 0.06,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className="rounded-[3px] border-[0.5px] border-ivory-border/80 bg-ivory-dark/35 px-1.5 py-1"
             >
-              {tile.rawLine}
-            </p>
-            <div className="mt-1 space-y-0.5">
-              {tile.rows.map((row, ri) => (
-                <div
-                  key={`${tile.meta}-${ri}`}
-                  className="flex items-baseline justify-between gap-1.5"
-                >
-                  <span className="min-w-0 shrink font-mono text-[8px] leading-tight text-ink-light">
-                    {row.label}
-                  </span>
-                  <span
-                    className={`shrink-0 text-right font-mono text-[9px] leading-tight tabular-nums ${
-                      row.tone ?? "text-ink"
-                    }`}
+              <p className="font-mono text-[7px] uppercase leading-tight tracking-[0.1em] text-ink-light/90">
+                {tile.meta}
+              </p>
+              <p
+                className="mt-0.5 truncate font-mono text-[6.5px] leading-tight tracking-tight text-ink-light/55"
+                title={tile.rawLine}
+              >
+                {tile.rawLine}
+              </p>
+              <div className="mt-0.5 space-y-px">
+                {tile.rows.map((row, ri) => (
+                  <div
+                    key={`${tile.meta}-${ri}`}
+                    className="flex items-baseline justify-between gap-1"
                   >
-                    {row.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        ))}
+                    <span className="min-w-0 shrink font-mono text-[7px] leading-snug text-ink-light/85">
+                      {row.label}
+                    </span>
+                    <span
+                      className={`max-w-[55%] shrink-0 text-right font-mono text-[7.5px] leading-snug tabular-nums ${
+                        row.tone ?? "text-ink-mid"
+                      }`}
+                    >
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-ivory-dark via-ivory-dark/50 to-transparent"
+        />
+      </div>
+
+      {/* Static tick strip — reads as tail of a live merge log */}
+      <div className="border-t-[0.5px] border-ivory-border/70 bg-ivory-dark/65 px-2 py-2 sm:px-2.5">
+        <div className="space-y-px font-mono text-[6.5px] leading-[1.45] text-ink-light/75">
+          {LANDING_FEED_TICKS.map((line) => (
+            <p key={line} className="truncate" title={line}>
+              {line}
+            </p>
+          ))}
+        </div>
       </div>
     </div>
   );
