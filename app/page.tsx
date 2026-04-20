@@ -586,7 +586,7 @@ export default function Home() {
                     <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                       Weather watch
                     </p>
-                    <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">
+                    <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
                       Wind speeds forecast 4&ndash;9 m/s across the 24h window. If wind
                       falls materially below 6.5 GW in the second half, system flips
                       gas-marginal. Market currently prices flat to this transition
@@ -619,7 +619,9 @@ export default function Home() {
                       <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                         Watch list
                       </p>
-                      <span className="font-mono text-[9px] text-ink-light">3 items</span>
+                      <span className="font-mono text-[9px] text-ink-light">
+                        3 items to watch
+                      </span>
                     </div>
                     <div className="mt-3 space-y-3">
                       {[
