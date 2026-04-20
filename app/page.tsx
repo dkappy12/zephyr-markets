@@ -9,7 +9,7 @@ import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -444,38 +444,32 @@ export default function Home() {
           <h2 className="text-center font-serif text-3xl text-ink sm:text-4xl">
             Every move in your book, explained.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Zephyr breaks down today&apos;s P&amp;L into the physical drivers moving
-            your book: wind, gas, carbon, REMIT, shape, demand, interconnector flows —
-            and what is left in residual.
-          </p>
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45 }}
-            className="mx-auto mt-12 max-w-4xl rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-6 sm:px-6 sm:py-8"
+            className="mx-auto mt-10 max-w-2xl rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-8 sm:px-8 sm:py-10"
           >
             <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               P&amp;L attribution
             </p>
-            <p className="mt-1 font-serif text-xl text-ink sm:text-2xl">
-              What moved your book today
+            <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+              Zephyr attributes today&apos;s portfolio P&amp;L—the same open-to-current marks
+              as your Book—into wind, gas (with carbon split out from the gas stack), REMIT,
+              shape and basis, demand from relevant desk signals, interconnector flow effects,
+              and whatever remains in residual. EUR/GBP feeds gas conversion; there is no
+              separate FX bucket in the bridge.
             </p>
-            <p className="mt-3 text-center font-mono text-[10px] text-ink-light">
-              Illustrative waterfall · same driver order as in-product
-            </p>
-            <LandingAttributionWaterfall />
-            <p className="mt-4 text-center text-xs leading-relaxed text-ink-mid">
-              In-app you&apos;ll see how much of today&apos;s P&amp;L the model explains,
-              the residual, and a confidence readout — the same decomposition your desk
-              uses to sanity-check the book.
-            </p>
-            <p className="mt-3 text-center font-mono text-[10px] text-ink-light">
-              Example: long GB baseload — expand any position for per-line factors.
+            <p className="mt-4 text-sm leading-relaxed text-ink-mid">
+              On Portfolio → Attribution you get a waterfall and driver table, how much of
+              today&apos;s P&amp;L is explained versus residual, a confidence readout and
+              diagnostics when fit is weak, optional per-position detail, REMIT signals
+              framed against your book, a book-vs-physical alignment gauge, and historical
+              P&amp;L over time.
             </p>
           </motion.div>
-          <p className="mx-auto mt-6 max-w-lg text-center text-sm text-ink-mid">
+          <p className="mx-auto mt-8 max-w-lg text-center text-sm text-ink-mid">
             <Link
               href="/#pricing"
               className="font-medium text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-ink/50"
@@ -484,8 +478,9 @@ export default function Home() {
             </Link>{" "}
             is included on Pro.
           </p>
-          <p className="mt-4 text-center text-sm text-ink-mid">
-            Updates as physical conditions and marks change.
+          <p className="mx-auto mt-3 max-w-lg text-center text-xs text-ink-light">
+            Power and gas marks refresh about every two minutes; fundamentals follow the
+            live ingestion stack.
           </p>
         </div>
       </section>
@@ -1192,149 +1187,6 @@ function LandingSourceGrid() {
           UTC
         </p>
       </div>
-    </div>
-  );
-}
-
-/** Matches portfolio attribution waterfall factor order (see AttributionPageClient). */
-const LANDING_ATTR_WATERFALL_STEPS: { label: string; delta: number }[] = [
-  { label: "Wind", delta: 21000 },
-  { label: "Gas", delta: -3600 },
-  { label: "Carbon", delta: -1800 },
-  { label: "REMIT", delta: 5000 },
-  { label: "Shape", delta: 2200 },
-  { label: "Demand", delta: 1500 },
-  { label: "Interconnector", delta: 1000 },
-  { label: "Residual", delta: 4010 },
-];
-
-const LANDING_WATERFALL_GREEN = "#1D6B4E";
-const LANDING_WATERFALL_RED = "#8B3A3A";
-const LANDING_WATERFALL_TOTAL = "#2C2A26";
-
-function LandingAttributionWaterfall() {
-  const total = LANDING_ATTR_WATERFALL_STEPS.reduce((s, r) => s + r.delta, 0);
-  const W = 860;
-  const H = 232;
-  const padL = 8;
-  const padR = 8;
-  const padT = 14;
-  const padB = 58;
-  const chartW = W - padL - padR;
-  const chartH = H - padT - padB;
-  const nCols = LANDING_ATTR_WATERFALL_STEPS.length + 1;
-  const gap = 5;
-  const colW = (chartW - gap * (nCols - 1)) / nCols;
-
-  const yAt = (value: number) => padT + chartH * (1 - value / total);
-
-  const lines: ReactNode[] = [];
-  const bars: ReactNode[] = [];
-  const labels: ReactNode[] = [];
-
-  let cum = 0;
-  LANDING_ATTR_WATERFALL_STEPS.forEach((step, i) => {
-    const next = cum + step.delta;
-    const low = Math.min(cum, next);
-    const high = Math.max(cum, next);
-    const x = padL + i * (colW + gap);
-    const yTop = yAt(high);
-    const yBot = yAt(low);
-    const h = Math.max(yBot - yTop, 1);
-    const fill = step.delta >= 0 ? LANDING_WATERFALL_GREEN : LANDING_WATERFALL_RED;
-    bars.push(
-      <rect key={`b-${i}`} x={x} y={yTop} width={colW} height={h} fill={fill} rx={2} />,
-    );
-
-    labels.push(
-      <text
-        key={`l-${i}`}
-        x={x + colW / 2}
-        y={H - 6}
-        textAnchor="end"
-        dominantBaseline="middle"
-        fill="#6B6760"
-        transform={`rotate(-42 ${x + colW / 2} ${H - 6})`}
-        style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
-      >
-        {step.label}
-      </text>,
-    );
-
-    if (i < LANDING_ATTR_WATERFALL_STEPS.length - 1) {
-      const x1 = x + colW;
-      const x2 = x + colW + gap;
-      const y = yAt(next);
-      lines.push(
-        <line
-          key={`c-${i}`}
-          x1={x1}
-          y1={y}
-          x2={x2}
-          y2={y}
-          stroke="rgba(44,42,38,0.2)"
-          strokeWidth={1}
-          strokeDasharray="3 3"
-        />,
-      );
-    }
-    cum = next;
-  });
-
-  const ti = LANDING_ATTR_WATERFALL_STEPS.length;
-  const xTot = padL + ti * (colW + gap);
-  const yTopTot = yAt(total);
-  const hTot = yAt(0) - yTopTot;
-  bars.push(
-    <rect
-      key="total"
-      x={xTot}
-      y={yTopTot}
-      width={colW}
-      height={hTot}
-      fill={LANDING_WATERFALL_TOTAL}
-      rx={2}
-    />,
-  );
-  labels.push(
-    <text
-      key="ltot"
-      x={xTot + colW / 2}
-      y={H - 10}
-      textAnchor="middle"
-      fill="#6B6760"
-      style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
-    >
-      Total
-    </text>,
-  );
-
-  const xLastEnd = padL + (ti - 1) * (colW + gap) + colW;
-  lines.push(
-    <line
-      key="c-tot"
-      x1={xLastEnd}
-      y1={yAt(cum)}
-      x2={xTot}
-      y2={yAt(cum)}
-      stroke="rgba(44,42,38,0.2)"
-      strokeWidth={1}
-      strokeDasharray="3 3"
-    />,
-  );
-
-  return (
-    <div className="mt-6 w-full overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="mx-auto h-auto w-full max-w-[860px]"
-        role="img"
-        aria-label="Illustrative P and L attribution waterfall by physical driver"
-      >
-        {lines}
-        {bars}
-        {labels}
-      </svg>
     </div>
   );
 }
