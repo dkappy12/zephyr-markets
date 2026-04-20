@@ -512,17 +512,24 @@ export default function Home() {
             className="text-center"
           >
             <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
-              Every data point, synthesised. In your inbox by 06:00.
+              Nine data sources. One brief. In your inbox by 06:00.
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
-              Published at 06:00 GMT every trading day, personalised to your open
-              positions.
+              Every trading morning Meridian reads each feed, scores the physical
+              premium, and writes the brief personalised to your open positions.
             </p>
+            <div className="mx-auto mt-6 flex max-w-md items-center justify-center gap-3 font-mono text-[9px] uppercase tracking-[0.18em] text-ink-light">
+              <span>Nine sources</span>
+              <span className="text-ink/30">&rarr;</span>
+              <span>Meridian</span>
+              <span className="text-ink/30">&rarr;</span>
+              <span>One brief</span>
+            </div>
           </motion.div>
 
           {/* Two-column layout */}
           <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-5 lg:items-start">
-            {/* Left — data panel */}
+            {/* Left — nine source tiles */}
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -530,7 +537,7 @@ export default function Home() {
               transition={{ duration: 0.45, delay: 0.05 }}
               className="lg:col-span-2 lg:self-stretch"
             >
-              <LandingDataPanel />
+              <LandingSourceGrid />
             </motion.div>
 
             {/* Right — morning brief */}
@@ -576,17 +583,6 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div>
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      Weather watch
-                    </p>
-                    <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">
-                      Wind speeds forecast 4–9 m/s across the 24h window. If wind falls
-                      materially below 6.5 GW in the second half, system flips
-                      gas-marginal. Market currently prices flat to this transition risk.
-                    </p>
-                  </div>
-
                   <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-4">
                     <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                       One risk the market may be underpricing
@@ -595,32 +591,9 @@ export default function Home() {
                       Synchronised IFA2 outage (2×1,014 MW) combined with ~900 MW of
                       unplanned thermal outages removes ~2.9 GW of capacity during peak
                       morning demand. The 48p premium gap to physical value likely
-                      understates scarcity risk in the 09:00–11:00 UTC window when import
-                      support vanishes.
+                      understates scarcity risk in the 09:00 to 11:00 UTC window when
+                      import support vanishes.
                     </p>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                        Watch list
-                      </p>
-                      <span className="font-mono text-[9px] text-ink-light">3 items</span>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      {[
-                        "IFA2 offline 08:00–10:45 UTC: monitor N2EX intraday for 10:00–11:00 UTC spike if wind <6.0 GW coincides.",
-                        "SCCL-1 (400 MW unplanned) offline 06:00–12:30 UTC: cascading with IFA2 creates tight morning shoulder.",
-                        "Wind forecast second-half decay: if outturn slips below 7.7 GW, residual demand approaches 15+ GW and pulls price toward SRMC (£99.94/MWh).",
-                      ].map((item, i) => (
-                        <div key={i} className="flex gap-3">
-                          <span className="mt-0.5 shrink-0 font-mono text-[11px] text-ink-light">
-                            →
-                          </span>
-                          <p className="text-[12px] leading-relaxed text-ink-mid">{item}</p>
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
                   <div className="border-t border-ivory-border pt-5">
@@ -629,14 +602,10 @@ export default function Home() {
                     </p>
                     <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
                       The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
-                      well-supported. Today&apos;s physical conditions suggest the
-                      market is underpricing tightness risk by £17/MWh. The short 25,000
-                      therm NBP Winter 2026 is correctly positioned given
-                      temperature-suppressed demand; TTF at €50/MWh with weak heating load
-                      supports the bias. Both carbon positions are immaterial to this
-                      morning&apos;s regime. Single largest risk: 3,240 MW of unplanned
-                      REMIT capacity active; any resolution could compress the premium
-                      gap immediately.
+                      well-supported; today&apos;s physical conditions suggest the
+                      market is underpricing tightness risk by £17/MWh. Single largest
+                      risk: 3,240 MW of unplanned REMIT capacity active, any resolution
+                      could compress the premium gap immediately.
                     </p>
                     <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
                       Personalised to: Long 50 MW GB Power Q3 2026 · Short 25,000 therm
@@ -965,156 +934,145 @@ export default function Home() {
   );
 }
 
-function LandingDataPanel() {
+type SourceRow = { label: string; value: string; tone?: string };
+type SourceTile = { meta: string; rows: SourceRow[] };
+
+const LANDING_SOURCE_TILES: SourceTile[] = [
+  {
+    meta: "REMIT · 05:42",
+    rows: [
+      { label: "Drax U4", value: "645 MW", tone: "text-[#8B3A3A]" },
+      { label: "SCCL-1", value: "400 MW", tone: "text-[#8B3A3A]" },
+      { label: "Unplanned", value: "3,240 MW" },
+    ],
+  },
+  {
+    meta: "ELEXON · LIVE",
+    rows: [
+      { label: "Wind", value: "8.2 GW" },
+      { label: "Solar", value: "1.1 GW" },
+      { label: "Residual", value: "22.4 GW" },
+    ],
+  },
+  {
+    meta: "N2EX · DAY-AHEAD",
+    rows: [
+      { label: "Base", value: "£101.12" },
+      { label: "Peak", value: "£108.20" },
+      { label: "1d", value: "+0.4%", tone: "text-bull" },
+    ],
+  },
+  {
+    meta: "ICE · TTF",
+    rows: [
+      { label: "Front mo.", value: "€42.03" },
+      { label: "1d", value: "+0.3%", tone: "text-bull" },
+      { label: "EU stor.", value: "38.4%" },
+    ],
+  },
+  {
+    meta: "ICE · NBP",
+    rows: [
+      { label: "Front mo.", value: "95.10p" },
+      { label: "1d", value: "flat", tone: "text-ink-mid" },
+      { label: "1w", value: "-1.2%", tone: "text-[#8B3A3A]" },
+    ],
+  },
+  {
+    meta: "METEO · 24H",
+    rows: [
+      { label: "Wind", value: "4-9 m/s" },
+      { label: "Min GW", value: "6.1" },
+      { label: "Max GW", value: "9.8" },
+    ],
+  },
+  {
+    meta: "ICE · CARBON",
+    rows: [
+      { label: "EUA", value: "€72.40" },
+      { label: "UKA", value: "£44.10" },
+      { label: "Spread", value: "€24.30" },
+    ],
+  },
+  {
+    meta: "YOUR BOOK · 3 OPEN",
+    rows: [
+      { label: "GB Pwr Q3", value: "+50 MW" },
+      { label: "NBP Win26", value: "-25k th" },
+      { label: "UKA Dec26", value: "+700 tco2" },
+    ],
+  },
+  {
+    meta: "FX · LIVE",
+    rows: [
+      { label: "GBP/EUR", value: "1.182" },
+      { label: "GBP/USD", value: "1.274" },
+      { label: "1d EUR", value: "+0.2%", tone: "text-bull" },
+    ],
+  },
+];
+
+function LandingSourceGrid() {
   return (
-    <div className="flex h-full flex-col rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-dark p-5 font-mono">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-ivory-border pb-3">
-        <span className="text-[9px] uppercase tracking-[0.18em] text-ink-light">
-          06:00 GMT · 18 Apr
+    <div className="flex h-full flex-col">
+      {/* Header bar — mirrors the brief's header for symmetry */}
+      <div className="flex items-center justify-between rounded-t-[4px] border-[0.5px] border-b-0 border-ivory-border bg-ivory-dark/70 px-4 py-3">
+        <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-light">
+          Nine sources · 06:00 GMT
         </span>
         <div className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 animate-live-dot-pulse rounded-full bg-bull" />
-          <span className="text-[9px] text-ink-light">Live</span>
+          <span className="font-mono text-[9px] text-ink-light">Live</span>
         </div>
       </div>
 
-      {/* Premium & price block */}
-      <div className="mt-4 space-y-2">
-        {[
-          { label: "Regime", value: "Transitional → gas-dominated", color: "" },
-          { label: "Premium score", value: "+4.8  Firming", color: "text-bull" },
-          { label: "Implied price", value: "£118.40/MWh", color: "" },
-          { label: "N2EX", value: "£101.12/MWh", color: "" },
-          { label: "SRMC", value: "£89.50/MWh", color: "" },
-        ].map((row) => (
-          <div key={row.label} className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">{row.label}</span>
-            <span className={`text-[11px] tabular-nums ${row.color || "text-ink"}`}>
-              {row.value}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="my-4 border-t border-ivory-border" />
-
-      {/* Physical generation block */}
-      <div className="space-y-2">
-        {[
-          { label: "GB wind", value: "8.2 GW", color: "" },
-          { label: "GB solar", value: "1.1 GW", color: "" },
-          { label: "Residual demand", value: "22.4 GW", color: "" },
-          { label: "Wind vs 7d avg", value: "+1.5 GW", color: "text-bull" },
-        ].map((row) => (
-          <div key={row.label} className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">{row.label}</span>
-            <span className={`text-[11px] tabular-nums ${row.color || "text-ink"}`}>
-              {row.value}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="my-4 border-t border-ivory-border" />
-
-      {/* Gas & market block */}
-      <div className="space-y-2">
-        {[
-          { label: "TTF", value: "€42.03/MWh" },
-          { label: "NBP", value: "95.10 p/therm" },
-          { label: "REMIT signals 24h", value: "19" },
-          { label: "Unplanned MW", value: "3,240 MW" },
-          { label: "EU storage", value: "38.4% full" },
-          { label: "GBP/EUR", value: "1.182" },
-        ].map((row) => (
-          <div key={row.label} className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">{row.label}</span>
-            <span className="text-[11px] tabular-nums text-ink">{row.value}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="my-4 border-t border-ivory-border" />
-
-      {/* Active REMIT block */}
-      <div>
-        <p className="mb-3 text-[9px] uppercase tracking-[0.14em] text-ink-light">
-          Active REMIT
-        </p>
-        <div className="space-y-2.5">
-          {[
-            { asset: "T_DRAXX-4", mw: "645 MW", unplanned: true },
-            { asset: "IFA2", mw: "2,028 MW", unplanned: false },
-            { asset: "SCCL-1", mw: "400 MW", unplanned: true },
-            { asset: "T_MRWD-1", mw: "920 MW", unplanned: false },
-            { asset: "FDUNT-1", mw: "59 MW", unplanned: false },
-          ].map((sig) => (
-            <div key={sig.asset} className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  className={`shrink-0 rounded-[2px] px-1 py-0.5 text-[8px] uppercase tracking-[0.06em] ${
-                    sig.unplanned
-                      ? "bg-[#8B3A3A]/10 text-[#8B3A3A]"
-                      : "bg-ink/5 text-ink-light"
-                  }`}
+      {/* 3x3 grid of source tiles */}
+      <div className="grid flex-1 grid-cols-3 gap-2 rounded-b-[4px] border-[0.5px] border-ivory-border bg-ivory-dark/30 p-2">
+        {LANDING_SOURCE_TILES.map((tile, i) => (
+          <motion.div
+            key={tile.meta}
+            initial={{ opacity: 0, y: 8 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{
+              duration: 0.4,
+              delay: 0.15 + i * 0.06,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+            className="rounded-[3px] border-[0.5px] border-ivory-border bg-card px-3 py-3"
+          >
+            <p className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-ink-light">
+              {tile.meta}
+            </p>
+            <div className="mt-2.5 space-y-1.5">
+              {tile.rows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-baseline justify-between gap-2"
                 >
-                  {sig.unplanned ? "U" : "P"}
-                </span>
-                <span className="truncate text-[10px] text-ink-mid">{sig.asset}</span>
-              </div>
-              <span className="shrink-0 text-[10px] tabular-nums text-ink">{sig.mw}</span>
+                  <span className="font-mono text-[9.5px] text-ink-light">
+                    {row.label}
+                  </span>
+                  <span
+                    className={`font-mono text-[10px] tabular-nums ${
+                      row.tone ?? "text-ink"
+                    }`}
+                  >
+                    {row.value}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </motion.div>
+        ))}
       </div>
 
-      <div className="my-4 border-t border-ivory-border" />
-
-      <div>
-        <p className="mb-3 text-[9px] uppercase tracking-[0.14em] text-ink-light">
-          Meridian · model accuracy
+      {/* Footer bar — summarises the synthesis step */}
+      <div className="mt-3 flex items-center justify-between rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-3">
+        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-light">
+          Meridian reads every source, every night
         </p>
-        <div className="space-y-2">
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">Overall MAE</span>
-            <span className="text-[11px] tabular-nums text-ink">£22.49/MWh</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">Bias</span>
-            <span className="text-[11px] tabular-nums text-[#8B3A3A]">−£2.37/MWh</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">Recalibrates</span>
-            <span className="text-[11px] tabular-nums text-ink">Nightly 02:00 UTC</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-[10px] text-ink-light">Status</span>
-            <span className="text-[11px] tabular-nums text-ink-mid">Warm-up · 1 of 18 days</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Bridge element — pinned to bottom */}
-      <div className="mt-6">
-        <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.16em] text-ink-light">
-                Morning brief ready · 06:00 GMT
-              </p>
-              <div className="mt-2.5 space-y-1">
-                <p className="text-[10px] text-ink-mid">8 data sources ingested</p>
-                <p className="text-[10px] text-ink-mid">19 REMIT signals processed</p>
-                <p className="text-[10px] text-ink-mid">Live premium score applied</p>
-                <p className="text-[10px] text-ink-mid">Book positions personalised</p>
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col items-center justify-center self-stretch">
-              <span className="font-serif text-2xl text-ink-light">→</span>
-            </div>
-          </div>
-        </div>
+        <span className="font-mono text-[11px] text-ink-light">&rarr;</span>
       </div>
     </div>
   );
