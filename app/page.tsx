@@ -9,7 +9,7 @@ import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -445,62 +445,47 @@ export default function Home() {
             Every move in your book, explained.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Zephyr decomposes intraday P&amp;L into the physical drivers that caused
-            it. Wind, gas, REMIT, carbon - each attributed separately.
+            Zephyr breaks down today&apos;s P&amp;L into the physical drivers moving
+            your book: wind, gas, carbon, REMIT, shape, demand, interconnector flows —
+            and what is left in residual.
           </p>
-          <div className="mx-auto mt-12 max-w-3xl rounded-[4px] bg-card p-8 text-ink">
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-light">
-              Long 50 MW · GB Power Q3 2026 Baseload
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{ duration: 0.45 }}
+            className="mx-auto mt-12 max-w-4xl rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-6 sm:px-6 sm:py-8"
+          >
+            <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              P&amp;L attribution
             </p>
-            <div className="mt-2 flex items-baseline gap-4">
-              <span className="font-serif text-3xl text-ink">+£29,310</span>
-              <span className="font-mono text-[11px] text-ink-light">Session P&amp;L</span>
-            </div>
-            <p className="mt-1 font-mono text-[10px] text-ink-light">
-              Entry £89.50/MWh · Current £101.12/MWh
+            <p className="mt-1 font-serif text-xl text-ink sm:text-2xl">
+              What moved your book today
             </p>
-            <div className="mb-6 mt-6 border-t border-ink/10" />
-            <p className="mb-4 font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-              Today&apos;s Attribution
+            <p className="mt-3 text-center font-mono text-[10px] text-ink-light">
+              Illustrative waterfall · same driver order as in-product
             </p>
-            <AttributionDriverRows />
-            <div className="border-t border-ink/10 pt-4">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[11px] text-ink-light">Session P&amp;L</span>
-                <span className="font-serif text-xl text-ink">+£29,310</span>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 max-w-3xl mx-auto grid grid-cols-2 gap-px rounded-[4px] border-[0.5px] border-ivory-border bg-ivory-border overflow-hidden">
-            <div className="bg-card p-6">
-              <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                Wind attribution
-              </p>
-              <p className="mt-2 font-serif text-4xl text-ink">+£14,200</p>
-              <p className="mt-1 font-sans text-[10px] uppercase tracking-[0.1em] text-bull">
-                +£14.20/MWh price suppression benefit
-              </p>
-              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-                Wind at 8.2 GW sits 4.1 GW above the 7-day baseline, suppressing GB
-                day-ahead prices and directly benefiting the long power position.
-              </p>
-            </div>
-            <div className="bg-card p-6">
-              <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                REMIT attribution
-              </p>
-              <p className="mt-2 font-serif text-4xl text-ink">+£4,800</p>
-              <p className="mt-1 font-sans text-[10px] uppercase tracking-[0.1em] text-bull">
-                +£4.80/MWh unplanned outage uplift
-              </p>
-              <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-                3,240 MW of unplanned outages active, 1,840 MW above the planned
-                baseline. Tighter-than-expected supply adds uplift to the long position.
-              </p>
-            </div>
-          </div>
-          <p className="mt-6 text-center text-sm text-ink-mid">
-            Attribution updates every 5 minutes as physical conditions change.
+            <LandingAttributionWaterfall />
+            <p className="mt-4 text-center text-xs leading-relaxed text-ink-mid">
+              In-app you&apos;ll see how much of today&apos;s P&amp;L the model explains,
+              the residual, and a confidence readout — the same decomposition your desk
+              uses to sanity-check the book.
+            </p>
+            <p className="mt-3 text-center font-mono text-[10px] text-ink-light">
+              Example: long GB baseload — expand any position for per-line factors.
+            </p>
+          </motion.div>
+          <p className="mx-auto mt-6 max-w-lg text-center text-sm text-ink-mid">
+            <Link
+              href="/#pricing"
+              className="font-medium text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-ink/50"
+            >
+              P&amp;L attribution
+            </Link>{" "}
+            is included on Pro.
+          </p>
+          <p className="mt-4 text-center text-sm text-ink-mid">
+            Updates as physical conditions and marks change.
           </p>
         </div>
       </section>
@@ -1211,49 +1196,146 @@ function LandingSourceGrid() {
   );
 }
 
-function AttributionDriverRows() {
-  const rows: {
-    name: string;
-    amount: string;
-    pct: number;
-    positive: boolean;
-  }[] = [
-    { name: "Wind delta", amount: "+£14,200", pct: 100, positive: true },
-    { name: "Residual", amount: "+£3,450", pct: 24, positive: true },
-    { name: "Shape/demand", amount: "+£2,180", pct: 15, positive: true },
-    { name: "REMIT shift", amount: "+£4,800", pct: 34, positive: true },
-    { name: "Gas (TTF move)", amount: "-£3,600", pct: 25, positive: false },
-    { name: "Carbon", amount: "-£1,720", pct: 12, positive: false },
-  ];
+/** Matches portfolio attribution waterfall factor order (see AttributionPageClient). */
+const LANDING_ATTR_WATERFALL_STEPS: { label: string; delta: number }[] = [
+  { label: "Wind", delta: 21000 },
+  { label: "Gas", delta: -3600 },
+  { label: "Carbon", delta: -1800 },
+  { label: "REMIT", delta: 5000 },
+  { label: "Shape", delta: 2200 },
+  { label: "Demand", delta: 1500 },
+  { label: "Interconnector", delta: 1000 },
+  { label: "Residual", delta: 4010 },
+];
+
+const LANDING_WATERFALL_GREEN = "#1D6B4E";
+const LANDING_WATERFALL_RED = "#8B3A3A";
+const LANDING_WATERFALL_TOTAL = "#2C2A26";
+
+function LandingAttributionWaterfall() {
+  const total = LANDING_ATTR_WATERFALL_STEPS.reduce((s, r) => s + r.delta, 0);
+  const W = 860;
+  const H = 232;
+  const padL = 8;
+  const padR = 8;
+  const padT = 14;
+  const padB = 58;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const nCols = LANDING_ATTR_WATERFALL_STEPS.length + 1;
+  const gap = 5;
+  const colW = (chartW - gap * (nCols - 1)) / nCols;
+
+  const yAt = (value: number) => padT + chartH * (1 - value / total);
+
+  const lines: ReactNode[] = [];
+  const bars: ReactNode[] = [];
+  const labels: ReactNode[] = [];
+
+  let cum = 0;
+  LANDING_ATTR_WATERFALL_STEPS.forEach((step, i) => {
+    const next = cum + step.delta;
+    const low = Math.min(cum, next);
+    const high = Math.max(cum, next);
+    const x = padL + i * (colW + gap);
+    const yTop = yAt(high);
+    const yBot = yAt(low);
+    const h = Math.max(yBot - yTop, 1);
+    const fill = step.delta >= 0 ? LANDING_WATERFALL_GREEN : LANDING_WATERFALL_RED;
+    bars.push(
+      <rect key={`b-${i}`} x={x} y={yTop} width={colW} height={h} fill={fill} rx={2} />,
+    );
+
+    labels.push(
+      <text
+        key={`l-${i}`}
+        x={x + colW / 2}
+        y={H - 6}
+        textAnchor="end"
+        dominantBaseline="middle"
+        fill="#6B6760"
+        transform={`rotate(-42 ${x + colW / 2} ${H - 6})`}
+        style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+      >
+        {step.label}
+      </text>,
+    );
+
+    if (i < LANDING_ATTR_WATERFALL_STEPS.length - 1) {
+      const x1 = x + colW;
+      const x2 = x + colW + gap;
+      const y = yAt(next);
+      lines.push(
+        <line
+          key={`c-${i}`}
+          x1={x1}
+          y1={y}
+          x2={x2}
+          y2={y}
+          stroke="rgba(44,42,38,0.2)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />,
+      );
+    }
+    cum = next;
+  });
+
+  const ti = LANDING_ATTR_WATERFALL_STEPS.length;
+  const xTot = padL + ti * (colW + gap);
+  const yTopTot = yAt(total);
+  const hTot = yAt(0) - yTopTot;
+  bars.push(
+    <rect
+      key="total"
+      x={xTot}
+      y={yTopTot}
+      width={colW}
+      height={hTot}
+      fill={LANDING_WATERFALL_TOTAL}
+      rx={2}
+    />,
+  );
+  labels.push(
+    <text
+      key="ltot"
+      x={xTot + colW / 2}
+      y={H - 10}
+      textAnchor="middle"
+      fill="#6B6760"
+      style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+    >
+      Total
+    </text>,
+  );
+
+  const xLastEnd = padL + (ti - 1) * (colW + gap) + colW;
+  lines.push(
+    <line
+      key="c-tot"
+      x1={xLastEnd}
+      y1={yAt(cum)}
+      x2={xTot}
+      y2={yAt(cum)}
+      stroke="rgba(44,42,38,0.2)"
+      strokeWidth={1}
+      strokeDasharray="3 3"
+    />,
+  );
 
   return (
-    <>
-      {rows.map((row, i) => (
-        <div key={row.name}>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[11px] text-ink-mid">{row.name}</span>
-            <span
-              className={`font-mono text-[11px] tabular-nums ${
-                row.positive ? "text-bull" : "text-[#8B3A3A]"
-              }`}
-            >
-              {row.amount}
-            </span>
-          </div>
-          <div className="mb-3 mt-1 h-1 w-full overflow-hidden rounded-full bg-ink/10">
-            <motion.div
-              className={`h-full rounded-full ${
-                row.positive ? "bg-bull/60" : "bg-[#c47a7a]/40"
-              }`}
-              initial={{ width: "0%" }}
-              whileInView={{ width: `${row.pct}%` }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: i * 0.08 }}
-            />
-          </div>
-        </div>
-      ))}
-    </>
+    <div className="mt-6 w-full overflow-x-auto">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="mx-auto h-auto w-full max-w-[860px]"
+        role="img"
+        aria-label="Illustrative P and L attribution waterfall by physical driver"
+      >
+        {lines}
+        {bars}
+        {labels}
+      </svg>
+    </div>
   );
 }
 
