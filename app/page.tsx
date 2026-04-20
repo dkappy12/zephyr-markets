@@ -1170,70 +1170,44 @@ const LANDING_ATTR_MOCK_RED = "#8B3A3A";
 const LANDING_ATTR_MOCK_TOTAL = "#2C2A26";
 
 /** Static deltas summing to total P&L; order matches AttributionPageClient waterfall. */
+/** Five-step illustrative bridge (+ Total); full app lists shape, demand, interconnector separately. */
 const LANDING_ATTR_WATERFALL: { label: string; delta: number }[] = [
   { label: "Wind", delta: -920 },
   { label: "Gas", delta: -610 },
   { label: "Carbon", delta: -210 },
   { label: "REMIT", delta: 460 },
-  { label: "Shape", delta: 260 },
-  { label: "Demand", delta: -125 },
-  { label: "Interconnector", delta: 58 },
-  { label: "Residual", delta: -437 },
+  { label: "Residual", delta: -244 },
 ];
 
 const LANDING_ATTR_TABLE_ROWS: {
   name: string;
   impactGbp: number;
   direction: string;
-  weightPct: number;
 }[] = [
   {
     name: "Wind generation",
     impactGbp: -920,
     direction: "Δwind −3.64 GW vs 7d baseline · −2.10 £/MWh",
-    weightPct: 100,
   },
   {
     name: "Gas prices (TTF)",
     impactGbp: -610,
     direction: "62% SRMC vs DA · −0.85 £/MWh",
-    weightPct: 66,
   },
   {
     name: "Carbon (UKA)",
     impactGbp: -210,
     direction: "UKA ref £55/t · EF 0.366 t/MWh · 18% of gas stack",
-    weightPct: 23,
   },
   {
     name: "REMIT outages",
     impactGbp: 460,
     direction: "41% system stress · +1.20 £/MWh",
-    weightPct: 50,
-  },
-  {
-    name: "Shape / basis",
-    impactGbp: 260,
-    direction: "−0.35 £/MWh residual market move",
-    weightPct: 28,
-  },
-  {
-    name: "Demand surprise",
-    impactGbp: -125,
-    direction: "2 demand-linked signals · proxy sensitivity",
-    weightPct: 14,
-  },
-  {
-    name: "Interconnector flow",
-    impactGbp: 58,
-    direction: "1 flow-linked signals · proxy sensitivity",
-    weightPct: 6,
   },
   {
     name: "Residual",
-    impactGbp: -437,
+    impactGbp: -244,
     direction: "unexplained after factor decomposition",
-    weightPct: 48,
   },
 ];
 
@@ -1251,12 +1225,12 @@ function LandingAttributionWaterfallSvg() {
   cumMax = Math.max(cumMax, 0, total);
   const span = cumMax - cumMin || 1;
 
-  const W = 860;
-  const H = 228;
+  const W = 800;
+  const H = 186;
   const padL = 8;
   const padR = 8;
-  const padT = 16;
-  const padB = 52;
+  const padT = 12;
+  const padB = 42;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
   const nCols = LANDING_ATTR_WATERFALL.length + 1;
@@ -1304,11 +1278,11 @@ function LandingAttributionWaterfallSvg() {
       <text
         key={`l-${i}`}
         x={x + colW / 2}
-        y={H - 8}
+        y={H - 6}
         textAnchor="end"
         dominantBaseline="middle"
         fill="#6B6760"
-        transform={`rotate(-38 ${x + colW / 2} ${H - 8})`}
+        transform={`rotate(-36 ${x + colW / 2} ${H - 6})`}
         style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
       >
         {step.label}
@@ -1355,7 +1329,7 @@ function LandingAttributionWaterfallSvg() {
     <text
       key="ltot"
       x={xTot + colW / 2}
-      y={H - 14}
+      y={H - 12}
       textAnchor="middle"
       fill="#6B6760"
       style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
@@ -1382,7 +1356,7 @@ function LandingAttributionWaterfallSvg() {
     <div className="w-full overflow-x-auto">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="mx-auto h-auto w-full max-w-[860px]"
+        className="mx-auto h-auto w-full max-w-[800px]"
         role="img"
         aria-label="Illustrative P&amp;L attribution waterfall by driver"
       >
@@ -1415,14 +1389,14 @@ function LandingAttributionMock() {
         Illustrative example · not live data
       </p>
       <div className="mt-4 overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border bg-card">
-        <div className="border-b-[0.5px] border-ivory-border px-4 py-4 sm:px-5">
+        <div className="border-b-[0.5px] border-ivory-border px-4 py-3 sm:px-5">
           <h3 className="font-serif text-2xl text-ink">Attribution</h3>
           <p className="mt-1 text-sm text-ink-light">
             How today&apos;s physical drivers are moving your book.
           </p>
         </div>
 
-        <div className="grid gap-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-4 sm:grid-cols-2 sm:px-5 lg:grid-cols-5">
+        <div className="grid gap-3 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-5">
           <div>
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-[#8B3A3A]">
@@ -1454,24 +1428,23 @@ function LandingAttributionMock() {
           </div>
         </div>
 
-        <div className="px-3 py-4 sm:px-4 sm:py-5">
+        <div className="px-3 py-3 sm:px-4 sm:py-4">
           <p className={landingAttrSectionLabel}>P&amp;L attribution</p>
           <h4 className="mt-1 font-serif text-xl text-ink sm:text-2xl">
             What moved your book today
           </h4>
 
-          <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-1 py-2">
+          <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-1 py-1.5">
             <LandingAttributionWaterfallSvg />
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
-            <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
+          <div className="mt-3 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
+            <table className="w-full min-w-0 border-collapse text-left text-[13px]">
               <thead>
                 <tr className="border-b border-ivory-border text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-mid">
-                  <th className="px-3 py-2.5 sm:px-4">Driver</th>
-                  <th className="px-2 py-2.5 sm:px-3">Impact</th>
-                  <th className="px-2 py-2.5 sm:px-3">Direction</th>
-                  <th className="px-3 py-2.5 sm:px-4">Weight</th>
+                  <th className="px-3 py-2 sm:px-4">Driver</th>
+                  <th className="px-2 py-2 sm:px-3">Impact</th>
+                  <th className="px-2 py-2 pr-3 sm:px-3 sm:pr-4">Direction</th>
                 </tr>
               </thead>
               <tbody>
@@ -1479,136 +1452,41 @@ function LandingAttributionMock() {
                   const pos = row.impactGbp >= 0;
                   return (
                     <tr key={row.name} className="border-b border-ivory-border/80">
-                      <td className="px-3 py-2.5 font-semibold text-ink sm:px-4 sm:py-3">
+                      <td className="px-3 py-2 font-semibold text-ink sm:px-4 sm:py-2.5">
                         {row.name}
                       </td>
                       <td
-                        className={`px-2 py-2.5 tabular-nums font-medium sm:px-3 sm:py-3 ${
+                        className={`px-2 py-2 tabular-nums font-medium sm:px-3 sm:py-2.5 ${
                           pos ? "text-bull" : "text-[#8B3A3A]"
                         }`}
                       >
                         {fmtGbp(row.impactGbp)}
                       </td>
-                      <td className="px-2 py-2.5 text-ink-mid sm:px-3 sm:py-3">
+                      <td className="px-2 py-2 pr-3 text-ink-mid sm:px-3 sm:py-2.5 sm:pr-4">
                         {row.direction}
-                      </td>
-                      <td className="px-3 py-2.5 sm:px-4 sm:py-3">
-                        <div className="flex h-2 w-full max-w-[180px] overflow-hidden rounded-sm bg-ivory-dark/80">
-                          <div
-                            className="h-full"
-                            style={{
-                              width: `${row.weightPct}%`,
-                              backgroundColor: pos
-                                ? LANDING_ATTR_MOCK_GREEN
-                                : LANDING_ATTR_MOCK_RED,
-                            }}
-                          />
-                        </div>
                       </td>
                     </tr>
                   );
                 })}
                 <tr className="bg-ivory/60">
-                  <td className="px-3 py-2.5 font-semibold text-ink sm:px-4 sm:py-3">
+                  <td className="px-3 py-2 font-semibold text-ink sm:px-4 sm:py-2.5">
                     Total
                   </td>
-                  <td className="px-2 py-2.5 tabular-nums font-semibold text-[#8B3A3A] sm:px-3 sm:py-3">
+                  <td className="px-2 py-2 tabular-nums font-semibold text-[#8B3A3A] sm:px-3 sm:py-2.5">
                     {fmtGbp(totalPnl)}
                   </td>
-                  <td className="px-2 py-2.5 text-ink-mid sm:px-3 sm:py-3">—</td>
-                  <td className="px-3 py-2.5 sm:px-4 sm:py-3" />
+                  <td className="px-2 py-2 pr-3 text-ink-mid sm:px-3 sm:py-2.5 sm:pr-4">
+                    —
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <p className="mt-3 text-xs text-ink-light">
-            Model explains 94% of today&apos;s P&amp;L ({fmtGbp(-1427)} explained,{" "}
-            {fmtGbp(-97)} residual) · confidence: Low.
-          </p>
-          <p className="mt-1 text-xs text-ink-light">
-            Calibration sample too small — using conservative multipliers.
-          </p>
-
-          <button
-            type="button"
-            className="mt-3 flex cursor-default items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
-            tabIndex={-1}
-            aria-hidden
-          >
-            <span className="inline-block translate-y-px">▸</span>
-            Expand position detail
-          </button>
-        </div>
-
-        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
-          <p className={landingAttrSectionLabel}>Physical signals</p>
-          <h4 className="mt-1 font-serif text-lg text-ink">
-            Active signals relevant to your positions
-          </h4>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <article className="rounded-[4px] border-[0.5px] border-ivory-border border-l-[2px] border-l-bull bg-card px-3 py-2.5">
-              <p className="text-[11px] font-semibold text-ink">
-                T_DRAXX-2 · Drax Power Station Unit 2
-              </p>
-              <p className="mt-1 text-[11px] text-ink-mid">1,500 MW offline (unplanned)</p>
-              <p className="mt-2 border-l-2 border-bull pl-2 text-[12px] italic leading-snug text-ink-mid">
-                This supports your long GB baseload position — estimated{" "}
-                <span className="not-italic font-medium text-bull">+£2,700</span> impact
-              </p>
-            </article>
-            <article className="rounded-[4px] border-[0.5px] border-ivory-border border-l-[2px] border-l-bull bg-card px-3 py-2.5">
-              <p className="text-[11px] font-semibold text-ink">
-                T_NEWC-1 · New CCGT unit trip
-              </p>
-              <p className="mt-1 text-[11px] text-ink-mid">420 MW offline (unplanned)</p>
-              <p className="mt-2 border-l-2 border-bull pl-2 text-[12px] italic leading-snug text-ink-mid">
-                This supports your long GB baseload position — estimated{" "}
-                <span className="not-italic font-medium text-bull">+£750</span> impact
-              </p>
-            </article>
-          </div>
-        </div>
-
-        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
-          <p className={landingAttrSectionLabel}>Alignment</p>
-          <h4 className="mt-1 font-serif text-lg text-ink">Book vs physical conditions</h4>
-          <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-5">
-            <div className="relative pt-5">
-              <div className="flex justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-ink-mid">
-                <span>Fully bearish</span>
-                <span>Fully bullish</span>
-              </div>
-              <div className="relative mt-2 h-3 rounded-full bg-gradient-to-r from-[#8B3A3A]/35 via-ivory-dark to-[#1D6B4E]/45">
-                <div
-                  className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-ink"
-                  style={{ left: "50%" }}
-                  title="50%"
-                />
-              </div>
-            </div>
-            <p className="mt-4 text-sm text-ink-mid">
-              Your book is{" "}
-              <span className="font-semibold tabular-nums text-ink">50%</span> aligned with
-              current physical signals. Illustrative caption.
-            </p>
-          </div>
-        </div>
-
-        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
-          <p className={landingAttrSectionLabel}>History</p>
-          <h4 className="mt-1 font-serif text-lg text-ink">Historical P&amp;L</h4>
-          <div className="mt-4 flex h-[100px] items-end gap-1.5 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 pb-3 pt-3">
-            {[44, 62, 28, 18, 52, 22, 36].map((pct, i) => (
-              <div
-                key={i}
-                className="min-w-0 flex-1 rounded-sm bg-bull/30"
-                style={{ height: `${pct}%`, maxHeight: "72px" }}
-              />
-            ))}
-          </div>
-          <p className="mt-2 text-center font-mono text-[10px] text-ink-light">
-            Example weekly shape · values not shown
+          <p className="mt-2 text-xs text-ink-light">
+            Explained share, residual, confidence, and calibration notes update with your
+            book—illustrative figures above. Shape, demand, and interconnector are separate
+            drivers in the full in-product table.
           </p>
         </div>
       </div>
