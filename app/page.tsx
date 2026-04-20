@@ -973,97 +973,133 @@ export default function Home() {
 }
 
 type SourceRow = { label: string; value: string; tone?: string };
-type SourceTile = { meta: string; rows: SourceRow[] };
+type SourceTile = { meta: string; rawLine: string; rows: SourceRow[] };
 
 const LANDING_SOURCE_TILES: SourceTile[] = [
   {
     meta: "REMIT · 05:42",
+    rawLine: "ELEXON/BMRS · REMIT/PUB/202604180542 · msg_8f3a2c1e\u2026",
     rows: [
-      { label: "Drax U4", value: "645 MW", tone: "text-[#8B3A3A]" },
-      { label: "IFA2", value: "2,028 MW" },
-      { label: "SCCL-1", value: "400 MW", tone: "text-[#8B3A3A]" },
-      { label: "T_MRWD-1", value: "920 MW" },
+      { label: "Drax U4", value: "645 MW U", tone: "text-[#8B3A3A]" },
+      { label: "IFA2", value: "2,028 MW P" },
+      { label: "SCCL-1", value: "400 MW U", tone: "text-[#8B3A3A]" },
+      { label: "T_MRWD-1", value: "920 MW P" },
+      { label: "FDUNT-1", value: "59 MW P" },
       { label: "Unplanned", value: "3,240 MW" },
+      { label: "24h signals", value: "19 scored" },
+      { label: "+more", value: "6 U · +847 MW", tone: "text-ink-light" },
     ],
   },
   {
     meta: "ELEXON · LIVE",
+    rawLine: "BMRS/FUELINST · SP=2026-04-18T05:45Z · dataset=PUBLIC\u2026",
     rows: [
       { label: "Wind", value: "8.2 GW" },
-      { label: "Residual", value: "22.4 GW" },
+      { label: "Solar", value: "1.1 GW" },
       { label: "CCGT", value: "14.2 GW" },
       { label: "Nuclear", value: "4.5 GW" },
-      { label: "Demand", value: "25.6 GW" },
+      { label: "Pumped", value: "0.4 GW" },
+      { label: "IC net", value: "+2.2 GW imp" },
+      { label: "Residual", value: "22.4 GW" },
+      { label: "+more", value: "14 fuel types", tone: "text-ink-light" },
     ],
   },
   {
     meta: "PVLIVE · SOLAR",
+    rawLine: "sheffield.ac.uk/pvlive · v4/regional/national\u2026",
     rows: [
       { label: "Current", value: "1.1 GW" },
       { label: "Today pk", value: "2.8 GW" },
       { label: "Capacity", value: "16.9 GW" },
       { label: "Irrad.", value: "412 W/m\u00b2" },
-      { label: "vs 7d avg", value: "+0.2 GW", tone: "text-bull" },
+      { label: "CF", value: "6.5%" },
+      { label: "vs 7d", value: "+0.2 GW", tone: "text-bull" },
+      { label: "vs norm", value: "-0.8%", tone: "text-[#8B3A3A]" },
+      { label: "+more", value: "847 sites", tone: "text-ink-light" },
     ],
   },
   {
     meta: "N2EX · DAY-AHEAD",
+    rawLine: "BMRS/MID · N2EXMIDP · settlement_period=12\u2026",
     rows: [
       { label: "Base", value: "\u00a3101.12" },
       { label: "Peak", value: "\u00a3108.20" },
       { label: "Off-peak", value: "\u00a394.05" },
+      { label: "Vol base", value: "12.4 GWh" },
       { label: "1d", value: "+0.4%", tone: "text-bull" },
       { label: "Pk/Op", value: "+\u00a314.15" },
+      { label: "vs SRMC", value: "\u2212\u00a312.38", tone: "text-ink-mid" },
+      { label: "+more", value: "46 SP/day", tone: "text-ink-light" },
     ],
   },
   {
     meta: "EEX · TTF",
+    rawLine: "EEX/NGP · TTF_Front_Apr26 · curve_roll=auto\u2026",
     rows: [
       { label: "Front mo.", value: "\u20ac42.03" },
       { label: "Day-ahead", value: "\u20ac41.80" },
       { label: "1d", value: "+0.3%", tone: "text-bull" },
       { label: "1w", value: "-1.2%", tone: "text-[#8B3A3A]" },
       { label: "EU stor.", value: "38.4%" },
+      { label: "LNG", value: "1.2 TWh/d" },
+      { label: "Z1\u2013Z3", value: "contango", tone: "text-ink-mid" },
+      { label: "+more", value: "12 hubs", tone: "text-ink-light" },
     ],
   },
   {
     meta: "ICE · NBP",
+    rawLine: "STQ · NBP_FRONT_M · adj=HHV · stale_ms=840\u2026",
     rows: [
       { label: "Front mo.", value: "95.10p" },
       { label: "Day-ahead", value: "92.40p" },
       { label: "1d", value: "flat", tone: "text-ink-mid" },
       { label: "1w", value: "-1.2%", tone: "text-[#8B3A3A]" },
       { label: "Basis TTF", value: "+2%" },
+      { label: "HHV adj.", value: "+0.4p" },
+      { label: "WD spread", value: "+1.8p" },
+      { label: "+more", value: "8 ladders", tone: "text-ink-light" },
     ],
   },
   {
     meta: "METEO · 24H",
+    rawLine: "open-meteo · ECMWF_IFS · hourly=168 · step=1h\u2026",
     rows: [
       { label: "Wind", value: "4\u20139 m/s" },
       { label: "Min GW", value: "6.1" },
       { label: "Max GW", value: "9.8" },
-      { label: "Direction", value: "W-SW" },
-      { label: "vs 7d avg", value: "+1.5 GW", tone: "text-bull" },
+      { label: "Dir.", value: "W-SW" },
+      { label: "Gust", value: "11 m/s" },
+      { label: "vs 7d", value: "+1.5 GW", tone: "text-bull" },
+      { label: "p50 decay", value: "\u22120.8 GW", tone: "text-[#8B3A3A]" },
+      { label: "+more", value: "168 hrs", tone: "text-ink-light" },
     ],
   },
   {
     meta: "CARBON · 05:30",
+    rawLine: "Ember v2 · EU_CARBON_EUR · fallback=last_good\u2026",
     rows: [
       { label: "EUA", value: "\u20ac72.40" },
       { label: "UKA", value: "\u00a344.10" },
       { label: "Spread", value: "\u20ac24.30" },
       { label: "EUA 1d", value: "+0.8%", tone: "text-bull" },
       { label: "UKA 1d", value: "-0.3%", tone: "text-[#8B3A3A]" },
+      { label: "EUA vol", value: "0.8m" },
+      { label: "Alloc.", value: "auction day" },
+      { label: "+more", value: "3 hedges", tone: "text-ink-light" },
     ],
   },
   {
     meta: "YOUR BOOK · 3 OPEN",
+    rawLine: "Supabase/positions · user_id=\u2026f2a9 · asof=06:00\u2026",
     rows: [
       { label: "GB Pwr Q3", value: "+50 MW" },
       { label: "NBP Win26", value: "-25k th" },
       { label: "UKA Dec26", value: "+700 tco2" },
-      { label: "Unreal. P&L", value: "+\u00a34,820", tone: "text-bull" },
+      { label: "Unreal.", value: "+\u00a34,820", tone: "text-bull" },
       { label: "VaR 1d", value: "\u00a32,340" },
+      { label: "Margin", value: "\u00a318.2k / 42%" },
+      { label: "Notional", value: "\u00a32.1m" },
+      { label: "+more", value: "2 alerts", tone: "text-ink-light" },
     ],
   },
 ];
@@ -1082,8 +1118,8 @@ function LandingSourceGrid() {
         </div>
       </div>
 
-      {/* 3x3 grid of source tiles — tight packing for density */}
-      <div className="grid flex-1 grid-cols-3 gap-1.5 rounded-b-[4px] border-[0.5px] border-ivory-border bg-ivory-dark/30 p-1.5">
+      {/* 3x3 grid — cramped mono readout to contrast with the brief */}
+      <div className="grid flex-1 grid-cols-3 gap-1 rounded-b-[4px] border-[0.5px] border-ivory-border bg-ivory-dark/30 p-1">
         {LANDING_SOURCE_TILES.map((tile, i) => (
           <motion.div
             key={tile.meta}
@@ -1095,22 +1131,28 @@ function LandingSourceGrid() {
               delay: 0.15 + i * 0.06,
               ease: [0.22, 1, 0.36, 1],
             }}
-            className="rounded-[3px] border-[0.5px] border-ivory-border bg-card px-2.5 py-2.5"
+            className="min-h-0 rounded-[3px] border-[0.5px] border-ivory-border bg-card px-2 py-1.5"
           >
-            <p className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-ink-light">
+            <p className="font-mono text-[8px] uppercase leading-tight tracking-[0.12em] text-ink-light">
               {tile.meta}
             </p>
-            <div className="mt-2 space-y-1">
-              {tile.rows.map((row) => (
+            <p
+              className="mt-0.5 truncate font-mono text-[7px] leading-tight tracking-tight text-ink-light/65"
+              title={tile.rawLine}
+            >
+              {tile.rawLine}
+            </p>
+            <div className="mt-1 space-y-0.5">
+              {tile.rows.map((row, ri) => (
                 <div
-                  key={row.label}
-                  className="flex items-baseline justify-between gap-2"
+                  key={`${tile.meta}-${ri}`}
+                  className="flex items-baseline justify-between gap-1.5"
                 >
-                  <span className="font-mono text-[9.5px] text-ink-light">
+                  <span className="min-w-0 shrink font-mono text-[8px] leading-tight text-ink-light">
                     {row.label}
                   </span>
                   <span
-                    className={`font-mono text-[10px] tabular-nums ${
+                    className={`shrink-0 text-right font-mono text-[9px] leading-tight tabular-nums ${
                       row.tone ?? "text-ink"
                     }`}
                   >
@@ -1121,14 +1163,6 @@ function LandingSourceGrid() {
             </div>
           </motion.div>
         ))}
-      </div>
-
-      {/* Footer bar — summarises the synthesis step */}
-      <div className="mt-2 flex items-center justify-between rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/60 px-4 py-3">
-        <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-light">
-          Meridian reads every source, every night
-        </p>
-        <span className="font-mono text-[11px] text-ink-light">&rarr;</span>
       </div>
     </div>
   );
