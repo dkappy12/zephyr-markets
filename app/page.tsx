@@ -1539,8 +1539,8 @@ function LandingAttributionMock() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3.5 sm:px-5 lg:flex-row lg:flex-nowrap lg:items-start lg:justify-between lg:gap-y-0 lg:divide-x lg:divide-ivory-border lg:[&>div]:px-3 lg:[&>div:first-child]:pl-0 lg:[&>div:last-child]:pr-0">
-          <div className="min-w-0 lg:shrink">
+        <div className="grid grid-cols-1 gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3.5 sm:px-5 sm:grid-cols-2 lg:grid-cols-5 lg:items-start lg:gap-x-0 lg:gap-y-0 lg:divide-x lg:divide-ivory-border lg:[&>div]:min-w-0 lg:[&>div]:px-3 lg:[&>div:first-child]:pl-0 lg:[&>div:last-child]:pr-0">
+          <div>
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
             <p
               className={`mt-1.5 text-base font-semibold tabular-nums leading-tight ${
@@ -1550,25 +1550,25 @@ function LandingAttributionMock() {
               {fmtGbp(totalPnl)}
             </p>
           </div>
-          <div className="min-w-0 lg:shrink">
+          <div>
             <p className={landingAttrSectionLabel}>Physical premium score</p>
             <p className="mt-1.5 text-base font-semibold tabular-nums leading-tight text-gold">
               +1.8 FIRMING
             </p>
           </div>
-          <div className="min-w-0 lg:shrink">
+          <div>
             <p className={landingAttrSectionLabel}>Book alignment</p>
             <p className="mt-1.5 text-base font-semibold leading-tight text-ink-mid">
               MIXED
             </p>
           </div>
-          <div className="min-w-0 lg:shrink">
+          <div>
             <p className={landingAttrSectionLabel}>Regime</p>
-            <p className="mt-1.5 text-base font-semibold uppercase leading-tight tracking-wide text-ink-mid">
+            <p className="mt-1.5 text-base font-semibold uppercase leading-snug tracking-wide text-ink-mid">
               Gas-dominated
             </p>
           </div>
-          <div className="min-w-0 lg:shrink">
+          <div className="sm:col-span-2 lg:col-span-1">
             <p className={landingAttrSectionLabel}>Explained</p>
             <p className="mt-1.5 text-base font-semibold tabular-nums leading-tight text-ink">
               94%
