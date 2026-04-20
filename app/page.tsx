@@ -445,7 +445,7 @@ export default function Home() {
             Every move in your book, explained.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Today&apos;s P&amp;L from your Book, decomposed into physical drivers—the same
+            Today&apos;s P&amp;L from your Book, decomposed into physical drivers, the same
             view as <span className="whitespace-nowrap">Portfolio → Attribution</span>.
           </p>
           <LandingAttributionMock />
@@ -1412,7 +1412,7 @@ function LandingAttributionMock() {
           <div>
             <p className={landingAttrSectionLabel}>Book alignment</p>
             <p className="mt-1 text-sm font-semibold leading-snug text-ink-mid">
-              MIXED — check breakdown
+              MIXED, check breakdown
             </p>
           </div>
           <div>
@@ -1476,7 +1476,7 @@ function LandingAttributionMock() {
                     {fmtGbp(totalPnl)}
                   </td>
                   <td className="px-2 py-2 pr-3 text-ink-mid sm:px-3 sm:py-2.5 sm:pr-4">
-                    —
+                    -
                   </td>
                 </tr>
               </tbody>
@@ -1485,7 +1485,7 @@ function LandingAttributionMock() {
 
           <p className="mt-2 text-xs text-ink-light">
             Explained share, residual, confidence, and calibration notes update with your
-            book—illustrative figures above. Shape, demand, and interconnector are separate
+            book. Illustrative figures above. Shape, demand, and interconnector are separate
             drivers in the full in-product table.
           </p>
         </div>
