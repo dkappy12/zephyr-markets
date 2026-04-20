@@ -236,6 +236,7 @@ function LiveTicker() {
 
 export default function Home() {
   const [showComparison, setShowComparison] = useState(false);
+  const [briefExpanded, setBriefExpanded] = useState(false);
   const [meridianStats, setMeridianStats] = useState<{
     overall_mae: number;
     overall_bias: number;
@@ -318,8 +319,8 @@ export default function Home() {
               animate="show"
               className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-ink-mid sm:text-lg"
             >
-              Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief,
-              sized to your book.
+              Live REMIT signals, a CCGT-anchored premium score, sized to your
+              book.
             </motion.p>
           </div>
 
@@ -376,8 +377,8 @@ export default function Home() {
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
             <ProductStat
-              value="5 minutes"
-              label="SRMC model recalculated against live TTF, wind and REMIT"
+              value="5 markets"
+              label="GB power, TTF, NBP, UKA and EUA — priced and scored side by side"
             />
             <ProductStat
               value="60 seconds"
@@ -497,116 +498,172 @@ export default function Home() {
               <p className="mb-3 font-serif text-[15px] italic text-ink-mid">
                 &hellip;to this.
               </p>
-              <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8">
-                <div className="flex items-center justify-between border-b border-ivory-border pb-4">
-                  <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-mid">
-                    Morning brief · 06:00 GMT
-                  </p>
-                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                    Powered by Meridian
-                  </p>
-                </div>
-
-                <div className="mt-6 space-y-6">
-                  <div>
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      Reliability
+              <div className="relative">
+                <div
+                  className={`rounded-[4px] border-[0.5px] border-ivory-border bg-ivory px-6 py-8 sm:px-8 ${
+                    briefExpanded ? "" : "max-h-[760px] overflow-hidden"
+                  }`}
+                >
+                  <div className="flex items-center justify-between border-b border-ivory-border pb-4">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-ink-mid">
+                      Morning brief · 06:00 GMT
                     </p>
-                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-mid">
-                      Confidence HIGH · Physical premium context uses latest model run ·
-                      Book touchpoints personalised · 8 sources live
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Powered by Meridian
                     </p>
                   </div>
 
-                  <div>
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      Overnight summary
-                    </p>
-                    <p className="mt-2 font-serif text-[17px] leading-relaxed text-ink">
-                      Physical premium model shows moderate firming with a normalised
-                      score of +4.8, as market prices at £101.12/MWh sit £17.28/MWh below
-                      the physically-implied £118.40/MWh. Wind generation at 8.2 GW with
-                      solar adding 1.1 GW drives residual demand to 22.4 GW. Key
-                      overnight REMIT signal: Drax Unit 4 unplanned 645 MW outage
-                      continuing through multiple periods.
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      Weather watch
-                    </p>
-                    <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
-                      Wind speeds forecast 4&ndash;9 m/s across the 24h window. If wind
-                      falls materially below 6.5 GW in the second half, system flips
-                      gas-marginal. Market currently prices flat to this transition
-                      risk.
-                    </p>
-                  </div>
-
-                  <section
-                    className={briefOneRiskCalloutClassName}
-                    style={briefOneRiskCalloutStyle}
-                  >
-                    <h2 className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      One risk the market may be underpricing
-                    </h2>
-                    <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
-                      Synchronised IFA2 outage (2×1,014 MW) combined with ~900 MW of
-                      unplanned thermal outages removes ~2.9 GW of capacity during peak
-                      morning demand. The 48p premium gap to physical value likely
-                      understates scarcity risk in the 09:00&ndash;11:00 UTC window when
-                      import support vanishes.
-                    </p>
-                  </section>
-
-                  <div>
-                    <div className="flex items-center gap-3">
+                  <div className="mt-6 space-y-6">
+                    <div>
                       <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                        Watch list
+                        Reliability
                       </p>
-                      <span className="font-mono text-[9px] text-ink-light">
-                        3 items to watch
-                      </span>
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-ink-mid">
+                        Confidence HIGH · 10h since generation · Physical premium
+                        context (implied vs N2EX, residual demand) uses the latest model
+                        run when book touchpoints are personalised · personalised
+                        touchpoints active
+                      </p>
                     </div>
-                    <div className="mt-3 space-y-3">
-                      {[
-                        "IFA2 offline 08:00\u201310:45 UTC: monitor N2EX intraday for 10:00\u201311:00 UTC spike if wind <6.0 GW coincides.",
-                        "SCCL-1 (400 MW unplanned) offline 06:00\u201312:30 UTC: cascading with IFA2 creates tight morning shoulder.",
-                        "Wind forecast second-half decay: if outturn slips below 7.7 GW, residual demand approaches 15+ GW and pulls price toward SRMC (\u00a399.94/MWh).",
-                      ].map((item, i) => (
-                        <div key={i} className="flex gap-3">
-                          <span className="mt-0.5 shrink-0 font-mono text-[11px] text-ink-light">
-                            &rarr;
-                          </span>
-                          <p className="text-[12px] leading-relaxed text-ink-mid">{item}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
 
-                  <div className="border-t border-ivory-border pt-5">
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
-                      Book touchpoints
-                    </p>
-                    <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
-                      The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 is
-                      well-supported. Today&apos;s physical conditions suggest the
-                      market is underpricing tightness risk by £17/MWh. The short
-                      25,000 therm NBP Winter 2026 is correctly positioned given
-                      temperature-suppressed demand; TTF at €50/MWh with weak heating
-                      load supports the bias. Both carbon positions are immaterial to
-                      this morning&apos;s regime. Single largest risk: 3,240 MW of
-                      unplanned REMIT capacity active; any resolution could compress
-                      the premium gap immediately.
-                    </p>
-                    <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
-                      Personalised to: Long 50 MW GB Power Q3 2026 · Short 25,000 therm
-                      NBP Winter 2026 · Long 700 tco2 UKA Dec-2026
-                    </p>
+                    <div>
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Overnight summary
+                      </p>
+                      <p className="mt-2 font-serif text-[16px] leading-relaxed text-ink">
+                        Physical premium model shows a 1.8 normalised score in firming
+                        mode, implying £93.64/MWh versus a market price of £84.74/MWh;
+                        the £8.90/MWh gap signals the market is undervaluing physical
+                        tightness. Wind outturn remains depressed at 2.5 GW with
+                        residual demand at 20.5 GW, pushing the system into a
+                        gas-dominated regime well above the 15 GW threshold. DRAXX-2
+                        (645 MW coal unit) remains partially offline through at least
+                        13:50 UTC today following an overnight unplanned outage; SUTB-1
+                        (832 MW) was in forced outage until 08:00 UTC and capacity is
+                        degrading across multiple coal and CCGT assets.
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Weather watch
+                      </p>
+                      <p className="mt-3 font-serif text-[16px] leading-relaxed text-ink">
+                        Wind is forecast to accelerate into the second half of the
+                        24-hour window, with the range 0.3&ndash;7.9 m/s implying
+                        movement from very weak early session conditions toward
+                        moderate-to-fresh afternoon winds; this should ease residual
+                        demand pressure as wind climbs from 2.5 GW toward 5&ndash;6 GW
+                        by late session. Temperature at 3.7&nbsp;&deg;C with a
+                        3.4&ndash;9.3&nbsp;&deg;C span through the day is cold enough to
+                        support baseline gas heating demand but without extreme stress.
+                        The residual demand profile will trail down through the session
+                        as renewables step up, reducing the need for rapid ramp-up from
+                        thermal fleet in afternoon hours.
+                      </p>
+                    </div>
+
+                    <section
+                      className={briefOneRiskCalloutClassName}
+                      style={briefOneRiskCalloutStyle}
+                    >
+                      <h2 className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        One risk the market may be underpricing
+                      </h2>
+                      <p className="mt-3 font-serif text-[16px] leading-relaxed text-ink">
+                        The SRMC anchor sits at £101.42/MWh while the market trades
+                        £84.74/MWh; if wind acceleration stalls or fails to materialise
+                        and multiple thermal units remain offline (DRAXX-2 still
+                        crippled through 13:50 UTC, TSREP-1 unplanned through 23:00 UTC,
+                        SUTB-1 just recovered), the system could flip to emergency
+                        thermal dependency within hours. The 2,585 MW REMIT capacity
+                        impact modelled suggests significant thermal unavailability
+                        compressed into a period when residual demand is still elevated
+                        at 20.5 GW; a wind forecast miss of just 2 m/s (3.6 GW
+                        equivalent) would force dispatch into the £95&ndash;101 range.
+                        Current market pricing assumes wind delivery and capacity
+                        recovery; neither is guaranteed this morning.
+                      </p>
+                    </section>
+
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                          Watch list
+                        </p>
+                        <span className="font-mono text-[9px] text-ink-light">
+                          3 items to watch
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {[
+                          "DRAXX-2 derated 645 MW through 13:50 UTC this morning; watch for reinstatement signals; any delay compounds thermal scarcity and pushes SP3\u2013SP10 toward SRMC anchor.",
+                          "Wind profile front-loaded to weak first half (0.3 m/s initial) means residual demand will spike in early session; check N2EX intraday spreads for morning peak premium before acceleration kicks in.",
+                          "T_NNGAO-2 rolls through planned deration 07:00\u201315:00 UTC (50\u201359 MW units); stacked outage window coincides with early weak wind; ensure ops readiness for rapid load swaps.",
+                        ].map((item, i) => (
+                          <div key={i} className="flex gap-3">
+                            <span className="mt-0.5 shrink-0 font-mono text-[11px] text-ink-light">
+                              &rarr;
+                            </span>
+                            <p className="text-[12px] leading-relaxed text-ink-mid">{item}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-ivory-border pt-5">
+                      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                        Book touchpoints
+                      </p>
+                      <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
+                        The long 54,000 therm NBP Cal-2028 entered at 97.8 is
+                        underwater by 0.3 pence against current forward valuations,
+                        while the long 42,000 therm Winter-2026 at 114.7 carries 22.25
+                        pence of mark-to-market loss in a transitional regime offering
+                        no demand support at 19.9 GW residual; conversely, both short
+                        positions benefit directly from the 9.76 pound/MWh gap between
+                        market price and physically-implied price, with the short
+                        31,000 therm Summer-2026 at 102.4 and short 22,000 therm
+                        Q1-2028 at 101.2 now 0.1 to 10.75 pence in-the-money as SRMC
+                        anchors at 101.34. The long 12,000 therm DA 2026-04-15 at
+                        108.55 loses 16.1 pence to current cash basis collapse, while
+                        the long 700 tco2 UKA Dec-2026 at 56.8 gains 8.7 pence from
+                        widening EUA&ndash;UKA spread pressures as the short 500 EUA
+                        Dec-2026 at 71.9 absorbs cross-curve arb risk. The single
+                        biggest risk is the 1,050 MW of active REMIT outages returning
+                        to service, which would compress residual demand below 15 GW
+                        and collapse the physically-implied premium entirely; monitor
+                        REMIT releases and TSO capacity notices between 08:00 and 10:00
+                        UTC.
+                      </p>
+                      <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
+                        Personalised to: Long 54,000 therm NBP Cal-2028 · Long 42,000
+                        therm NBP Winter-2026 · Short 31,000 therm NBP Summer-2026 ·
+                        Short 22,000 therm NBP Q1-2028 · Short 18,000 therm NBP Cal-2028
+                        · Long 12,000 therm NBP DA 2026-04-15 · Long 700 tco2 UKA
+                        Dec-2026 · Short 500 tco2 EUA Dec-2026
+                      </p>
+                    </div>
                   </div>
                 </div>
+                {!briefExpanded ? (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-40 rounded-b-[4px] bg-gradient-to-t from-ivory via-ivory/92 to-transparent"
+                  />
+                ) : null}
               </div>
+              <button
+                type="button"
+                onClick={() => setBriefExpanded((v) => !v)}
+                aria-expanded={briefExpanded}
+                className="mx-auto mt-5 flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-mid transition-colors hover:text-ink"
+              >
+                {briefExpanded ? "Show less" : "Read the full brief"}
+                <span aria-hidden className="text-[13px]">
+                  {briefExpanded ? "\u2191" : "\u2193"}
+                </span>
+              </button>
             </motion.div>
           </div>
         </div>
@@ -626,10 +683,8 @@ export default function Home() {
                 The model that improves itself.
               </h2>
               <p className="mt-4 text-sm leading-relaxed text-ink-mid">
-                Meridian is the autonomous calibration engine running behind every
-                premium score. Every night it compares its predictions against actual
-                N2EX settlement prices, recalculates its error, and updates its own
-                coefficients. No manual tuning. No stale parameters.
+                Every night Meridian scores its predictions against N2EX settlement
+                and updates its own coefficients — no manual tuning, no stale parameters.
               </p>
               <p className="mt-3 text-sm leading-relaxed text-ink-mid">
                 Most analytics platforms don&apos;t publish their own accuracy. We do.
@@ -782,41 +837,28 @@ export default function Home() {
               emphasis={false}
             />
           </div>
-          <p className="mt-10 text-center text-sm text-ink-light">
-            Need more than 5 seats?{" "}
-            <a
-              href="mailto:contact@zephyr.markets"
-              className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+          <div className="mt-10 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowComparison(!showComparison)}
+              aria-expanded={showComparison}
+              className="flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
             >
-              contact@zephyr.markets
-            </a>
-          </p>
-        </div>
-      </section>
-
-      <section
-        aria-labelledby="plan-comparison-heading"
-        className="border-b-[0.5px] border-ivory-border bg-ivory py-16 sm:py-20"
-      >
-        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
-          <h2
-            id="plan-comparison-heading"
-            className="text-center font-serif text-3xl text-ink sm:text-4xl"
-          >
-            Everything in the plan
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-center text-sm leading-relaxed text-ink-mid">
-            Compare tiers at a glance. Upgrade when you need real time, depth, or a
-            full desk on one book.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowComparison(!showComparison)}
-            className="mx-auto mt-8 flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
-          >
-            {showComparison ? "Hide feature comparison" : "Compare all features"}
-            <span className="text-xs">{showComparison ? "↑" : "↓"}</span>
-          </button>
+              {showComparison ? "Hide feature comparison" : "Compare all features"}
+              <span aria-hidden className="text-xs">
+                {showComparison ? "\u2191" : "\u2193"}
+              </span>
+            </button>
+            <p className="text-center text-sm text-ink-light">
+              Need more than 5 seats?{" "}
+              <a
+                href="mailto:contact@zephyr.markets"
+                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+              >
+                contact@zephyr.markets
+              </a>
+            </p>
+          </div>
           {showComparison ? (
             <div className="mt-6 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
               <table className="w-full min-w-[640px] border-collapse text-left">
@@ -1478,9 +1520,8 @@ function LandingAttributionMock() {
           </div>
 
           <p className="mt-2 text-xs text-ink-light">
-            Explained share, residual, confidence, and calibration notes update with your
-            book. Illustrative figures above. Shape, demand, and interconnector are separate
-            drivers in the full in-product table.
+            Explained share, residual, and confidence update with your book.
+            Shape, demand, and interconnector are separate drivers in-product.
           </p>
         </div>
       </div>
