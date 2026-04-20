@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  briefOneRiskCalloutClassName,
+  briefOneRiskCalloutStyle,
+} from "@/lib/brief-one-risk-callout";
 import { createClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
@@ -595,17 +599,13 @@ export default function Home() {
                   </div>
 
                   <section
-                    className="rounded-[4px] py-4 pl-4 pr-4"
-                    style={{
-                      backgroundColor: "#F1F3EB",
-                      border: "0.5px solid #D9D2C4",
-                      borderLeft: "4px solid #1D6B4E",
-                    }}
+                    className={briefOneRiskCalloutClassName}
+                    style={briefOneRiskCalloutStyle}
                   >
-                    <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
+                    <h2 className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                       One risk the market may be underpricing
-                    </p>
-                    <p className="mt-2 text-[13px] leading-relaxed text-ink">
+                    </h2>
+                    <p className="mt-3 font-serif text-lg leading-relaxed text-ink">
                       Synchronised IFA2 outage (2×1,014 MW) combined with ~900 MW of
                       unplanned thermal outages removes ~2.9 GW of capacity during peak
                       morning demand. The 48p premium gap to physical value likely

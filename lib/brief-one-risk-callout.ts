@@ -1,8 +1,7 @@
 import type { CSSProperties } from "react";
 
 /**
- * In-app morning brief “one risk” callout only (dashboard).
- * Green left rule + light wash — no full box outline (landing mock uses its own inline styles).
+ * Morning brief “one risk” callout — dashboard and landing mock (same chrome).
  */
 export const briefOneRiskCalloutClassName = "rounded-[4px] pl-4";
 
