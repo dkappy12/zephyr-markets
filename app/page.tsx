@@ -1412,7 +1412,7 @@ function LandingAttributionMock() {
           <div>
             <p className={landingAttrSectionLabel}>Book alignment</p>
             <p className="mt-1 text-sm font-semibold leading-snug text-ink-mid">
-              MIXED, check breakdown
+              MIXED — check breakdown
             </p>
           </div>
           <div>
