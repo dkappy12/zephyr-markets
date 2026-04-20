@@ -446,20 +446,10 @@ export default function Home() {
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
             Today&apos;s P&amp;L from your Book, decomposed into physical drivers—the same
-            view as{" "}
-            <span className="whitespace-nowrap">Portfolio → Attribution</span> (Pro).
+            view as <span className="whitespace-nowrap">Portfolio → Attribution</span>.
           </p>
           <LandingAttributionMock />
-          <p className="mx-auto mt-8 max-w-lg text-center text-sm text-ink-mid">
-            <Link
-              href="/#pricing"
-              className="font-medium text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-ink/50"
-            >
-              P&amp;L attribution
-            </Link>{" "}
-            is included on Pro.
-          </p>
-          <p className="mx-auto mt-3 max-w-lg text-center text-xs text-ink-light">
+          <p className="mx-auto mt-8 max-w-lg text-center text-xs text-ink-light">
             Power and gas marks refresh about every two minutes; fundamentals follow the
             live ingestion stack.
           </p>
