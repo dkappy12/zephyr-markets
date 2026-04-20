@@ -1559,8 +1559,7 @@ function LandingAttributionMock() {
           <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Book alignment</p>
             <p className="mt-1.5 text-base font-semibold leading-tight text-ink-mid">
-              <span>MIXED</span>
-              <span className="font-normal text-ink-mid"> · Check breakdown</span>
+              MIXED
             </p>
           </div>
           <div className="min-w-0 lg:shrink">
@@ -1572,8 +1571,7 @@ function LandingAttributionMock() {
           <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Explained</p>
             <p className="mt-1.5 text-base font-semibold tabular-nums leading-tight text-ink">
-              <span>94%</span>
-              <span className="font-normal text-ink-mid"> · High confidence</span>
+              94%
             </p>
           </div>
         </div>
