@@ -673,7 +673,7 @@ export default function Home() {
         className="border-y-[0.5px] border-ivory-border bg-ivory py-16 sm:py-20"
       >
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-12 lg:grid-cols-2 lg:items-center lg:gap-20">
+          <div className="grid gap-12 lg:grid-cols-2 lg:items-start lg:gap-20">
             <div>
               <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-ink-light">
                 Meridian
@@ -682,8 +682,9 @@ export default function Home() {
                 The model that improves itself.
               </h2>
               <p className="mt-4 text-sm leading-relaxed text-ink-mid">
-                Every night Meridian scores its predictions against N2EX settlement
-                and updates its own coefficients — no manual tuning, no stale parameters.
+                Every night Meridian scores its physically-implied price
+                predictions against N2EX settlement and updates its own
+                coefficients. No manual tuning, no stale parameters.
               </p>
               <p className="mt-3 text-sm leading-relaxed text-ink-mid">
                 Most analytics platforms don&apos;t publish their own accuracy. We do.
@@ -695,7 +696,9 @@ export default function Home() {
                   Meridian · live accuracy
                 </p>
                 <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
-                  {meridianStats?.days_of_data ?? "—"} OF 18 DAYS
+                  {meridianStats != null
+                    ? `n=${meridianStats.filled_count} settlement periods`
+                    : "Live"}
                 </span>
               </div>
 
@@ -715,6 +718,9 @@ export default function Home() {
                       "—"
                     )}
                   </p>
+                  <p className="mt-0.5 font-sans text-[9px] text-ink-light">
+                    Mean absolute error vs settlement
+                  </p>
                 </div>
                 <div>
                   <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
@@ -722,26 +728,17 @@ export default function Home() {
                   </p>
                   {meridianStats == null ? (
                     <p className="mt-1 font-serif text-2xl text-ink">—</p>
-                  ) : meridianStats.overall_bias >= 0 ? (
-                    <>
-                      <p className="mt-1 font-serif text-2xl text-bull">
-                        +£{meridianStats.overall_bias.toFixed(2)}
-                        <span className="font-sans text-xs text-ink-mid">/MWh</span>
-                      </p>
-                      <p className="mt-0.5 font-sans text-[9px] text-ink-light">
-                        {meridianStats.overall_bias > 0
-                          ? "Slight overestimate"
-                          : "Slight underestimate"}
-                      </p>
-                    </>
                   ) : (
                     <>
-                      <p className="mt-1 font-serif text-2xl text-[#8B3A3A]">
-                        −£{Math.abs(meridianStats.overall_bias).toFixed(2)}
+                      <p className="mt-1 font-serif text-2xl text-ink">
+                        {meridianStats.overall_bias >= 0 ? "+" : "\u2212"}£
+                        {Math.abs(meridianStats.overall_bias).toFixed(2)}
                         <span className="font-sans text-xs text-ink-mid">/MWh</span>
                       </p>
                       <p className="mt-0.5 font-sans text-[9px] text-ink-light">
-                        Slight underestimate
+                        Model runs {Math.abs(meridianStats.overall_bias).toFixed(2)}{" "}
+                        {meridianStats.overall_bias >= 0 ? "above" : "below"}{" "}
+                        settlement on average
                       </p>
                     </>
                   )}
@@ -778,21 +775,21 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Calibration status */}
+              {/* Calibration governance */}
               <div className="mt-5 rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-4 py-3">
                 <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
-                  Calibration status
+                  Calibration governance
                 </p>
                 <p className="mt-1.5 text-[11px] leading-relaxed text-ink-mid">
-                  Coefficient updates are gated. Meridian will not promote new
-                  parameters until sufficient settlement periods are observed.
-                  Currently in warm-up.
+                  Coefficient updates are gated: Meridian only promotes new parameters
+                  once regime-specific sample thresholds are met. No untested
+                  parameters ever hit production.
                 </p>
               </div>
 
               <p className="mt-4 text-[10px] leading-relaxed text-ink-light">
-                Bias is mean signed error (predicted minus actual). Negative = model
-                underestimating market price. Recalibrates nightly at 02:00 UTC.
+                Recalibrates nightly at 02:00 UTC against N2EX settlement. MAE and
+                bias update live across the rolling window.
               </p>
             </div>
           </div>
