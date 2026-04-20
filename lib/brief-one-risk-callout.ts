@@ -1,14 +1,12 @@
 import type { CSSProperties } from "react";
 
 /**
- * In-app morning brief “one risk” callout: green left rule + pale grey-green wash.
- * Opaque fill (not alpha-blended) so it cannot read as ivory-dark next to the terminal column.
- * Border + fill are inline so they are not dropped if Tailwind does not scan this file.
+ * In-app morning brief “one risk” callout only (dashboard).
+ * Green left rule + light wash — no full box outline (landing mock uses its own inline styles).
  */
 export const briefOneRiskCalloutClassName = "rounded-[4px] pl-4";
 
 export const briefOneRiskCalloutStyle: CSSProperties = {
-  backgroundColor: "#F1F3EB",
-  border: "0.5px solid #D9D2C4",
-  borderLeft: "4px solid #1D6B4E",
+  backgroundColor: "rgba(29, 107, 78, 0.03)",
+  borderLeft: "2px solid #1D6B4E",
 };
