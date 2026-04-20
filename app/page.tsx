@@ -9,7 +9,7 @@ import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -444,31 +444,12 @@ export default function Home() {
           <h2 className="text-center font-serif text-3xl text-ink sm:text-4xl">
             Every move in your book, explained.
           </h2>
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.45 }}
-            className="mx-auto mt-10 max-w-2xl rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-8 sm:px-8 sm:py-10"
-          >
-            <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              P&amp;L attribution
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-              Zephyr attributes today&apos;s portfolio P&amp;L—the same open-to-current marks
-              as your Book—into wind, gas (with carbon split out from the gas stack), REMIT,
-              shape and basis, demand from relevant desk signals, interconnector flow effects,
-              and whatever remains in residual. EUR/GBP feeds gas conversion; there is no
-              separate FX bucket in the bridge.
-            </p>
-            <p className="mt-4 text-sm leading-relaxed text-ink-mid">
-              On Portfolio → Attribution you get a waterfall and driver table, how much of
-              today&apos;s P&amp;L is explained versus residual, a confidence readout and
-              diagnostics when fit is weak, optional per-position detail, REMIT signals
-              framed against your book, a book-vs-physical alignment gauge, and historical
-              P&amp;L over time.
-            </p>
-          </motion.div>
+          <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
+            Today&apos;s P&amp;L from your Book, decomposed into physical drivers—the same
+            view as{" "}
+            <span className="whitespace-nowrap">Portfolio → Attribution</span> (Pro).
+          </p>
+          <LandingAttributionMock />
           <p className="mx-auto mt-8 max-w-lg text-center text-sm text-ink-mid">
             <Link
               href="/#pricing"
@@ -1188,6 +1169,460 @@ function LandingSourceGrid() {
         </p>
       </div>
     </div>
+  );
+}
+
+const landingAttrSectionLabel =
+  "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
+
+const LANDING_ATTR_MOCK_GREEN = "#1D6B4E";
+const LANDING_ATTR_MOCK_RED = "#8B3A3A";
+const LANDING_ATTR_MOCK_TOTAL = "#2C2A26";
+
+/** Static deltas summing to total P&L; order matches AttributionPageClient waterfall. */
+const LANDING_ATTR_WATERFALL: { label: string; delta: number }[] = [
+  { label: "Wind", delta: -920 },
+  { label: "Gas", delta: -610 },
+  { label: "Carbon", delta: -210 },
+  { label: "REMIT", delta: 460 },
+  { label: "Shape", delta: 260 },
+  { label: "Demand", delta: -125 },
+  { label: "Interconnector", delta: 58 },
+  { label: "Residual", delta: -437 },
+];
+
+const LANDING_ATTR_TABLE_ROWS: {
+  name: string;
+  impactGbp: number;
+  direction: string;
+  weightPct: number;
+}[] = [
+  {
+    name: "Wind generation",
+    impactGbp: -920,
+    direction: "Δwind −3.64 GW vs 7d baseline · −2.10 £/MWh",
+    weightPct: 100,
+  },
+  {
+    name: "Gas prices (TTF)",
+    impactGbp: -610,
+    direction: "62% SRMC vs DA · −0.85 £/MWh",
+    weightPct: 66,
+  },
+  {
+    name: "Carbon (UKA)",
+    impactGbp: -210,
+    direction: "UKA ref £55/t · EF 0.366 t/MWh · 18% of gas stack",
+    weightPct: 23,
+  },
+  {
+    name: "REMIT outages",
+    impactGbp: 460,
+    direction: "41% system stress · +1.20 £/MWh",
+    weightPct: 50,
+  },
+  {
+    name: "Shape / basis",
+    impactGbp: 260,
+    direction: "−0.35 £/MWh residual market move",
+    weightPct: 28,
+  },
+  {
+    name: "Demand surprise",
+    impactGbp: -125,
+    direction: "2 demand-linked signals · proxy sensitivity",
+    weightPct: 14,
+  },
+  {
+    name: "Interconnector flow",
+    impactGbp: 58,
+    direction: "1 flow-linked signals · proxy sensitivity",
+    weightPct: 6,
+  },
+  {
+    name: "Residual",
+    impactGbp: -437,
+    direction: "unexplained after factor decomposition",
+    weightPct: 48,
+  },
+];
+
+function LandingAttributionWaterfallSvg() {
+  const total = LANDING_ATTR_WATERFALL.reduce((s, r) => s + r.delta, 0);
+  let cumMin = 0;
+  let cumMax = 0;
+  let run = 0;
+  for (const r of LANDING_ATTR_WATERFALL) {
+    run += r.delta;
+    cumMin = Math.min(cumMin, run);
+    cumMax = Math.max(cumMax, run);
+  }
+  cumMin = Math.min(cumMin, total);
+  cumMax = Math.max(cumMax, 0, total);
+  const span = cumMax - cumMin || 1;
+
+  const W = 860;
+  const H = 228;
+  const padL = 8;
+  const padR = 8;
+  const padT = 16;
+  const padB = 52;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const nCols = LANDING_ATTR_WATERFALL.length + 1;
+  const gap = 5;
+  const colW = (chartW - gap * (nCols - 1)) / nCols;
+
+  const yAt = (value: number) => padT + chartH * ((cumMax - value) / span);
+
+  const gridLines: ReactNode[] = [];
+  for (let gi = 0; gi <= 4; gi++) {
+    const v = cumMax - (span * gi) / 4;
+    const y = yAt(v);
+    gridLines.push(
+      <line
+        key={`g-${gi}`}
+        x1={padL}
+        y1={y}
+        x2={W - padR}
+        y2={y}
+        stroke="rgba(44,42,38,0.06)"
+        strokeWidth={1}
+        strokeDasharray="3 3"
+      />,
+    );
+  }
+
+  const bridgeLines: ReactNode[] = [];
+  const bars: ReactNode[] = [];
+  const labels: ReactNode[] = [];
+
+  let cum = 0;
+  LANDING_ATTR_WATERFALL.forEach((step, i) => {
+    const next = cum + step.delta;
+    const low = Math.min(cum, next);
+    const high = Math.max(cum, next);
+    const x = padL + i * (colW + gap);
+    const yTop = yAt(high);
+    const yBot = yAt(low);
+    const h = Math.max(yBot - yTop, 1);
+    const fill = step.delta >= 0 ? LANDING_ATTR_MOCK_GREEN : LANDING_ATTR_MOCK_RED;
+    bars.push(
+      <rect key={`b-${i}`} x={x} y={yTop} width={colW} height={h} fill={fill} rx={2} />,
+    );
+    labels.push(
+      <text
+        key={`l-${i}`}
+        x={x + colW / 2}
+        y={H - 8}
+        textAnchor="end"
+        dominantBaseline="middle"
+        fill="#6B6760"
+        transform={`rotate(-38 ${x + colW / 2} ${H - 8})`}
+        style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+      >
+        {step.label}
+      </text>,
+    );
+    if (i < LANDING_ATTR_WATERFALL.length - 1) {
+      const x1 = x + colW;
+      const x2 = x + colW + gap;
+      const y = yAt(next);
+      bridgeLines.push(
+        <line
+          key={`c-${i}`}
+          x1={x1}
+          y1={y}
+          x2={x2}
+          y2={y}
+          stroke="rgba(44,42,38,0.2)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />,
+      );
+    }
+    cum = next;
+  });
+
+  const ti = LANDING_ATTR_WATERFALL.length;
+  const xTot = padL + ti * (colW + gap);
+  const yTopTot = yAt(Math.max(0, total));
+  const yBotTot = yAt(Math.min(0, total));
+  const topTot = Math.min(yTopTot, yBotTot);
+  const hTot = Math.abs(yBotTot - yTopTot);
+  bars.push(
+    <rect
+      key="total"
+      x={xTot}
+      y={topTot}
+      width={colW}
+      height={Math.max(hTot, 1)}
+      fill={LANDING_ATTR_MOCK_TOTAL}
+      rx={2}
+    />,
+  );
+  labels.push(
+    <text
+      key="ltot"
+      x={xTot + colW / 2}
+      y={H - 14}
+      textAnchor="middle"
+      fill="#6B6760"
+      style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+    >
+      Total
+    </text>,
+  );
+
+  const xLastEnd = padL + (ti - 1) * (colW + gap) + colW;
+  bridgeLines.push(
+    <line
+      key="c-tot"
+      x1={xLastEnd}
+      y1={yAt(cum)}
+      x2={xTot}
+      y2={yAt(cum)}
+      stroke="rgba(44,42,38,0.2)"
+      strokeWidth={1}
+      strokeDasharray="3 3"
+    />,
+  );
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="mx-auto h-auto w-full max-w-[860px]"
+        role="img"
+        aria-label="Illustrative P&amp;L attribution waterfall by driver"
+      >
+        {gridLines}
+        {bridgeLines}
+        {bars}
+        {labels}
+      </svg>
+    </div>
+  );
+}
+
+function LandingAttributionMock() {
+  const totalPnl = LANDING_ATTR_WATERFALL.reduce((s, r) => s + r.delta, 0);
+  const fmtGbp = (n: number) => {
+    const sign = n >= 0 ? "+" : "−";
+    const v = Math.abs(Math.round(n)).toLocaleString("en-GB");
+    return `${sign}£${v}`;
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-40px" }}
+      transition={{ duration: 0.45 }}
+      className="mx-auto mt-10 max-w-[960px]"
+    >
+      <p className="text-center font-mono text-[10px] text-ink-light">
+        Illustrative example · not live data
+      </p>
+      <div className="mt-4 overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border bg-card">
+        <div className="border-b-[0.5px] border-ivory-border px-4 py-4 sm:px-5">
+          <h3 className="font-serif text-2xl text-ink">Attribution</h3>
+          <p className="mt-1 text-sm text-ink-light">
+            How today&apos;s physical drivers are moving your book.
+          </p>
+        </div>
+
+        <div className="grid gap-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-4 sm:grid-cols-2 sm:px-5 lg:grid-cols-5">
+          <div>
+            <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-[#8B3A3A]">
+              {fmtGbp(totalPnl)}
+            </p>
+          </div>
+          <div>
+            <p className={landingAttrSectionLabel}>Physical premium score</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-gold">
+              +0.1 PHYSICAL
+            </p>
+          </div>
+          <div>
+            <p className={landingAttrSectionLabel}>Book alignment</p>
+            <p className="mt-1 text-sm font-semibold leading-snug text-ink-mid">
+              MIXED — check breakdown
+            </p>
+          </div>
+          <div>
+            <p className={landingAttrSectionLabel}>Regime</p>
+            <p className="mt-1 text-sm font-semibold uppercase tracking-wide text-ink-mid">
+              Transitional
+            </p>
+          </div>
+          <div>
+            <p className={landingAttrSectionLabel}>Explained</p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-ink">94%</p>
+            <p className="mt-1 text-[11px] text-ink-mid">Low confidence</p>
+          </div>
+        </div>
+
+        <div className="px-3 py-4 sm:px-4 sm:py-5">
+          <p className={landingAttrSectionLabel}>P&amp;L attribution</p>
+          <h4 className="mt-1 font-serif text-xl text-ink sm:text-2xl">
+            What moved your book today
+          </h4>
+
+          <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-1 py-2">
+            <LandingAttributionWaterfallSvg />
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
+            <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-ivory-border text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-mid">
+                  <th className="px-3 py-2.5 sm:px-4">Driver</th>
+                  <th className="px-2 py-2.5 sm:px-3">Impact</th>
+                  <th className="px-2 py-2.5 sm:px-3">Direction</th>
+                  <th className="px-3 py-2.5 sm:px-4">Weight</th>
+                </tr>
+              </thead>
+              <tbody>
+                {LANDING_ATTR_TABLE_ROWS.map((row) => {
+                  const pos = row.impactGbp >= 0;
+                  return (
+                    <tr key={row.name} className="border-b border-ivory-border/80">
+                      <td className="px-3 py-2.5 font-semibold text-ink sm:px-4 sm:py-3">
+                        {row.name}
+                      </td>
+                      <td
+                        className={`px-2 py-2.5 tabular-nums font-medium sm:px-3 sm:py-3 ${
+                          pos ? "text-bull" : "text-[#8B3A3A]"
+                        }`}
+                      >
+                        {fmtGbp(row.impactGbp)}
+                      </td>
+                      <td className="px-2 py-2.5 text-ink-mid sm:px-3 sm:py-3">
+                        {row.direction}
+                      </td>
+                      <td className="px-3 py-2.5 sm:px-4 sm:py-3">
+                        <div className="flex h-2 w-full max-w-[180px] overflow-hidden rounded-sm bg-ivory-dark/80">
+                          <div
+                            className="h-full"
+                            style={{
+                              width: `${row.weightPct}%`,
+                              backgroundColor: pos
+                                ? LANDING_ATTR_MOCK_GREEN
+                                : LANDING_ATTR_MOCK_RED,
+                            }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-ivory/60">
+                  <td className="px-3 py-2.5 font-semibold text-ink sm:px-4 sm:py-3">
+                    Total
+                  </td>
+                  <td className="px-2 py-2.5 tabular-nums font-semibold text-[#8B3A3A] sm:px-3 sm:py-3">
+                    {fmtGbp(totalPnl)}
+                  </td>
+                  <td className="px-2 py-2.5 text-ink-mid sm:px-3 sm:py-3">—</td>
+                  <td className="px-3 py-2.5 sm:px-4 sm:py-3" />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-3 text-xs text-ink-light">
+            Model explains 94% of today&apos;s P&amp;L ({fmtGbp(-1427)} explained,{" "}
+            {fmtGbp(-97)} residual) · confidence: Low.
+          </p>
+          <p className="mt-1 text-xs text-ink-light">
+            Calibration sample too small — using conservative multipliers.
+          </p>
+
+          <button
+            type="button"
+            className="mt-3 flex cursor-default items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid"
+            tabIndex={-1}
+            aria-hidden
+          >
+            <span className="inline-block translate-y-px">▸</span>
+            Expand position detail
+          </button>
+        </div>
+
+        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
+          <p className={landingAttrSectionLabel}>Physical signals</p>
+          <h4 className="mt-1 font-serif text-lg text-ink">
+            Active signals relevant to your positions
+          </h4>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <article className="rounded-[4px] border-[0.5px] border-ivory-border border-l-[2px] border-l-bull bg-card px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-ink">
+                T_DRAXX-2 · Drax Power Station Unit 2
+              </p>
+              <p className="mt-1 text-[11px] text-ink-mid">1,500 MW offline (unplanned)</p>
+              <p className="mt-2 border-l-2 border-bull pl-2 text-[12px] italic leading-snug text-ink-mid">
+                This supports your long GB baseload position — estimated{" "}
+                <span className="not-italic font-medium text-bull">+£2,700</span> impact
+              </p>
+            </article>
+            <article className="rounded-[4px] border-[0.5px] border-ivory-border border-l-[2px] border-l-bull bg-card px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-ink">
+                T_NEWC-1 · New CCGT unit trip
+              </p>
+              <p className="mt-1 text-[11px] text-ink-mid">420 MW offline (unplanned)</p>
+              <p className="mt-2 border-l-2 border-bull pl-2 text-[12px] italic leading-snug text-ink-mid">
+                This supports your long GB baseload position — estimated{" "}
+                <span className="not-italic font-medium text-bull">+£750</span> impact
+              </p>
+            </article>
+          </div>
+        </div>
+
+        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
+          <p className={landingAttrSectionLabel}>Alignment</p>
+          <h4 className="mt-1 font-serif text-lg text-ink">Book vs physical conditions</h4>
+          <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-5">
+            <div className="relative pt-5">
+              <div className="flex justify-between text-[10px] font-medium uppercase tracking-[0.12em] text-ink-mid">
+                <span>Fully bearish</span>
+                <span>Fully bullish</span>
+              </div>
+              <div className="relative mt-2 h-3 rounded-full bg-gradient-to-r from-[#8B3A3A]/35 via-ivory-dark to-[#1D6B4E]/45">
+                <div
+                  className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-ink"
+                  style={{ left: "50%" }}
+                  title="50%"
+                />
+              </div>
+            </div>
+            <p className="mt-4 text-sm text-ink-mid">
+              Your book is{" "}
+              <span className="font-semibold tabular-nums text-ink">50%</span> aligned with
+              current physical signals. Illustrative caption.
+            </p>
+          </div>
+        </div>
+
+        <div className="border-t-[0.5px] border-ivory-border px-3 py-4 sm:px-4 sm:py-5">
+          <p className={landingAttrSectionLabel}>History</p>
+          <h4 className="mt-1 font-serif text-lg text-ink">Historical P&amp;L</h4>
+          <div className="mt-4 flex h-[100px] items-end gap-1.5 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-3 pb-3 pt-3">
+            {[44, 62, 28, 18, 52, 22, 36].map((pct, i) => (
+              <div
+                key={i}
+                className="min-w-0 flex-1 rounded-sm bg-bull/30"
+                style={{ height: `${pct}%`, maxHeight: "72px" }}
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-center font-mono text-[10px] text-ink-light">
+            Example weekly shape · values not shown
+          </p>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
