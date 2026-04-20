@@ -466,8 +466,7 @@ export default function Home() {
               Every data point, synthesised. In your inbox by 06:00.
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
-              Published at 06:00 GMT every trading day, personalised to your open
-              positions.
+              Published every trading day, personalised to your open positions.
             </p>
           </motion.div>
 
@@ -837,28 +836,17 @@ export default function Home() {
               emphasis={false}
             />
           </div>
-          <div className="mt-10 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowComparison(!showComparison)}
-              aria-expanded={showComparison}
-              className="flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
-            >
-              {showComparison ? "Hide feature comparison" : "Compare all features"}
-              <span aria-hidden className="text-xs">
-                {showComparison ? "\u2191" : "\u2193"}
-              </span>
-            </button>
-            <p className="text-center text-sm text-ink-light">
-              Need more than 5 seats?{" "}
-              <a
-                href="mailto:contact@zephyr.markets"
-                className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
-              >
-                contact@zephyr.markets
-              </a>
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowComparison(!showComparison)}
+            aria-expanded={showComparison}
+            className="mx-auto mt-10 flex w-max items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
+          >
+            {showComparison ? "Hide feature comparison" : "Compare all features"}
+            <span aria-hidden className="text-xs">
+              {showComparison ? "\u2191" : "\u2193"}
+            </span>
+          </button>
           {showComparison ? (
             <div className="mt-6 overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card shadow-sm">
               <table className="w-full min-w-[640px] border-collapse text-left">
@@ -911,6 +899,15 @@ export default function Home() {
               </table>
             </div>
           ) : null}
+          <p className="mt-8 text-center text-sm text-ink-light">
+            Need more than 5 seats?{" "}
+            <a
+              href="mailto:contact@zephyr.markets"
+              className="text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+            >
+              contact@zephyr.markets
+            </a>
+          </p>
         </div>
       </section>
 
