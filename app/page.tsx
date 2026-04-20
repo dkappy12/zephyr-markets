@@ -378,7 +378,7 @@ export default function Home() {
           <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
             <ProductStat
               value="5 markets"
-              label="GB power, TTF, NBP, UKA and EUA — priced and scored side by side"
+              label="GB power, TTF, NBP, UKA and EUA, priced and scored side by side"
             />
             <ProductStat
               value="60 seconds"
