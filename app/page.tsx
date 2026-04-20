@@ -1110,6 +1110,11 @@ const LANDING_FEED_TICKS: string[] = [
   "05:45:52  OPEN-METEO pull          hrs=168 model=IFS",
   "05:44:18  EEX/NGP    front_roll    TTF_Apr26",
   "05:43:06  SYNC       checkpoint    rows=412 merge=06:00:02",
+  "05:42:19  PVLIVE     national      gw=1.12 cf=6.5%",
+  "05:41:44  STQ/NBP    stale_ms=840  adj=HHV",
+  "05:40:02  GIE/AGSI   eu_pct=38.4   d-1=-0.2%",
+  "05:39:17  FRANKFURT  GBP/EUR       fix=daily",
+  "05:38:55  EMBER      EUA_EUR       oilprice_fallback=off",
 ];
 
 function LandingSourceGrid() {
@@ -1126,8 +1131,8 @@ function LandingSourceGrid() {
         </div>
       </div>
 
-      {/* Clipped grid: implies more feed below the fold */}
-      <div className="relative max-h-[min(42rem,62svh)] overflow-hidden">
+      {/* Clipped on small viewports only; full grid on lg+ (no fake void) */}
+      <div className="relative max-h-[min(34rem,68svh)] overflow-hidden lg:max-h-none lg:overflow-visible">
         <div className="grid grid-cols-3 items-start gap-1 bg-ivory-dark/40 p-1">
           {LANDING_SOURCE_TILES.map((tile, i) => (
             <motion.div
@@ -1175,19 +1180,23 @@ function LandingSourceGrid() {
         </div>
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-ivory-dark via-ivory-dark/50 to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-ivory-dark/40 via-ivory-dark/15 to-transparent lg:hidden"
         />
       </div>
 
-      {/* Static tick strip — reads as tail of a live merge log */}
-      <div className="border-t-[0.5px] border-ivory-border/70 bg-ivory-dark/65 px-2 py-2 sm:px-2.5">
-        <div className="space-y-px font-mono text-[6.5px] leading-[1.45] text-ink-light/75">
+      {/* Static tick strip — dense tail of the merge log */}
+      <div className="border-t-[0.5px] border-ivory-border/70 bg-ivory-dark/65 px-2 py-2.5 sm:px-2.5">
+        <div className="space-y-0.5 font-mono text-[6.5px] leading-[1.5] text-ink-light/75">
           {LANDING_FEED_TICKS.map((line) => (
             <p key={line} className="truncate" title={line}>
               {line}
             </p>
           ))}
         </div>
+        <p className="mt-2 border-t border-ivory-border/50 pt-2 font-mono text-[6.5px] leading-snug tracking-tight text-ink-light/60">
+          8 feeds ingested · same ingestion stack as production · brief_run=06:00:00
+          UTC
+        </p>
       </div>
     </div>
   );
