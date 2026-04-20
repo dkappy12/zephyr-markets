@@ -1249,8 +1249,36 @@ function LandingSourceGrid() {
 const landingAttrSectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
-const landingAttrMetricValue =
-  "mt-1.5 text-base font-semibold tabular-nums leading-snug";
+/** Primary line + optional subline; columns without copy use an invisible subline for height parity. */
+function LandingAttrKpiValue({
+  primaryClassName,
+  children,
+  subline,
+}: {
+  primaryClassName: string;
+  children: ReactNode;
+  subline?: ReactNode;
+}) {
+  return (
+    <div className="mt-1.5 space-y-0.5">
+      <p
+        className={`text-base font-semibold tabular-nums leading-tight ${primaryClassName}`}
+      >
+        {children}
+      </p>
+      {subline != null ? (
+        <p className="text-[11px] leading-tight text-ink-mid">{subline}</p>
+      ) : (
+        <p
+          className="invisible text-[11px] leading-tight select-none"
+          aria-hidden
+        >
+          &nbsp;
+        </p>
+      )}
+    </div>
+  );
+}
 
 const LANDING_ATTR_MOCK_GREEN = "#1D6B4E";
 const LANDING_ATTR_MOCK_RED = "#8B3A3A";
@@ -1542,45 +1570,44 @@ function LandingAttributionMock() {
           </p>
         </div>
 
-        <div className="grid items-start gap-x-4 gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="grid items-start gap-x-3 gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3.5 sm:grid-cols-2 sm:px-5 lg:grid-cols-5 lg:gap-y-0">
           <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
-            <p
-              className={`${landingAttrMetricValue} ${
+            <LandingAttrKpiValue
+              primaryClassName={
                 totalPnl >= 0 ? "text-bull" : "text-[#8B3A3A]"
-              }`}
+              }
             >
               {fmtGbp(totalPnl)}
-            </p>
+            </LandingAttrKpiValue>
           </div>
           <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Physical premium score</p>
-            <p className={`${landingAttrMetricValue} text-gold`}>+1.8 FIRMING</p>
+            <LandingAttrKpiValue primaryClassName="text-gold">
+              +1.8 FIRMING
+            </LandingAttrKpiValue>
           </div>
           <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Book alignment</p>
-            <p className={`${landingAttrMetricValue} text-ink-mid`}>
-              MIXED — check breakdown
-            </p>
+            <LandingAttrKpiValue primaryClassName="text-ink-mid" subline="Check breakdown">
+              MIXED
+            </LandingAttrKpiValue>
           </div>
           <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Regime</p>
-            <p
-              className={`${landingAttrMetricValue} uppercase tracking-wide text-ink-mid`}
-            >
+            <LandingAttrKpiValue primaryClassName="uppercase tracking-wide text-ink-mid">
               Gas-dominated
-            </p>
+            </LandingAttrKpiValue>
           </div>
           <div className="min-w-0 sm:col-span-2 lg:col-span-1">
             <p className={landingAttrSectionLabel}>Explained</p>
-            <p className={`${landingAttrMetricValue} text-ink`}>94%</p>
-            <p className="mt-0.5 text-[11px] leading-tight text-ink-mid">
-              High confidence
-            </p>
+            <LandingAttrKpiValue primaryClassName="text-ink" subline="High confidence">
+              94%
+            </LandingAttrKpiValue>
           </div>
         </div>
 
-        <div className="px-3 py-3 pb-5 sm:px-4 sm:py-4 sm:pb-6">
+        <div className="px-4 py-3 pb-5 sm:px-5 sm:py-4 sm:pb-6">
           <p className={landingAttrSectionLabel}>P&amp;L attribution</p>
           <h4 className="mt-1 font-serif text-xl text-ink sm:text-2xl">
             What moved your book today
