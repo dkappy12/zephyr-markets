@@ -310,7 +310,7 @@ export default function Home() {
               animate="show"
               className="font-serif text-[2.125rem] font-medium leading-[1.1] tracking-tight text-ink sm:text-5xl lg:text-[3.15rem]"
             >
-              The GB power market, physically priced. Every 5 minutes.
+              The GB power market, physically priced. In real time.
             </motion.h1>
             <motion.p
               custom={1}
@@ -378,15 +378,15 @@ export default function Home() {
           <div className="grid gap-10 sm:grid-cols-3 sm:gap-6">
             <ProductStat
               value="5 markets"
-              label="GB power, TTF, NBP, UKA and EUA, priced and scored side by side"
+              label="GB power, TTF, NBP, UKA and EUA. Priced and scored side by side."
             />
             <ProductStat
               value="60 seconds"
-              label="REMIT notice to scored signal in your feed"
+              label="REMIT notice to scored signal in your feed."
             />
             <ProductStat
               value="8 sources"
-              label="Elexon BMRS, EEX, Sheffield Solar PV_Live, GIE AGSI, OilPriceAPI, Open-Meteo and more"
+              label="Elexon, EEX, GIE, Open-Meteo and more, reconciled into one stack."
             />
           </div>
         </div>
@@ -414,16 +414,16 @@ export default function Home() {
             <LandingSignalCard
               meta="UNPLANNED · HIGH · 645 MW"
               title="T_DRAXX-4 · Drax Power Station Unit 4"
-              detail="Unavailable from 13 Apr 06:00 - return unknown"
+              detail="Unavailable from 13 Apr 06:00. Return unknown."
               implication="645 MW of baseload removed without notice. Tightens residual demand by ~1.5 GW when wind drops below 8 GW. Watch GB Power front-month."
               severity="high"
-              assetLabel="Other"
+              assetLabel="Baseload"
             />
             <LandingSignalCard
               meta="PLANNED · MEDIUM · 920 MW"
               title="T_MRWD-1 · Mereworth Gas Turbine"
-              detail="Maintenance outage 14-22 Apr"
-              implication="Scheduled peaker maintenance. Market has priced this - no immediate action unless unplanned extension."
+              detail="Maintenance outage 14-22 Apr."
+              implication="Scheduled peaker maintenance. Market has priced this. No immediate action unless the outage extends."
               severity="medium"
               assetLabel="CCGT"
             />
@@ -446,14 +446,14 @@ export default function Home() {
             Every move in your book, explained.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Today&apos;s P&amp;L from your Book, decomposed into physical drivers.
+            Today&apos;s P&amp;L from your book, decomposed into physical drivers.
           </p>
           <LandingAttributionMock />
         </div>
       </section>
 
       <section className="border-b-[0.5px] border-ivory-border bg-ivory-dark/40 py-16 sm:py-24">
-        <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-16">
+        <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
           {/* Heading — full width, centred */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -809,7 +809,7 @@ export default function Home() {
             <PricingCard
               name="Free"
               price="£0"
-              blurb="Physical premium score, morning brief (06:00 UTC), and signal feed. No credit card required."
+              blurb="Physical premium score, morning brief (06:00 GMT), and signal feed with 2h delay. No credit card required."
               cta="Start free"
               href="/signup"
               emphasis={false}
@@ -943,18 +943,6 @@ export default function Home() {
               className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
             >
               Docs
-            </Link>
-            <Link
-              href="/login"
-              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
-            >
-              Log in
-            </Link>
-            <Link
-              href="/signup"
-              className="text-xs font-medium uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
-            >
-              Sign up
             </Link>
           </div>
         </div>
@@ -1171,7 +1159,7 @@ function LandingSourceGrid() {
         </div>
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-ivory-dark/40 via-ivory-dark/15 to-transparent lg:hidden"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-ivory-dark/40 via-ivory-dark/15 to-transparent"
         />
       </div>
 
