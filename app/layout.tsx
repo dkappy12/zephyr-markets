@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+const SITE_DESCRIPTION =
+  "GB and NW European power & gas: live REMIT signals, book-sized morning briefs, and P&L attribution, built for traders who care about the physical stack.";
+
 export const metadata: Metadata = {
   title: {
     default: "Zephyr Markets",
     template: "%s · Zephyr Markets",
   },
-  description:
-    "Real-time physical intelligence for GB and Northwest European energy traders. The physical world, translated into financial intelligence.",
+  description: SITE_DESCRIPTION,
   icons: {
     icon: [{ url: "/favicon.png", type: "image/png" }],
     apple: [{ url: "/apple-touch-icon.png", type: "image/png" }],
@@ -15,16 +17,14 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://zephyr.markets"),
   openGraph: {
     title: "Zephyr Markets",
-    description:
-      "Real-time physical intelligence for GB power and European gas traders. Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief sized to your book.",
+    description: SITE_DESCRIPTION,
     url: "https://zephyr.markets",
     siteName: "Zephyr Markets",
     locale: "en_GB",
     type: "website",
   },
   twitter: {
-    description:
-      "Real-time physical intelligence for GB power and European gas traders. Live REMIT signals, a CCGT-anchored premium score, and a 06:00 brief sized to your book.",
+    description: SITE_DESCRIPTION,
   },
 };
 
