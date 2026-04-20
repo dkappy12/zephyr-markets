@@ -274,12 +274,6 @@ export default function Home() {
           </Link>
           <div className="flex items-center gap-6">
             <Link
-              href="/docs"
-              className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
-            >
-              Docs
-            </Link>
-            <Link
               href="/login"
               className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-mid transition-colors hover:text-ink"
             >
@@ -308,7 +302,7 @@ export default function Home() {
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="font-serif text-[2.125rem] font-medium leading-[1.1] tracking-tight text-ink sm:text-5xl lg:text-[3.15rem]"
+              className="mx-auto max-w-[22ch] font-serif text-[2.125rem] font-medium leading-[1.1] tracking-tight text-ink sm:text-5xl lg:text-[3.15rem]"
             >
               The GB power market, physically priced. In real time.
             </motion.h1>
@@ -343,29 +337,29 @@ export default function Home() {
                   </span>
                 </div>
                 <span className="font-mono text-[10px] tabular-nums tracking-wide text-ink-mid">
-                  06:42 GMT
+                  06:00 GMT
                 </span>
               </div>
               <div className="mt-6 flex flex-wrap items-baseline gap-x-4 gap-y-1">
                 <span className="font-serif text-5xl font-medium leading-none tracking-tight text-ink sm:text-[3.25rem]">
-                  +4.8
+                  +1.8
                 </span>
                 <span className="font-sans text-xs font-semibold uppercase tracking-[0.18em] text-gold">
                   Firming
                 </span>
               </div>
-              <div className="mt-6 space-y-2 font-mono text-[11px] leading-relaxed tabular-nums text-ink-mid sm:text-xs">
+              <div className="mt-6 space-y-2.5 font-mono text-[12px] leading-relaxed tabular-nums text-ink sm:text-[13px]">
                 <p>
-                  Implied £118.40 <span className="text-ink-light">·</span> N2EX £101.12
+                  Implied £93.64 <span className="text-ink-light">·</span> N2EX £84.74 <span className="text-ink-light">·</span> Gap <span className="text-gold">+£8.90</span>
                 </p>
-                <p>
-                  SRMC £89.50 <span className="text-ink-light">·</span> Wind 8.2 GW
+                <p className="text-[11px] text-ink-mid sm:text-xs">
+                  SRMC £101.42 <span className="text-ink-light">·</span> Wind 2.5 GW <span className="text-ink-light">·</span> Residual 20.5 GW
                 </p>
               </div>
               <div className="mt-5 border-t border-ink/10 pt-4 font-mono text-[10px] leading-relaxed text-ink-mid sm:text-[11px]">
-                <p>3,240 MW unplanned REMIT active</p>
+                <p>2,336 MW unplanned REMIT active</p>
                 <p className="mt-1.5 text-ink-light">
-                  Regime: transitional → gas-dominated
+                  Regime: gas-dominated
                 </p>
               </div>
             </div>
@@ -394,7 +388,7 @@ export default function Home() {
 
       <LiveTicker />
 
-      <section className="border-b-[0.5px] border-ivory-border bg-[#E8E0D0] py-20 sm:py-28">
+      <section className="border-b-[0.5px] border-ivory-border bg-ivory py-20 sm:py-28">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -402,39 +396,51 @@ export default function Home() {
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45 }}
           >
-            <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-light">
+              Signal feed
+            </p>
+            <h2 className="mt-3 font-serif text-3xl text-ink sm:text-[2rem]">
               Every REMIT notice, scored in plain English.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
-              Every notice scored, sized, and explained. The same feed you see
-              in-product.
+              60-second ingest from the ELEXON feed. Impact sized in MW and
+              £/MWh. The same cards you work from in-product.
             </p>
           </motion.div>
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          <div className="mt-10 flex flex-col gap-4">
             <LandingSignalCard
-              meta="UNPLANNED · HIGH · 645 MW"
-              title="T_DRAXX-4 · Drax Power Station Unit 4"
-              detail="Unavailable from 13 Apr 06:00. Return unknown."
-              implication="645 MW of baseload removed without notice. Tightens residual demand by ~1.5 GW when wind drops below 8 GW. Watch GB Power front-month."
-              severity="high"
-              assetLabel="Baseload"
+              titleAsset="T_DRAXX-2"
+              middleLine="645 MW offline (of 690 MW normal capacity) · Unplanned · Since 18 Apr 02:18 UTC · Until ~13:50 UTC 18 Apr · BMRS 02:22 UTC"
+              assetTypeLabel="BASELOAD"
+              severity="HIGH"
+              timeIso="2026-04-18T02:18:00.000Z"
+              timeUtc="18 Apr 2026 02:18 UTC"
+              derationPct={100}
+              implicationContext="Severe coal baseload loss overnight. Residual demand tight at 2.5 GW wind — pushes intraday curves toward the £101.42 SRMC anchor."
+              priceImpactLine="~£3/MWh estimated price impact"
             />
             <LandingSignalCard
-              meta="PLANNED · MEDIUM · 920 MW"
-              title="T_MRWD-1 · Mereworth Gas Turbine"
-              detail="Maintenance outage 14-22 Apr."
-              implication="Scheduled peaker maintenance. Market has priced this. No immediate action unless the outage extends."
-              severity="medium"
-              assetLabel="CCGT"
+              titleAsset="T_SUTB-1"
+              middleLine="583 MW offline (of 832 MW normal capacity) · Unplanned · Since 17 Apr 22:40 UTC · No return posted · Partial trip"
+              assetTypeLabel="CCGT"
+              severity="HIGH"
+              timeIso="2026-04-17T22:40:00.000Z"
+              timeUtc="17 Apr 2026 22:40 UTC"
+              updateCount={2}
+              derationPct={70}
+              implicationContext="Major CCGT derate in a gas-dominated regime. Combined with Drax, over 1.2 GW thermal effectively offline at low wind."
+              priceImpactLine="~£3/MWh estimated price impact"
             />
             <LandingSignalCard
-              meta="INTERCONNECTOR · HIGH · 1,000 MW"
-              title="IFA1 · France-GB Interconnector"
-              detail="Reduced capacity from 2,000 MW to 1,000 MW"
-              implication="Half of IFA1 flow removed. With French nuclear at 72% availability, this reduces import optionality during peak demand periods."
-              severity="high"
-              accent="interconnector"
-              assetLabel="Interconnector"
+              titleAsset="T_MRWD-1"
+              middleLine="230 MW offline (of 920 MW normal capacity) · Planned · 14–22 Apr · Unit at 690 MW nominal · Priced in"
+              assetTypeLabel="CCGT"
+              severity="MEDIUM"
+              timeIso="2026-04-14T06:00:00.000Z"
+              timeUtc="14 Apr 2026 06:00 UTC"
+              derationPct={25}
+              implicationContext="Planned peaker rotation; the auction stack has largely priced this window."
+              priceImpactLine="~£1/MWh estimated price impact"
             />
           </div>
         </div>
@@ -442,36 +448,42 @@ export default function Home() {
 
       <section className="border-b-[0.5px] border-ivory-border bg-ivory-dark py-24 sm:py-32">
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
-          <h2 className="text-center font-serif text-3xl text-ink sm:text-4xl">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-light">
+            P&amp;L attribution
+          </p>
+          <h2 className="mt-3 font-serif text-3xl text-ink sm:text-4xl">
             Every move in your book, explained.
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Today&apos;s P&amp;L from your book, decomposed into physical drivers.
+          <p className="mt-3 max-w-xl text-sm text-ink-mid">
+            Wind, gas, carbon, outages. Each driver sized in pounds, every
+            morning.
           </p>
           <LandingAttributionMock />
         </div>
       </section>
 
       <section className="border-b-[0.5px] border-ivory-border bg-ivory-dark/40 py-16 sm:py-24">
-        <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
-          {/* Heading — full width, centred */}
+        <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
+          {/* Heading — left-aligned to break the centred rhythm */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45 }}
-            className="text-center"
           >
-            <h2 className="font-serif text-3xl text-ink sm:text-[2rem]">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-light">
+              Morning brief
+            </p>
+            <h2 className="mt-3 font-serif text-3xl text-ink sm:text-[2rem]">
               Every data point, synthesised. In your inbox by 06:00.
             </h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-mid">
               Published every trading day, personalised to your open positions.
             </p>
           </motion.div>
 
           {/* Two-column layout */}
-          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-5 lg:items-start">
+          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-5 lg:items-stretch">
             {/* Left — nine source tiles */}
             <motion.div
               initial={{ opacity: 0, y: 12 }}
@@ -480,7 +492,8 @@ export default function Home() {
               transition={{ duration: 0.45, delay: 0.05 }}
               className="flex flex-col lg:col-span-2"
             >
-              <p className="mb-3 font-serif text-[15px] italic text-ink-mid">
+              <p className="mb-3 flex items-center gap-2 font-serif text-base italic text-ink-mid">
+                <span className="h-px w-6 bg-ink-light/50" aria-hidden />
                 From this&hellip;
               </p>
               <LandingSourceGrid />
@@ -494,7 +507,10 @@ export default function Home() {
               transition={{ duration: 0.45, delay: 0.1 }}
               className="flex flex-col lg:col-span-3"
             >
-              <p className="mb-3 font-serif text-[15px] italic text-ink-mid">
+              <p className="mb-3 flex items-center gap-2 font-serif text-base italic text-ink">
+                <span className="font-mono not-italic text-[12px] text-ink-light" aria-hidden>
+                  &rarr;
+                </span>
                 &hellip;to this.
               </p>
               <div className="relative">
@@ -518,10 +534,9 @@ export default function Home() {
                         Reliability
                       </p>
                       <p className="mt-1.5 text-[12px] leading-relaxed text-ink-mid">
-                        Confidence HIGH · 10h since generation · Physical premium
-                        context (implied vs N2EX, residual demand) uses the latest model
-                        run when book touchpoints are personalised · personalised
-                        touchpoints active
+                        Confidence HIGH · published 06:00 GMT · premium context
+                        (implied vs N2EX, residual demand) from the 05:55 model run
+                        · personalised touchpoints active
                       </p>
                     </div>
 
@@ -535,11 +550,12 @@ export default function Home() {
                         the £8.90/MWh gap signals the market is undervaluing physical
                         tightness. Wind outturn remains depressed at 2.5 GW with
                         residual demand at 20.5 GW, pushing the system into a
-                        gas-dominated regime well above the 15 GW threshold. DRAXX-2
-                        (645 MW coal unit) remains partially offline through at least
-                        13:50 UTC today following an overnight unplanned outage; SUTB-1
-                        (832 MW) was in forced outage until 08:00 UTC and capacity is
-                        degrading across multiple coal and CCGT assets.
+                        gas-dominated regime well above the 15 GW threshold.                         DRAXX-2
+                        (645 MW coal unit) remains offline through at least 13:50 UTC
+                        following an overnight unplanned outage; SUTB-1 is partially
+                        tripped, generating at 249 MW of 832 MW nominal with no return
+                        time posted, and capacity is degrading across multiple coal and
+                        CCGT assets.
                       </p>
                     </div>
 
@@ -572,16 +588,16 @@ export default function Home() {
                       <p className="mt-3 font-serif text-[16px] leading-relaxed text-ink">
                         The SRMC anchor sits at £101.42/MWh while the market trades
                         £84.74/MWh; if wind acceleration stalls or fails to materialise
-                        and multiple thermal units remain offline (DRAXX-2 still
-                        crippled through 13:50 UTC, TSREP-1 unplanned through 23:00 UTC,
-                        SUTB-1 just recovered), the system could flip to emergency
-                        thermal dependency within hours. The 2,585 MW REMIT capacity
-                        impact modelled suggests significant thermal unavailability
-                        compressed into a period when residual demand is still elevated
-                        at 20.5 GW; a wind forecast miss of just 2 m/s (3.6 GW
-                        equivalent) would force dispatch into the £95&ndash;101 range.
-                        Current market pricing assumes wind delivery and capacity
-                        recovery; neither is guaranteed this morning.
+                        and multiple thermal units remain stressed (DRAXX-2 through
+                        13:50 UTC, SUTB-1 partially tripped with indefinite return,
+                        TSREP-1 unplanned through 23:00 UTC), the system could flip to
+                        emergency thermal dependency within hours. The 2,336 MW of
+                        modelled REMIT capacity impact
+                        is compressed into a period when residual demand is still
+                        elevated at 20.5 GW; a wind forecast miss of just 2 m/s
+                        (3.6 GW equivalent) would force dispatch into the £95&ndash;101
+                        range. Current market pricing assumes wind delivery and
+                        capacity recovery; neither is guaranteed this morning.
                       </p>
                     </section>
 
@@ -615,32 +631,26 @@ export default function Home() {
                         Book touchpoints
                       </p>
                       <p className="mt-2 font-serif text-[15px] leading-relaxed text-ink">
-                        The long 54,000 therm NBP Cal-2028 entered at 97.8 is
-                        underwater by 0.3 pence against current forward valuations,
-                        while the long 42,000 therm Winter-2026 at 114.7 carries 22.25
-                        pence of mark-to-market loss in a transitional regime offering
-                        no demand support at 19.9 GW residual; conversely, both short
-                        positions benefit directly from the 9.76 pound/MWh gap between
-                        market price and physically-implied price, with the short
-                        31,000 therm Summer-2026 at 102.4 and short 22,000 therm
-                        Q1-2028 at 101.2 now 0.1 to 10.75 pence in-the-money as SRMC
-                        anchors at 101.34. The long 12,000 therm DA 2026-04-15 at
-                        108.55 loses 16.1 pence to current cash basis collapse, while
-                        the long 700 tco2 UKA Dec-2026 at 56.8 gains 8.7 pence from
-                        widening EUA&ndash;UKA spread pressures as the short 500 EUA
-                        Dec-2026 at 71.9 absorbs cross-curve arb risk. The single
-                        biggest risk is the 1,050 MW of active REMIT outages returning
-                        to service, which would compress residual demand below 15 GW
-                        and collapse the physically-implied premium entirely; monitor
-                        REMIT releases and TSO capacity notices between 08:00 and 10:00
-                        UTC.
+                        The long 50 MW GB Power Q3-2026 benefits directly from the
+                        £8.90/MWh gap between market and physically-implied price;
+                        at 2.5 GW wind and 20.5 GW residual, the SRMC anchor at
+                        £101.42 sits £16.68 above the current tape, and any delay to
+                        DRAXX-2&apos;s return compounds the firming into the morning peak.
+                        The short 25,000 therm NBP Winter-2026 at 114.7 carries
+                        mark-to-market pressure from the overnight TTF firm; if gas
+                        continues to price the thermal stack, this position absorbs
+                        cross-commodity beta against the long power. The long 700
+                        tco2 UKA Dec-2026 at 56.8 gains from widening EUA&ndash;UKA
+                        spread pressures as UKA firms alongside thermal demand. The
+                        single biggest risk is the 1,050 MW of active REMIT outages
+                        returning to service, which would compress residual demand
+                        below 15 GW and collapse the physically-implied premium;
+                        monitor REMIT releases and TSO capacity notices between 08:00
+                        and 10:00 UTC.
                       </p>
                       <p className="mt-5 border-t border-ivory-border pt-4 font-mono text-[9px] leading-relaxed text-ink-light/70">
-                        Personalised to: Long 54,000 therm NBP Cal-2028 · Long 42,000
-                        therm NBP Winter-2026 · Short 31,000 therm NBP Summer-2026 ·
-                        Short 22,000 therm NBP Q1-2028 · Short 18,000 therm NBP Cal-2028
-                        · Long 12,000 therm NBP DA 2026-04-15 · Long 700 tco2 UKA
-                        Dec-2026 · Short 500 tco2 EUA Dec-2026
+                        Personalised to: Long 50 MW GB Power Q3-2026 · Short 25,000
+                        therm NBP Winter-2026 · Long 700 tco2 UKA Dec-2026
                       </p>
                     </div>
                   </div>
@@ -648,7 +658,7 @@ export default function Home() {
                 {!briefExpanded ? (
                   <div
                     aria-hidden
-                    className="pointer-events-none absolute inset-x-0 bottom-0 h-40 rounded-b-[4px] bg-gradient-to-t from-ivory via-ivory/92 to-transparent"
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-64 rounded-b-[4px] bg-gradient-to-t from-ivory via-ivory/70 to-transparent"
                   />
                 ) : null}
               </div>
@@ -675,7 +685,7 @@ export default function Home() {
         <div className="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8">
           <div className="grid gap-12 lg:grid-cols-2 lg:items-start lg:gap-20">
             <div>
-              <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-ink-light">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-light">
                 Meridian
               </p>
               <h2 className="mt-3 font-serif text-3xl text-ink sm:text-4xl">
@@ -689,15 +699,47 @@ export default function Home() {
               <p className="mt-3 text-sm leading-relaxed text-ink-mid">
                 Most analytics platforms don&apos;t publish their own accuracy. We do.
               </p>
+              <div className="mt-8 grid grid-cols-2 gap-4 border-t-[0.5px] border-ivory-border pt-6 sm:max-w-sm">
+                <div>
+                  <p className="font-sans text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                    Days in production
+                  </p>
+                  <p className="mt-1 font-serif text-2xl text-ink">
+                    {meridianStats != null
+                      ? meridianStats.days_of_data.toLocaleString("en-GB")
+                      : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-sans text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                    Settlement periods scored
+                  </p>
+                  <p className="mt-1 font-serif text-2xl text-ink">
+                    {meridianStats != null
+                      ? meridianStats.filled_count.toLocaleString("en-GB")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-6 text-[11px] leading-relaxed text-ink-light">
+                Every prediction scored against N2EX settlement. Every coefficient
+                update gated on sample size. No hidden benchmarks.
+              </p>
             </div>
             <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-6">
               <div className="flex items-center justify-between border-b border-ivory-border pb-4">
-                <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-light">
-                  Meridian · live accuracy
-                </p>
-                <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-mid">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-bull animate-live-dot-pulse"
+                    aria-hidden
+                  />
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-light">
+                    Meridian · live accuracy
+                  </p>
+                </div>
+                <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-mid">
                   {meridianStats != null
-                    ? `n=${meridianStats.filled_count} settlement periods`
+                    ? `n=${meridianStats.filled_count} periods`
                     : "Live"}
                 </span>
               </div>
@@ -747,32 +789,59 @@ export default function Home() {
 
               {/* MAE by regime */}
               <div className="mt-5">
-                <p className="mb-3 font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+                <p className="mb-3 font-sans text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light">
                   MAE by regime
                 </p>
-                {(["Gas-dominated", "Transitional", "Renewable"] as const).map(
-                  (regimeLabel) => {
+                {(() => {
+                  const regimes = ["Gas-dominated", "Transitional", "Renewable"] as const;
+                  const maxMae = Math.max(
+                    ...regimes.map((label) => {
+                      const row = meridianStats?.regime_stats?.find(
+                        (r) => r.regime === label,
+                      );
+                      return row?.mae ?? 0;
+                    }),
+                    0.01,
+                  );
+                  return regimes.map((regimeLabel) => {
                     const row = meridianStats?.regime_stats?.find(
                       (r) => r.regime === regimeLabel,
                     );
+                    const pct =
+                      row != null && row.mae > 0
+                        ? Math.max(4, Math.min(100, (row.mae / maxMae) * 100))
+                        : 0;
                     return (
                       <div
                         key={regimeLabel}
-                        className="flex items-center justify-between border-b border-ivory-border py-2.5 last:border-0"
+                        className="border-b border-ivory-border py-2.5 last:border-0"
                       >
-                        <span className="text-[12px] text-ink-mid">{regimeLabel}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-[10px] text-ink-light">
-                            {row != null ? `n=${row.n}` : "—"}
-                          </span>
-                          <span className="font-mono text-[12px] tabular-nums text-ink">
-                            {row != null ? `£${row.mae.toFixed(2)}` : "—"}
-                          </span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[12px] text-ink-mid">{regimeLabel}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-[10px] text-ink-light">
+                              {row != null ? `n=${row.n}` : "—"}
+                            </span>
+                            <span className="font-mono text-[12px] tabular-nums text-ink">
+                              {row != null ? `£${row.mae.toFixed(2)}` : "—"}
+                            </span>
+                          </div>
                         </div>
+                        {row != null ? (
+                          <div
+                            className="mt-1.5 h-1 w-full overflow-hidden rounded-[2px] bg-ivory-dark"
+                            aria-hidden
+                          >
+                            <div
+                              className="h-full rounded-[2px] bg-ink/55"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     );
-                  },
-                )}
+                  });
+                })()}
               </div>
 
               {/* Calibration governance */}
@@ -805,7 +874,7 @@ export default function Home() {
               market set.
             </p>
           </div>
-          <div className="mt-12 grid gap-6 md:grid-cols-3">
+          <div className="mt-12 grid items-stretch gap-6 md:grid-cols-3">
             <PricingCard
               name="Free"
               price="£0"
@@ -959,27 +1028,27 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
     meta: "REMIT · 05:42",
     rawLine: "ELEXON/BMRS · REMIT/PUB/202604180542 · msg_8f3a2c1e\u2026",
     rows: [
-      { label: "Drax U4", value: "645 MW U", tone: "text-[#8B3A3A]" },
-      { label: "IFA2", value: "2,028 MW P" },
-      { label: "SCCL-1", value: "400 MW U", tone: "text-[#8B3A3A]" },
-      { label: "T_MRWD-1", value: "920 MW P" },
-      { label: "FDUNT-1", value: "59 MW P" },
-      { label: "Unplanned", value: "3,240 MW" },
-      { label: "24h signals", value: "19 scored" },
-      { label: "+more", value: "6 U · +847 MW", tone: "text-ink-light" },
+      { label: "DRAXX-2", value: "645 MW U", tone: "text-[#8B3A3A]" },
+      { label: "SUTB-1", value: "583 MW U", tone: "text-[#8B3A3A]" },
+      { label: "T_NNGAO-2", value: "59 MW P" },
+      { label: "TSREP-1", value: "410 MW U", tone: "text-[#8B3A3A]" },
+      { label: "T_MRWD-1", value: "230 MW P" },
+      { label: "Unplanned", value: "2,336 MW" },
+      { label: "24h signals", value: "17 scored" },
+      { label: "+more", value: "5 U · +698 MW", tone: "text-ink-light" },
     ],
   },
   {
     meta: "ELEXON · LIVE",
     rawLine: "BMRS/FUELINST · SP=2026-04-18T05:45Z · dataset=PUBLIC\u2026",
     rows: [
-      { label: "Wind", value: "8.2 GW" },
-      { label: "Solar", value: "1.1 GW" },
-      { label: "CCGT", value: "14.2 GW" },
+      { label: "Wind", value: "2.5 GW", tone: "text-[#8B3A3A]" },
+      { label: "Solar", value: "0.2 GW" },
+      { label: "CCGT", value: "17.8 GW" },
       { label: "Nuclear", value: "4.5 GW" },
-      { label: "Pumped", value: "0.4 GW" },
-      { label: "IC net", value: "+2.2 GW imp" },
-      { label: "Residual", value: "22.4 GW" },
+      { label: "Pumped", value: "0.6 GW" },
+      { label: "IC net", value: "+2.4 GW imp" },
+      { label: "Residual", value: "20.5 GW" },
       { label: "+more", value: "14 fuel types", tone: "text-ink-light" },
     ],
   },
@@ -987,13 +1056,13 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
     meta: "PVLIVE · SOLAR",
     rawLine: "sheffield.ac.uk/pvlive · v4/regional/national\u2026",
     rows: [
-      { label: "Current", value: "1.1 GW" },
-      { label: "Today pk", value: "2.8 GW" },
+      { label: "Current", value: "0.2 GW" },
+      { label: "Today pk", value: "1.8 GW" },
       { label: "Capacity", value: "16.9 GW" },
-      { label: "Irrad.", value: "412 W/m\u00b2" },
-      { label: "CF", value: "6.5%" },
-      { label: "vs 7d", value: "+0.2 GW", tone: "text-bull" },
-      { label: "vs norm", value: "-0.8%", tone: "text-[#8B3A3A]" },
+      { label: "Irrad.", value: "184 W/m\u00b2" },
+      { label: "CF", value: "1.2%" },
+      { label: "vs 7d", value: "-0.4 GW", tone: "text-[#8B3A3A]" },
+      { label: "vs norm", value: "-3.1%", tone: "text-[#8B3A3A]" },
       { label: "+more", value: "847 sites", tone: "text-ink-light" },
     ],
   },
@@ -1001,13 +1070,13 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
     meta: "N2EX · DAY-AHEAD",
     rawLine: "BMRS/MID · N2EXMIDP · settlement_period=12\u2026",
     rows: [
-      { label: "Base", value: "\u00a3101.12" },
-      { label: "Peak", value: "\u00a3108.20" },
-      { label: "Off-peak", value: "\u00a394.05" },
-      { label: "Vol base", value: "12.4 GWh" },
-      { label: "1d", value: "+0.4%", tone: "text-bull" },
-      { label: "Pk/Op", value: "+\u00a314.15" },
-      { label: "vs SRMC", value: "\u2212\u00a312.38", tone: "text-ink-mid" },
+      { label: "Base", value: "\u00a384.74" },
+      { label: "Peak", value: "\u00a396.20" },
+      { label: "Off-peak", value: "\u00a378.15" },
+      { label: "Vol base", value: "11.8 GWh" },
+      { label: "1d", value: "+1.6%", tone: "text-bull" },
+      { label: "Pk/Op", value: "+\u00a318.05" },
+      { label: "vs SRMC", value: "\u2212\u00a316.68", tone: "text-[#8B3A3A]" },
       { label: "+more", value: "46 SP/day", tone: "text-ink-light" },
     ],
   },
@@ -1043,13 +1112,13 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
     meta: "METEO · 24H",
     rawLine: "open-meteo · ECMWF_IFS · hourly=168 · step=1h\u2026",
     rows: [
-      { label: "Wind", value: "4\u20139 m/s" },
-      { label: "Min GW", value: "6.1" },
-      { label: "Max GW", value: "9.8" },
-      { label: "Dir.", value: "W-SW" },
-      { label: "Gust", value: "11 m/s" },
-      { label: "vs 7d", value: "+1.5 GW", tone: "text-bull" },
-      { label: "p50 decay", value: "\u22120.8 GW", tone: "text-[#8B3A3A]" },
+      { label: "Wind", value: "0.3\u20137.9 m/s" },
+      { label: "Min GW", value: "2.5", tone: "text-[#8B3A3A]" },
+      { label: "Max GW", value: "5.8" },
+      { label: "Dir.", value: "S-SW" },
+      { label: "Gust", value: "9 m/s" },
+      { label: "vs 7d", value: "\u22123.6 GW", tone: "text-[#8B3A3A]" },
+      { label: "Temp", value: "3.4\u20139.3\u00b0C" },
       { label: "+more", value: "168 hrs", tone: "text-ink-light" },
     ],
   },
@@ -1071,14 +1140,14 @@ const LANDING_SOURCE_TILES: SourceTile[] = [
     meta: "YOUR BOOK · 3 OPEN",
     rawLine: "Supabase/positions · user_id=\u2026f2a9 · asof=06:00\u2026",
     rows: [
-      { label: "GB Pwr Q3", value: "+50 MW" },
-      { label: "NBP Win26", value: "-25k th" },
-      { label: "UKA Dec26", value: "+700 tco2" },
-      { label: "Unreal.", value: "+\u00a34,820", tone: "text-bull" },
-      { label: "VaR 1d", value: "\u00a32,340" },
-      { label: "Margin", value: "\u00a318.2k / 42%" },
-      { label: "Notional", value: "\u00a32.1m" },
-      { label: "+more", value: "2 alerts", tone: "text-ink-light" },
+      { label: "GB Pwr Q3-26", value: "+50 MW" },
+      { label: "NBP Win-26", value: "\u221225k th" },
+      { label: "UKA Dec-26", value: "+700 tco2" },
+      { label: "PnL today", value: "+\u00a3420", tone: "text-bull" },
+      { label: "VaR 1d", value: "\u00a32,140" },
+      { label: "Margin", value: "\u00a316.8k / 38%" },
+      { label: "Notional", value: "\u00a31.8m" },
+      { label: "Alignment", value: "mixed", tone: "text-ink-light" },
     ],
   },
 ];
@@ -1191,11 +1260,11 @@ const LANDING_ATTR_MOCK_TOTAL = "#2C2A26";
 /** Static deltas summing to total P&L; order matches AttributionPageClient waterfall. */
 /** Five-step illustrative bridge (+ Total); full app lists shape, demand, interconnector separately. */
 const LANDING_ATTR_WATERFALL: { label: string; delta: number }[] = [
-  { label: "Wind", delta: -920 },
-  { label: "Gas", delta: -610 },
-  { label: "Carbon", delta: -210 },
-  { label: "REMIT", delta: 460 },
-  { label: "Residual", delta: -244 },
+  { label: "Wind", delta: 540 },
+  { label: "Gas", delta: -420 },
+  { label: "Carbon", delta: 180 },
+  { label: "REMIT", delta: 380 },
+  { label: "Residual", delta: -260 },
 ];
 
 const LANDING_ATTR_TABLE_ROWS: {
@@ -1205,27 +1274,27 @@ const LANDING_ATTR_TABLE_ROWS: {
 }[] = [
   {
     name: "Wind generation",
-    impactGbp: -920,
-    direction: "Δwind −3.64 GW vs 7d baseline · −2.10 £/MWh",
+    impactGbp: 540,
+    direction: "Δwind −3.64 GW vs 7d baseline · +1.25 £/MWh",
   },
   {
     name: "Gas prices (TTF)",
-    impactGbp: -610,
-    direction: "62% SRMC vs DA · −0.85 £/MWh",
+    impactGbp: -420,
+    direction: "62% SRMC vs DA · +0.95 £/MWh",
   },
   {
     name: "Carbon (UKA)",
-    impactGbp: -210,
+    impactGbp: 180,
     direction: "UKA ref £55/t · EF 0.366 t/MWh · 18% of gas stack",
   },
   {
     name: "REMIT outages",
-    impactGbp: 460,
-    direction: "41% system stress · +1.20 £/MWh",
+    impactGbp: 380,
+    direction: "41% system stress · +0.88 £/MWh",
   },
   {
     name: "Residual",
-    impactGbp: -244,
+    impactGbp: -260,
     direction: "unexplained after factor decomposition",
   },
 ];
@@ -1240,16 +1309,20 @@ function LandingAttributionWaterfallSvg() {
     cumMin = Math.min(cumMin, run);
     cumMax = Math.max(cumMax, run);
   }
-  cumMin = Math.min(cumMin, total);
+  cumMin = Math.min(cumMin, total, 0);
   cumMax = Math.max(cumMax, 0, total);
-  const span = cumMax - cumMin || 1;
+  // Add headroom so value labels don't clip against the top/bottom of the chart area.
+  const rawSpan = cumMax - cumMin || 1;
+  const headroom = rawSpan * 0.18;
+  const yMax = cumMax + headroom;
+  const yMin = cumMin - headroom;
+  const span = yMax - yMin || 1;
 
   const W = 800;
-  const H = 208;
+  const H = 240;
   const padL = 8;
   const padR = 8;
   const padT = 12;
-  /** Bottom band for horizontal axis labels (no rotation — avoids clipping). */
   const labelBand = 46;
   const chartW = W - padL - padR;
   const chartH = H - padT - labelBand;
@@ -1258,11 +1331,16 @@ function LandingAttributionWaterfallSvg() {
   const gap = 5;
   const colW = (chartW - gap * (nCols - 1)) / nCols;
 
-  const yAt = (value: number) => padT + chartH * ((cumMax - value) / span);
+  const yAt = (value: number) => padT + chartH * ((yMax - value) / span);
+
+  const fmtDelta = (n: number) => {
+    const sign = n >= 0 ? "+" : "\u2212";
+    return `${sign}\u00A3${Math.abs(Math.round(n)).toLocaleString("en-GB")}`;
+  };
 
   const gridLines: ReactNode[] = [];
   for (let gi = 0; gi <= 4; gi++) {
-    const v = cumMax - (span * gi) / 4;
+    const v = yMax - (span * gi) / 4;
     const y = yAt(v);
     gridLines.push(
       <line
@@ -1278,9 +1356,24 @@ function LandingAttributionWaterfallSvg() {
     );
   }
 
+  // Zero reference line (solid, slightly stronger) so up vs down is unambiguous.
+  const yZero = yAt(0);
+  gridLines.push(
+    <line
+      key="g-zero"
+      x1={padL}
+      y1={yZero}
+      x2={W - padR}
+      y2={yZero}
+      stroke="rgba(44,42,38,0.28)"
+      strokeWidth={1}
+    />,
+  );
+
   const bridgeLines: ReactNode[] = [];
   const bars: ReactNode[] = [];
   const labels: ReactNode[] = [];
+  const valueLabels: ReactNode[] = [];
 
   let cum = 0;
   LANDING_ATTR_WATERFALL.forEach((step, i) => {
@@ -1295,6 +1388,24 @@ function LandingAttributionWaterfallSvg() {
     bars.push(
       <rect key={`b-${i}`} x={x} y={yTop} width={colW} height={h} fill={fill} rx={2} />,
     );
+    // Value label: positive deltas above bar, negative below.
+    const valY = step.delta >= 0 ? yTop - 5 : yBot + 12;
+    valueLabels.push(
+      <text
+        key={`v-${i}`}
+        x={x + colW / 2}
+        y={valY}
+        textAnchor="middle"
+        fill={fill}
+        style={{
+          fontSize: 10,
+          fontFamily: "DM Mono, ui-monospace, monospace",
+          fontWeight: 600,
+        }}
+      >
+        {fmtDelta(step.delta)}
+      </text>,
+    );
     labels.push(
       <text
         key={`l-${i}`}
@@ -1302,8 +1413,8 @@ function LandingAttributionWaterfallSvg() {
         y={labelBaselineY}
         textAnchor="middle"
         dominantBaseline="alphabetic"
-        fill="#6B6760"
-        style={{ fontSize: 7.5, fontFamily: "DM Sans, sans-serif" }}
+        fill="#4a4640"
+        style={{ fontSize: 10, fontFamily: "DM Sans, sans-serif", fontWeight: 500 }}
       >
         {step.label}
       </text>,
@@ -1319,9 +1430,9 @@ function LandingAttributionWaterfallSvg() {
           y1={y}
           x2={x2}
           y2={y}
-          stroke="rgba(44,42,38,0.2)"
-          strokeWidth={1}
-          strokeDasharray="3 3"
+          stroke="rgba(44,42,38,0.45)"
+          strokeWidth={1.5}
+          strokeDasharray="4 2"
         />,
       );
     }
@@ -1345,6 +1456,23 @@ function LandingAttributionWaterfallSvg() {
       rx={2}
     />,
   );
+  const totalValY = total >= 0 ? topTot - 5 : topTot + hTot + 12;
+  valueLabels.push(
+    <text
+      key="v-tot"
+      x={xTot + colW / 2}
+      y={totalValY}
+      textAnchor="middle"
+      fill={LANDING_ATTR_MOCK_TOTAL}
+      style={{
+        fontSize: 11,
+        fontFamily: "DM Mono, ui-monospace, monospace",
+        fontWeight: 700,
+      }}
+    >
+      {fmtDelta(total)}
+    </text>,
+  );
   labels.push(
     <text
       key="ltot"
@@ -1352,8 +1480,8 @@ function LandingAttributionWaterfallSvg() {
       y={labelBaselineY}
       textAnchor="middle"
       dominantBaseline="alphabetic"
-      fill="#6B6760"
-      style={{ fontSize: 7.5, fontFamily: "DM Sans, sans-serif" }}
+      fill="#2c2a26"
+      style={{ fontSize: 10, fontFamily: "DM Sans, sans-serif", fontWeight: 600 }}
     >
       Total
     </text>,
@@ -1367,9 +1495,9 @@ function LandingAttributionWaterfallSvg() {
       y1={yAt(cum)}
       x2={xTot}
       y2={yAt(cum)}
-      stroke="rgba(44,42,38,0.2)"
-      strokeWidth={1}
-      strokeDasharray="3 3"
+      stroke="rgba(44,42,38,0.45)"
+      strokeWidth={1.5}
+      strokeDasharray="4 2"
     />,
   );
 
@@ -1384,6 +1512,7 @@ function LandingAttributionWaterfallSvg() {
         {gridLines}
         {bridgeLines}
         {bars}
+        {valueLabels}
         {labels}
       </svg>
     </div>
@@ -1407,24 +1536,28 @@ function LandingAttributionMock() {
       className="mx-auto mt-10 max-w-[960px]"
     >
       <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card">
-        <div className="border-b-[0.5px] border-ivory-border px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b-[0.5px] border-ivory-border px-4 py-3 sm:px-5">
           <h3 className="font-serif text-2xl text-ink">Attribution</h3>
-          <p className="mt-1 text-sm text-ink-light">
-            How today&apos;s physical drivers are moving your book.
+          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-light">
+            18 Apr · 06:00 GMT
           </p>
         </div>
 
         <div className="grid gap-3 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-5">
           <div>
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-[#8B3A3A]">
+            <p
+              className={`mt-1 text-lg font-semibold tabular-nums ${
+                totalPnl >= 0 ? "text-bull" : "text-[#8B3A3A]"
+              }`}
+            >
               {fmtGbp(totalPnl)}
             </p>
           </div>
           <div>
             <p className={landingAttrSectionLabel}>Physical premium score</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-gold">
-              +0.1 PHYSICAL
+              +1.8 FIRMING
             </p>
           </div>
           <div>
@@ -1436,13 +1569,13 @@ function LandingAttributionMock() {
           <div>
             <p className={landingAttrSectionLabel}>Regime</p>
             <p className="mt-1 text-sm font-semibold uppercase tracking-wide text-ink-mid">
-              Transitional
+              Gas-dominated
             </p>
           </div>
           <div>
             <p className={landingAttrSectionLabel}>Explained</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-ink">94%</p>
-            <p className="mt-1 text-[11px] text-ink-mid">Low confidence</p>
+            <p className="mt-1 text-[11px] text-ink-mid">High confidence</p>
           </div>
         </div>
 
@@ -1490,7 +1623,11 @@ function LandingAttributionMock() {
                   <td className="px-3 py-2 font-semibold text-ink sm:px-4 sm:py-2.5">
                     Total
                   </td>
-                  <td className="px-2 py-2 tabular-nums font-semibold text-[#8B3A3A] sm:px-3 sm:py-2.5">
+                  <td
+                    className={`px-2 py-2 tabular-nums font-semibold sm:px-3 sm:py-2.5 ${
+                      totalPnl >= 0 ? "text-bull" : "text-[#8B3A3A]"
+                    }`}
+                  >
                     {fmtGbp(totalPnl)}
                   </td>
                   <td className="px-2 py-2 pr-3 text-ink-mid sm:px-3 sm:py-2.5 sm:pr-4">
@@ -1502,7 +1639,6 @@ function LandingAttributionMock() {
           </div>
 
           <p className="mt-2 text-xs text-ink-light">
-            Explained share, residual, and confidence update with your book.
             Shape, demand, and interconnector are separate drivers in-product.
           </p>
         </div>
@@ -1511,57 +1647,145 @@ function LandingAttributionMock() {
   );
 }
 
+/** Matches `StructuredSignalCard` / signal-feed page (`BRAND_GREEN` border on implication). */
+const LANDING_SIGNAL_PRICE_BORDER = "#1D6B4E";
+
+function landingSignalAssetPillClass(assetTypeLabel: string): string {
+  const u = assetTypeLabel.toUpperCase();
+  if (u === "CCGT")
+    return "border-amber-700/35 bg-amber-50/80 text-amber-900";
+  return "border-ivory-border bg-ivory text-ink-mid";
+}
+
+function landingSignalSeverityPillClass(s: "HIGH" | "MEDIUM" | "LOW"): string {
+  switch (s) {
+    case "HIGH":
+      return "border-transparent bg-[#8B3A3A] text-white";
+    case "MEDIUM":
+      return "border-transparent bg-[#92400E] text-white";
+    default:
+      return "border-transparent bg-[#4B5320] text-white";
+  }
+}
+
+/** Same breakpoints as `derationBarColor` in `app/dashboard/intelligence/signal-feed/page.tsx`. */
+function landingDerationBarFill(pct: number): string {
+  if (pct >= 99.5 || pct <= 0) return "#8B3A3A";
+  if (pct >= 66) return "#9B3D20";
+  if (pct >= 33) return "#B45309";
+  return "#1D6B4E";
+}
+
+function landingPriceImpactRichText(line: string): ReactNode {
+  const m = line.match(/^(.+?)\s+(estimated price impact)$/i);
+  if (m) {
+    return (
+      <>
+        {m[1]} <span className="font-semibold">{m[2]}</span>
+      </>
+    );
+  }
+  return line;
+}
+
+/**
+ * Static REMIT row styled like `StructuredSignalCard` in
+ * `app/dashboard/intelligence/signal-feed/page.tsx` (title row, MW line, bar, implication).
+ */
 function LandingSignalCard({
-  meta,
-  title,
-  detail,
-  implication,
+  titleAsset,
+  eventLabel = "Generation Outage",
+  assetTypeLabel,
   severity,
-  accent,
-  assetLabel,
+  updateCount,
+  timeIso,
+  timeUtc,
+  middleLine,
+  derationPct,
+  implicationContext,
+  priceImpactLine,
 }: {
-  meta: string;
-  title: string;
-  detail: string;
-  implication: string;
-  severity: "high" | "medium";
-  accent?: "interconnector";
-  assetLabel: string;
+  titleAsset: string;
+  eventLabel?: string;
+  assetTypeLabel: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  updateCount?: number;
+  /** Valid `dateTime` for `<time>` (UTC). */
+  timeIso: string;
+  timeUtc: string;
+  middleLine: string;
+  derationPct: number;
+  implicationContext: string;
+  priceImpactLine?: string;
 }) {
-  const severityClass =
-    severity === "high"
-      ? "border-transparent bg-[#8B3A3A] text-white"
-      : "border-transparent bg-[#92400E] text-white";
-  const accentClass =
-    accent === "interconnector"
-      ? "border-cyan-700/30 bg-cyan-50/80 text-cyan-950"
-      : assetLabel === "CCGT"
-        ? "border-amber-700/35 bg-amber-50/80 text-amber-900"
-        : "border-ivory-border bg-ivory text-ink-mid";
+  const terrPct = Math.max(0, Math.min(100, derationPct));
+  const barFill = landingDerationBarFill(terrPct);
+  const capacityBarLabel =
+    terrPct >= 99.5 ? "FULLY OFFLINE" : `${Math.round(terrPct)}% derated`;
 
   return (
-    <article className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4">
-      <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-        {meta}
-      </p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span
-          className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${accentClass}`}
+    <article className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex flex-wrap items-center gap-2">
+          <h3 className="font-sans text-base font-semibold leading-snug text-ink">
+            {titleAsset}
+            {eventLabel ? (
+              <span className="font-medium text-ink-mid"> — {eventLabel}</span>
+            ) : null}
+          </h3>
+          <span
+            className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${landingSignalAssetPillClass(assetTypeLabel)}`}
+          >
+            {assetTypeLabel}
+          </span>
+          <span
+            className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${landingSignalSeverityPillClass(severity)}`}
+          >
+            {severity}
+          </span>
+          {updateCount != null && updateCount > 1 ? (
+            <span className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.04em] text-ink-mid">
+              {updateCount} updates
+            </span>
+          ) : null}
+        </div>
+        <time
+          className="shrink-0 text-[11px] tabular-nums text-ink-light"
+          dateTime={timeIso}
         >
-          {assetLabel}
-        </span>
-        <span
-          className={`rounded-[3px] border-[0.5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${severityClass}`}
-        >
-          {severity === "high" ? "HIGH" : "MEDIUM"}
-        </span>
+          {timeUtc}
+        </time>
       </div>
-      <h3 className="mt-3 font-sans text-base font-semibold leading-snug text-ink">
-        {title}
-      </h3>
-      <p className="mt-2 text-[13px] leading-relaxed text-ink-mid">{detail}</p>
-      <p className="mt-4 border-t border-ivory-border pt-3 font-serif text-[14px] font-medium leading-relaxed text-ink">
-        {implication}
+      <p className="mt-2 text-sm leading-relaxed text-ink">{middleLine}</p>
+
+      <div className="mt-2">
+        <div
+          className="flex h-2 w-full overflow-hidden rounded-sm"
+          style={{ backgroundColor: "#e5e1d9" }}
+        >
+          <div
+            className="h-full shrink-0 rounded-sm transition-colors"
+            style={{
+              width: `${terrPct}%`,
+              backgroundColor: barFill,
+            }}
+          />
+        </div>
+        <p className="mt-1 text-[10px] font-medium tabular-nums text-ink-mid">
+          {capacityBarLabel}
+        </p>
+      </div>
+
+      <p
+        className="mt-3 border-l-2 pl-3 text-[11px] italic leading-relaxed text-ink-light"
+        style={{ borderColor: LANDING_SIGNAL_PRICE_BORDER }}
+      >
+        {implicationContext}
+        {priceImpactLine ? (
+          <span className="ml-1 not-italic font-medium text-ink-mid">
+            · {landingPriceImpactRichText(priceImpactLine)}
+          </span>
+        ) : null}
       </p>
     </article>
   );
@@ -1599,11 +1823,18 @@ function PricingCard({
 }) {
   return (
     <div
-      className={`rounded-[4px] border-[0.5px] bg-card px-6 py-7 ${
-        emphasis ? "border-gold/55" : "border-ivory-border"
+      className={`relative flex h-full min-h-0 flex-col rounded-[4px] bg-card px-6 py-7 transition-shadow ${
+        emphasis
+          ? "border border-gold shadow-[0_8px_24px_-12px_rgba(140,105,30,0.35)]"
+          : "border-[0.5px] border-ivory-border"
       }`}
     >
-      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
+      {emphasis ? (
+        <span className="absolute -top-2.5 left-6 rounded-[3px] bg-gold px-2 py-0.5 font-sans text-[9px] font-semibold uppercase tracking-[0.14em] text-ivory">
+          Most popular
+        </span>
+      ) : null}
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-mid">
         {name}
       </p>
       <p className="mt-4 font-serif text-4xl text-ink">
@@ -1614,13 +1845,14 @@ function PricingCard({
           </span>
         ) : null}
       </p>
-      <p className="mt-4 text-sm leading-relaxed text-ink-mid">{blurb}</p>
+      <p className="mt-4 shrink-0 text-sm leading-relaxed text-ink-mid">{blurb}</p>
+      <div className="min-h-0 flex-1" aria-hidden />
       <Link
         href={href}
-        className={`mt-8 inline-flex h-10 w-full items-center justify-center rounded-[4px] text-xs font-semibold tracking-[0.08em] transition-colors duration-200 ${
+        className={`mt-5 inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[4px] text-xs font-semibold tracking-[0.08em] transition-colors duration-200 ${
           emphasis
             ? "bg-gold text-ivory hover:bg-[#7a5f1a]"
-            : "border-[0.5px] border-ivory-border bg-ivory text-ink hover:bg-ivory-dark"
+            : "border-[0.5px] border-ink/30 bg-ivory text-ink hover:border-ink hover:bg-ivory-dark"
         }`}
       >
         {cta}
