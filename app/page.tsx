@@ -509,7 +509,7 @@ export default function Home() {
             >
               <p className="mb-3 flex items-center gap-2 font-serif text-base italic text-ink-mid">
                 <span className="h-px w-6 bg-ink-light/50" aria-hidden />
-                To this&hellip;
+                To this.
               </p>
               <div className="relative">
                 <div
