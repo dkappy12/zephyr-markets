@@ -220,8 +220,31 @@ function ChartTooltip({
               ? String(raw)
               : "";
         return (
-          <div key={i} style={{ color: entry.color, marginBottom: 2 }}>
-            {text}: {value}
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 2,
+              color: "var(--ink)",
+            }}
+          >
+            {entry.color ? (
+              <span
+                aria-hidden
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 9999,
+                  flexShrink: 0,
+                  background: entry.color,
+                }}
+              />
+            ) : null}
+            <span>
+              {text}: {value}
+            </span>
           </div>
         );
       })}
