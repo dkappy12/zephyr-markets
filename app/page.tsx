@@ -403,8 +403,8 @@ export default function Home() {
               Every REMIT notice, scored in plain English.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-mid">
-              60-second ingest from the ELEXON feed. Impact sized in MW and
-              £/MWh. The same cards you work from in-product.
+              60-second ingest from the ELEXON feed. Impact sized in MW and £/MWh.
+              The same cards you use in the live product.
             </p>
           </motion.div>
           <div className="mt-10 flex flex-col gap-4">
@@ -507,11 +507,9 @@ export default function Home() {
               transition={{ duration: 0.45, delay: 0.1 }}
               className="flex flex-col lg:col-span-3"
             >
-              <p className="mb-3 flex items-center gap-2 font-serif text-base italic text-ink">
-                <span className="font-mono not-italic text-[12px] text-ink-light" aria-hidden>
-                  &rarr;
-                </span>
-                &hellip;to this.
+              <p className="mb-3 flex items-center gap-2 font-serif text-base italic text-ink-mid">
+                <span className="h-px w-6 bg-ink-light/50" aria-hidden />
+                To this&hellip;
               </p>
               <div className="relative">
                 <div
@@ -738,9 +736,7 @@ export default function Home() {
                   </p>
                 </div>
                 <span className="rounded-[3px] border-[0.5px] border-ivory-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-mid">
-                  {meridianStats != null
-                    ? `n=${meridianStats.filled_count} periods`
-                    : "Live"}
+                  {meridianStats != null ? "Vs N2EX settlement" : "Live"}
                 </span>
               </div>
 
