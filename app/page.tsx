@@ -1557,15 +1557,15 @@ function LandingAttributionMock() {
             </p>
           </div>
           <div>
-            <p className={landingAttrSectionLabel}>Book alignment</p>
-            <p className="mt-1.5 text-base font-semibold leading-tight text-ink-mid">
-              MIXED
-            </p>
-          </div>
-          <div>
             <p className={landingAttrSectionLabel}>Regime</p>
             <p className="mt-1.5 text-base font-semibold uppercase leading-snug tracking-wide text-ink-mid">
               Gas-dominated
+            </p>
+          </div>
+          <div>
+            <p className={landingAttrSectionLabel}>Book alignment</p>
+            <p className="mt-1.5 text-base font-semibold leading-tight text-ink-mid">
+              MIXED
             </p>
           </div>
           <div className="sm:col-span-2 lg:col-span-1">
