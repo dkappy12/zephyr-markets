@@ -445,14 +445,9 @@ export default function Home() {
             Every move in your book, explained.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-sm text-ink-mid">
-            Today&apos;s P&amp;L from your Book, decomposed into physical drivers, the same
-            view as <span className="whitespace-nowrap">Portfolio → Attribution</span>.
+            Today&apos;s P&amp;L from your Book, decomposed into physical drivers.
           </p>
           <LandingAttributionMock />
-          <p className="mx-auto mt-8 max-w-lg text-center text-xs text-ink-light">
-            Power and gas marks refresh about every two minutes; fundamentals follow the
-            live ingestion stack.
-          </p>
         </div>
       </section>
 
@@ -1226,14 +1221,15 @@ function LandingAttributionWaterfallSvg() {
   const span = cumMax - cumMin || 1;
 
   const W = 800;
-  const H = 236;
+  const H = 208;
   const padL = 8;
   const padR = 8;
   const padT = 12;
-  const padB = 78;
+  /** Bottom band for horizontal axis labels (no rotation — avoids clipping). */
+  const labelBand = 46;
   const chartW = W - padL - padR;
-  const chartH = H - padT - padB;
-  const labelPivotY = padT + chartH + 10;
+  const chartH = H - padT - labelBand;
+  const labelBaselineY = H - 10;
   const nCols = LANDING_ATTR_WATERFALL.length + 1;
   const gap = 5;
   const colW = (chartW - gap * (nCols - 1)) / nCols;
@@ -1279,12 +1275,11 @@ function LandingAttributionWaterfallSvg() {
       <text
         key={`l-${i}`}
         x={x + colW / 2}
-        y={labelPivotY}
+        y={labelBaselineY}
         textAnchor="middle"
-        dominantBaseline="middle"
+        dominantBaseline="alphabetic"
         fill="#6B6760"
-        transform={`rotate(-32 ${x + colW / 2} ${labelPivotY})`}
-        style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+        style={{ fontSize: 7.5, fontFamily: "DM Sans, sans-serif" }}
       >
         {step.label}
       </text>,
@@ -1330,11 +1325,11 @@ function LandingAttributionWaterfallSvg() {
     <text
       key="ltot"
       x={xTot + colW / 2}
-      y={H - 16}
+      y={labelBaselineY}
       textAnchor="middle"
-      dominantBaseline="middle"
+      dominantBaseline="alphabetic"
       fill="#6B6760"
-      style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
+      style={{ fontSize: 7.5, fontFamily: "DM Sans, sans-serif" }}
     >
       Total
     </text>,
@@ -1387,10 +1382,7 @@ function LandingAttributionMock() {
       transition={{ duration: 0.45 }}
       className="mx-auto mt-10 max-w-[960px]"
     >
-      <p className="text-center font-mono text-[10px] text-ink-light">
-        Illustrative example · not live data
-      </p>
-      <div className="mt-4 overflow-hidden rounded-[4px] border-[0.5px] border-ivory-border bg-card">
+      <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-card">
         <div className="border-b-[0.5px] border-ivory-border px-4 py-3 sm:px-5">
           <h3 className="font-serif text-2xl text-ink">Attribution</h3>
           <p className="mt-1 text-sm text-ink-light">
