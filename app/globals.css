@@ -3,6 +3,9 @@
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
+/* Ensure utilities referenced only from TS under lib/ are emitted (e.g. shared class strings). */
+@source "../lib/**/*.ts";
+
 @theme inline {
   --font-dm-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-cormorant: "Cormorant Garamond", ui-serif, Georgia, serif;

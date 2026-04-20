@@ -1,9 +1,5 @@
 "use client";
 
-import {
-  briefOneRiskCalloutClassName,
-  briefOneRiskCalloutStyle,
-} from "@/lib/brief-one-risk-callout";
 import { createClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
@@ -599,8 +595,12 @@ export default function Home() {
                   </div>
 
                   <section
-                    className={`${briefOneRiskCalloutClassName} py-4 pr-4`}
-                    style={briefOneRiskCalloutStyle}
+                    className="rounded-[4px] py-4 pl-4 pr-4"
+                    style={{
+                      backgroundColor: "#F1F3EB",
+                      border: "0.5px solid #D9D2C4",
+                      borderLeft: "4px solid #1D6B4E",
+                    }}
                   >
                     <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                       One risk the market may be underpricing

@@ -9,5 +9,6 @@ export const briefOneRiskCalloutClassName = "rounded-[4px] pl-4";
 
 export const briefOneRiskCalloutStyle: CSSProperties = {
   backgroundColor: "#F1F3EB",
+  border: "0.5px solid #D9D2C4",
   borderLeft: "4px solid #1D6B4E",
 };
