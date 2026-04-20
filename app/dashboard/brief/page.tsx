@@ -4,6 +4,10 @@ import { ManuscriptMarginalia } from "@/components/ui/ManuscriptMarginalia";
 import { startStripeSubscriptionCheckout } from "@/lib/billing/start-stripe-checkout";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
+  briefOneRiskCalloutClassName,
+  briefOneRiskCalloutStyle,
+} from "@/lib/brief-one-risk-callout";
+import {
   formatReliabilityConfidenceDesk,
   reliabilityConfidenceFromBriefAgeHours,
 } from "@/lib/reliability/contract";
@@ -673,8 +677,8 @@ export default function BriefPage() {
         </section>
 
         <section
-          className="rounded-[4px] border-l-[2px] border-[#1D6B4E] pl-4"
-          style={{ backgroundColor: "rgba(29, 107, 78, 0.03)" }}
+          className={briefOneRiskCalloutClassName}
+          style={briefOneRiskCalloutStyle}
         >
           <h2 className={sectionLabelClass}>One risk the market may be underpricing</h2>
           <p className="mt-3 font-serif text-lg leading-relaxed text-ink">

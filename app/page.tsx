@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  briefOneRiskCalloutClassName,
+  briefOneRiskCalloutStyle,
+} from "@/lib/brief-one-risk-callout";
 import { createClient } from "@/lib/supabase/client";
 import { TopoBackground } from "@/components/ui/TopoBackground";
 import { TriangulationMesh } from "@/components/ui/TriangulationMesh";
@@ -594,7 +598,10 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="rounded-[3px] border-[0.5px] border-ivory-border bg-ivory-dark px-4 py-4">
+                  <section
+                    className={`${briefOneRiskCalloutClassName} py-4 pr-4`}
+                    style={briefOneRiskCalloutStyle}
+                  >
                     <p className="font-sans text-[9px] font-semibold uppercase tracking-[0.16em] text-ink-light">
                       One risk the market may be underpricing
                     </p>
@@ -605,7 +612,7 @@ export default function Home() {
                       understates scarcity risk in the 09:00&ndash;11:00 UTC window when
                       import support vanishes.
                     </p>
-                  </div>
+                  </section>
 
                   <div>
                     <div className="flex items-center gap-3">
