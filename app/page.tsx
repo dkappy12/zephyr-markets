@@ -1249,6 +1249,9 @@ function LandingSourceGrid() {
 const landingAttrSectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
+const landingAttrMetricValue =
+  "mt-1.5 text-base font-semibold tabular-nums leading-snug";
+
 const LANDING_ATTR_MOCK_GREEN = "#1D6B4E";
 const LANDING_ATTR_MOCK_RED = "#8B3A3A";
 const LANDING_ATTR_MOCK_TOTAL = "#2C2A26";
@@ -1539,39 +1542,41 @@ function LandingAttributionMock() {
           </p>
         </div>
 
-        <div className="grid gap-3 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-5">
-          <div>
+        <div className="grid items-start gap-x-4 gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3 sm:grid-cols-2 sm:px-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
             <p
-              className={`mt-1 text-lg font-semibold tabular-nums ${
+              className={`${landingAttrMetricValue} ${
                 totalPnl >= 0 ? "text-bull" : "text-[#8B3A3A]"
               }`}
             >
               {fmtGbp(totalPnl)}
             </p>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Physical premium score</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-gold">
-              +1.8 FIRMING
-            </p>
+            <p className={`${landingAttrMetricValue} text-gold`}>+1.8 FIRMING</p>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Book alignment</p>
-            <p className="mt-1 text-sm font-semibold leading-snug text-ink-mid">
+            <p className={`${landingAttrMetricValue} text-ink-mid`}>
               MIXED — check breakdown
             </p>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className={landingAttrSectionLabel}>Regime</p>
-            <p className="mt-1 text-sm font-semibold uppercase tracking-wide text-ink-mid">
+            <p
+              className={`${landingAttrMetricValue} uppercase tracking-wide text-ink-mid`}
+            >
               Gas-dominated
             </p>
           </div>
-          <div>
+          <div className="min-w-0 sm:col-span-2 lg:col-span-1">
             <p className={landingAttrSectionLabel}>Explained</p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-ink">94%</p>
-            <p className="mt-1 text-[11px] text-ink-mid">High confidence</p>
+            <p className={`${landingAttrMetricValue} text-ink`}>94%</p>
+            <p className="mt-0.5 text-[11px] leading-tight text-ink-mid">
+              High confidence
+            </p>
           </div>
         </div>
 
