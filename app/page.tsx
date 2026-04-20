@@ -1476,7 +1476,7 @@ function LandingAttributionMock() {
                     {fmtGbp(totalPnl)}
                   </td>
                   <td className="px-2 py-2 pr-3 text-ink-mid sm:px-3 sm:py-2.5 sm:pr-4">
-                    -
+                    —
                   </td>
                 </tr>
               </tbody>
