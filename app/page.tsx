@@ -1249,37 +1249,6 @@ function LandingSourceGrid() {
 const landingAttrSectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
-/** Primary line + optional subline; columns without copy use an invisible subline for height parity. */
-function LandingAttrKpiValue({
-  primaryClassName,
-  children,
-  subline,
-}: {
-  primaryClassName: string;
-  children: ReactNode;
-  subline?: ReactNode;
-}) {
-  return (
-    <div className="mt-1.5 space-y-0.5">
-      <p
-        className={`text-base font-semibold tabular-nums leading-tight ${primaryClassName}`}
-      >
-        {children}
-      </p>
-      {subline != null ? (
-        <p className="text-[11px] leading-tight text-ink-mid">{subline}</p>
-      ) : (
-        <p
-          className="invisible text-[11px] leading-tight select-none"
-          aria-hidden
-        >
-          &nbsp;
-        </p>
-      )}
-    </div>
-  );
-}
-
 const LANDING_ATTR_MOCK_GREEN = "#1D6B4E";
 const LANDING_ATTR_MOCK_RED = "#8B3A3A";
 const LANDING_ATTR_MOCK_TOTAL = "#2C2A26";
@@ -1570,40 +1539,42 @@ function LandingAttributionMock() {
           </p>
         </div>
 
-        <div className="grid items-start gap-x-3 gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3.5 sm:grid-cols-2 sm:px-5 lg:grid-cols-5 lg:gap-y-0">
-          <div className="min-w-0">
+        <div className="flex flex-col gap-y-4 border-b-[0.5px] border-ivory-border bg-ivory px-4 py-3.5 sm:px-5 lg:flex-row lg:flex-nowrap lg:items-start lg:justify-between lg:gap-y-0 lg:divide-x lg:divide-ivory-border lg:[&>div]:px-3 lg:[&>div:first-child]:pl-0 lg:[&>div:last-child]:pr-0">
+          <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Total P&amp;L today</p>
-            <LandingAttrKpiValue
-              primaryClassName={
+            <p
+              className={`mt-1.5 text-base font-semibold tabular-nums leading-tight ${
                 totalPnl >= 0 ? "text-bull" : "text-[#8B3A3A]"
-              }
+              }`}
             >
               {fmtGbp(totalPnl)}
-            </LandingAttrKpiValue>
+            </p>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Physical premium score</p>
-            <LandingAttrKpiValue primaryClassName="text-gold">
+            <p className="mt-1.5 text-base font-semibold tabular-nums leading-tight text-gold">
               +1.8 FIRMING
-            </LandingAttrKpiValue>
+            </p>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Book alignment</p>
-            <LandingAttrKpiValue primaryClassName="text-ink-mid" subline="Check breakdown">
-              MIXED
-            </LandingAttrKpiValue>
+            <p className="mt-1.5 text-base font-semibold leading-tight text-ink-mid">
+              <span>MIXED</span>
+              <span className="font-medium text-ink-mid"> · Check breakdown</span>
+            </p>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Regime</p>
-            <LandingAttrKpiValue primaryClassName="uppercase tracking-wide text-ink-mid">
+            <p className="mt-1.5 text-base font-semibold uppercase leading-tight tracking-wide text-ink-mid">
               Gas-dominated
-            </LandingAttrKpiValue>
+            </p>
           </div>
-          <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+          <div className="min-w-0 lg:shrink">
             <p className={landingAttrSectionLabel}>Explained</p>
-            <LandingAttrKpiValue primaryClassName="text-ink" subline="High confidence">
-              94%
-            </LandingAttrKpiValue>
+            <p className="mt-1.5 text-base font-semibold tabular-nums leading-tight text-ink">
+              <span>94%</span>
+              <span className="font-medium text-ink-mid"> · High confidence</span>
+            </p>
           </div>
         </div>
 
