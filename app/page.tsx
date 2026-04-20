@@ -1226,13 +1226,14 @@ function LandingAttributionWaterfallSvg() {
   const span = cumMax - cumMin || 1;
 
   const W = 800;
-  const H = 186;
+  const H = 236;
   const padL = 8;
   const padR = 8;
   const padT = 12;
-  const padB = 42;
+  const padB = 78;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
+  const labelPivotY = padT + chartH + 10;
   const nCols = LANDING_ATTR_WATERFALL.length + 1;
   const gap = 5;
   const colW = (chartW - gap * (nCols - 1)) / nCols;
@@ -1278,11 +1279,11 @@ function LandingAttributionWaterfallSvg() {
       <text
         key={`l-${i}`}
         x={x + colW / 2}
-        y={H - 6}
-        textAnchor="end"
+        y={labelPivotY}
+        textAnchor="middle"
         dominantBaseline="middle"
         fill="#6B6760"
-        transform={`rotate(-36 ${x + colW / 2} ${H - 6})`}
+        transform={`rotate(-32 ${x + colW / 2} ${labelPivotY})`}
         style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
       >
         {step.label}
@@ -1329,8 +1330,9 @@ function LandingAttributionWaterfallSvg() {
     <text
       key="ltot"
       x={xTot + colW / 2}
-      y={H - 12}
+      y={H - 16}
       textAnchor="middle"
+      dominantBaseline="middle"
       fill="#6B6760"
       style={{ fontSize: 8, fontFamily: "DM Sans, sans-serif" }}
     >
@@ -1428,13 +1430,13 @@ function LandingAttributionMock() {
           </div>
         </div>
 
-        <div className="px-3 py-3 sm:px-4 sm:py-4">
+        <div className="px-3 py-3 pb-5 sm:px-4 sm:py-4 sm:pb-6">
           <p className={landingAttrSectionLabel}>P&amp;L attribution</p>
           <h4 className="mt-1 font-serif text-xl text-ink sm:text-2xl">
             What moved your book today
           </h4>
 
-          <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-1 py-1.5">
+          <div className="mt-3 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-1 pb-2 pt-1.5">
             <LandingAttributionWaterfallSvg />
           </div>
 
