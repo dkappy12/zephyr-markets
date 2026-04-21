@@ -9,7 +9,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
 - Storage: polls GIE AGSI (GB + DE/FR/IT/NL/AT) → Supabase `storage_levels`
   (upsert by report_date + location).
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
-  `market_prices` (upsert by price_date + settlement_period + market).
+  `market_prices` (upsert by price_date + settlement_period + market). One-off
+  historical: `python main.py backfill [--days 150] [--nbp-only|--mid-only]`.
 - TTF/NBP gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - FX rates: Frankfurter EUR/GBP daily fix → Supabase `fx_rates` (upsert on rate_date + base + quote).
 - Carbon: Ember EUA + derived UKA → Supabase `carbon_prices` (upsert on price_date + hub).
@@ -40,6 +41,7 @@ Environment:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import csv
 import io
@@ -114,6 +116,11 @@ MARKET_INDEX_POLL_MINUTES = 30
 
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
+# Daily OHLCV; d1/d2 = YYYYMMDD. `Close` = NBP p/th. Used by `main.py backfill`.
+STOOQ_NBP_DAILY_CSV = (
+    "https://stooq.com/q/d/l/?s=nf.f&i=d&d1={d1}&d2={d2}"
+)
+NBP_STOOQ_BACKFILL_CHUNK_DAYS = 200
 
 # Absolute sanity bounds on NBP close values published by the Stooq NF.F
 # feed. These are write-time guardrails: if Stooq ever prints a value outside
@@ -1903,9 +1910,8 @@ def _mid_volume_mwh(row: dict[str, Any]) -> float | None:
     return None
 
 
-def _mid_utc_day_bounds_iso() -> tuple[str, str, str]:
-    """Return (from, to) ISO 8601 Z for the current UTC calendar day, and YYYY-MM-DD."""
-    today = datetime.now(timezone.utc).date()
+def _mid_utc_day_bounds_for_date(today: date) -> tuple[str, str, str]:
+    """Return (from, to) ISO 8601 Z for UTC ``today``, and YYYY-MM-DD."""
     start = datetime(
         today.year, today.month, today.day, 0, 0, 0, tzinfo=timezone.utc
     )
@@ -1914,6 +1920,11 @@ def _mid_utc_day_bounds_iso() -> tuple[str, str, str]:
     )
     zfmt = "%Y-%m-%dT%H:%M:%SZ"
     return start.strftime(zfmt), end.strftime(zfmt), today.isoformat()
+
+
+def _mid_utc_day_bounds_iso() -> tuple[str, str, str]:
+    """Return (from, to) ISO 8601 Z for the current UTC calendar day, and YYYY-MM-DD."""
+    return _mid_utc_day_bounds_for_date(datetime.now(timezone.utc).date())
 
 
 def _mid_build_upsert_rows(
@@ -2029,11 +2040,16 @@ def _parse_mid_http_body(text: str) -> Any:
     return None
 
 
-async def fetch_market_prices() -> None:
-    """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
-    _require_supabase_env()
-    from_iso, to_iso, settlement_date = _mid_utc_day_bounds_iso()
-    fetched_at = datetime.now(timezone.utc).isoformat()
+async def fetch_market_prices_for_date(
+    http: httpx.AsyncClient,
+    settlement_day: date,
+    fetched_at: str,
+) -> int:
+    """
+    Fetch Elexon BMRS MID for one UTC calendar day and upsert into market_prices.
+    Returns the number of rows upserted (0 on failure or empty data).
+    """
+    from_iso, to_iso, settlement_date = _mid_utc_day_bounds_for_date(settlement_day)
 
     base_params: dict[str, str] = {
         "from": from_iso,
@@ -2045,92 +2061,304 @@ async def fetch_market_prices() -> None:
     dataset_params = {**base_params, "format": "json"}
     stream_params = dict(base_params)
 
+    resp = await http.get(
+        MID_DATASET_URL, params=dataset_params, timeout=HTTP_TIMEOUT
+    )
+    logger.info(
+        "n2ex_cycle: GET %s status=%s date=%s",
+        MID_DATASET_URL,
+        resp.status_code,
+        settlement_date,
+    )
+    logger.debug("n2ex_cycle: raw MID response body: %s", resp.text)
+
+    if resp.status_code == 404:
+        resp = await http.get(
+            MID_STREAM_URL, params=stream_params, timeout=HTTP_TIMEOUT
+        )
+        logger.info(
+            "n2ex_cycle: GET %s status=%s",
+            MID_STREAM_URL,
+            resp.status_code,
+        )
+        logger.debug("n2ex_cycle: raw MID stream response body: %s", resp.text)
+
+    if resp.status_code == 404:
+        logger.error(
+            "n2ex_cycle: MID dataset and stream both returned 404 date=%s",
+            settlement_date,
+        )
+        return 0
+
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "n2ex_cycle: MID HTTP error status=%s url=%s date=%s",
+            e.response.status_code if e.response is not None else "?",
+            str(e.request.url) if e.request else "?",
+            settlement_date,
+        )
+        return 0
+
+    try:
+        payload = resp.json()
+    except json.JSONDecodeError:
+        payload = _parse_mid_http_body(resp.text)
+    if not isinstance(payload, dict):
+        logger.error(
+            "n2ex_cycle: MID response is not a JSON object date=%s",
+            settlement_date,
+        )
+        return 0
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        logger.warning(
+            "n2ex_cycle: missing or invalid data[] for %s",
+            settlement_date,
+        )
+        return 0
+
+    out = _mid_build_upsert_rows(data, settlement_date, fetched_at)
+
+    if not out:
+        logger.warning(
+            "n2ex_cycle: no MID rows to upsert for %s (data len=%s)",
+            settlement_date,
+            len(data),
+        )
+        return 0
+
+    await upsert_market_prices_http(http, out)
+
+    avg_price = sum(x["price_gbp_mwh"] for x in out) / len(out)
+    logger.info(
+        "n2ex_cycle: upserted %s rows for %s (average price: £%.2f/MWh)",
+        len(out),
+        settlement_date,
+        avg_price,
+    )
+    return len(out)
+
+
+async def fetch_market_prices() -> None:
+    """Fetch today's MID dataset from Elexon BMRS and upsert into market_prices."""
+    _require_supabase_env()
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    day = datetime.now(timezone.utc).date()
     async with httpx.AsyncClient(
         headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Ingestion/1.0"},
         follow_redirects=True,
     ) as http:
-        resp = await http.get(
-            MID_DATASET_URL, params=dataset_params, timeout=HTTP_TIMEOUT
-        )
-        logger.info(
-            "n2ex_cycle: GET %s status=%s",
-            MID_DATASET_URL,
-            resp.status_code,
-        )
-        logger.debug(
-            "n2ex_cycle: raw MID response body: %s",
-            resp.text,
-        )
+        await fetch_market_prices_for_date(http, day, fetched_at)
 
-        if resp.status_code == 404:
-            resp = await http.get(
-                MID_STREAM_URL, params=stream_params, timeout=HTTP_TIMEOUT
+
+async def backfill_mid_historical(
+    days: int,
+    pause_s: float = 0.25,
+) -> int:
+    """
+    Pull Elexon MID for each UTC calendar day in [today - days, today] and upsert.
+    Returns total market_prices rows written (sum over days).
+    """
+    _require_supabase_env()
+    if days < 1:
+        return 0
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    total = 0
+    d = start
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    async with httpx.AsyncClient(
+        headers={"Accept": "application/json", "User-Agent": "ZephyrMarkets-MID-Backfill/1.0"},
+        follow_redirects=True,
+    ) as http:
+        while d <= end:
+            n = await fetch_market_prices_for_date(http, d, fetched_at)
+            total += n
+            d += timedelta(days=1)
+            if d <= end and pause_s > 0:
+                await asyncio.sleep(pause_s)
+    logger.info(
+        "backfill_mid: finished %d calendar days (%s → %s), %d market_price rows",
+        (end - start).days + 1,
+        start,
+        end,
+        total,
+    )
+    return total
+
+
+def _parse_stooq_nbp_daily_csv(text: str) -> list[tuple[date, float]]:
+    """
+    Stooq /q/d/l/ daily: header Date,Open,High,Low,Close,Volume; Date is YYYY-MM-DD.
+    Returns (gas day, close p/th) with invalid / out-of-range prices skipped later.
+    """
+    text = (text or "").strip()
+    if text.startswith("\ufeff"):
+        text = text[1:].lstrip()
+    if not text:
+        return []
+    if "no data" in text.lower() and len(text) < 80:
+        return []
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return []
+    header = [c.strip().lower() for c in rows[0]]
+    out: list[tuple[date, float]] = []
+    if "close" in header and ("date" in header or "time" in header):
+        di = header.index("date") if "date" in header else 0
+        ci = header.index("close")
+        for parts in rows[1:]:
+            if len(parts) <= max(di, ci):
+                continue
+            raw_d = (parts[di] or "").strip()[:10]
+            raw_c = (parts[ci] or "").strip()
+            try:
+                d_parsed = _stooq_parse_csv_date(raw_d)
+                cl = float(raw_c.replace(",", "."))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if d_parsed is None or not math.isfinite(cl):
+                continue
+            out.append((d_parsed, cl))
+    else:
+        for parts in rows:
+            if not parts:
+                continue
+            try:
+                if len(parts) >= 7 and (parts[0] or "").upper().startswith("NF"):
+                    # Symbol,Date,Time,Open,High,Low,Close,Volume
+                    raw_d = (parts[1] or "").strip()[:10]
+                    cl = float((parts[6] or "0").replace(",", "."))
+                elif len(parts) >= 5:
+                    raw_d = (parts[0] or "").strip()[:10]
+                    cl = float((parts[4] or "0").replace(",", "."))
+                else:
+                    continue
+                d_parsed = _stooq_parse_csv_date(raw_d)
+            except (TypeError, ValueError, IndexError, OverflowError):
+                continue
+            if d_parsed is None or not math.isfinite(cl):
+                continue
+            out.append((d_parsed, cl))
+    return out
+
+
+def _stooq_parse_csv_date(raw: str) -> date | None:
+    s = (raw or "").strip().replace("-", "")
+    if len(s) >= 8 and s[:8].isdigit():
+        y, m, d0 = int(s[:4]), int(s[4:6]), int(s[6:8])
+        return date(y, m, d0)
+    try:
+        return date.fromisoformat((raw or "")[:10])
+    except ValueError:
+        return None
+
+
+async def backfill_nbp_stooq_historical(
+    days: int,
+) -> int:
+    """
+    Load Stooq NBP daily closes into gas_prices (hub NBP), chunked by calendar range.
+    Returns number of row dicts sent to PostgREST (after sanity filter).
+    """
+    _require_supabase_env()
+    if days < 1:
+        return 0
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    written = 0
+    d0 = start
+    async with httpx.AsyncClient(
+        headers={
+            "Accept": "text/csv,text/plain,*/*",
+            "User-Agent": "ZephyrMarkets-NBP-Backfill/1.0",
+        },
+        follow_redirects=True,
+        timeout=60.0,
+    ) as http:
+        while d0 <= end:
+            d1 = min(
+                d0 + timedelta(days=NBP_STOOQ_BACKFILL_CHUNK_DAYS - 1),
+                end,
             )
+            url = STOOQ_NBP_DAILY_CSV.format(
+                d1=d0.strftime("%Y%m%d"),
+                d2=d1.strftime("%Y%m%d"),
+            )
+            try:
+                resp = await http.get(url)
+            except httpx.HTTPError as e:
+                logger.error("nbp_backfill: HTTP error %s for %s", e, url)
+                d0 = d1 + timedelta(days=1)
+                continue
+            if not resp.is_success:
+                logger.warning(
+                    "nbp_backfill: Stooq status=%s for %s–%s",
+                    resp.status_code,
+                    d0,
+                    d1,
+                )
+                d0 = d1 + timedelta(days=1)
+                continue
+            parsed = _parse_stooq_nbp_daily_csv(resp.text)
+            batch: list[dict[str, Any]] = []
+            for gas_day, px in parsed:
+                if not (NBP_SANITY_MIN_PTH <= px <= NBP_SANITY_MAX_PTH):
+                    continue
+                dt_utc = datetime(
+                    gas_day.year,
+                    gas_day.month,
+                    gas_day.day,
+                    0,
+                    0,
+                    0,
+                    tzinfo=timezone.utc,
+                )
+                batch.append(
+                    {
+                        "price_time": dt_utc.isoformat(),
+                        "hub": HUB_NBP,
+                        "price_eur_mwh": px,
+                        "source": "Stooq UK Natural Gas ICE NF.F (d/l backfill)",
+                        "fetched_at": fetched_at,
+                    }
+                )
+            for i in range(0, len(batch), 500):
+                chunk = batch[i : i + 500]
+                await upsert_gas_prices_http(http, chunk)
+                written += len(chunk)
             logger.info(
-                "n2ex_cycle: GET %s status=%s",
-                MID_STREAM_URL,
-                resp.status_code,
+                "nbp_backfill: chunk %s–%s → %d Stooq rows (sanity-filtered) upserted",
+                d0,
+                d1,
+                len(batch),
             )
-            logger.debug(
-                "n2ex_cycle: raw MID stream response body: %s",
-                resp.text,
-            )
+            d0 = d1 + timedelta(days=1)
+    logger.info("nbp_backfill: total gas_prices rows upserted: %d", written)
+    return written
 
-        if resp.status_code == 404:
-            logger.error(
-                "n2ex_cycle: MID dataset and stream both returned 404 date=%s",
-                settlement_date,
-            )
-            return
 
-        try:
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                "n2ex_cycle: MID HTTP error status=%s url=%s",
-                e.response.status_code if e.response is not None else "?",
-                str(e.request.url) if e.request else "?",
-            )
-            return
-
-        try:
-            payload = resp.json()
-        except json.JSONDecodeError:
-            payload = _parse_mid_http_body(resp.text)
-        if not isinstance(payload, dict):
-            logger.error(
-                "n2ex_cycle: MID response is not a JSON object date=%s",
-                settlement_date,
-            )
-            return
-
-        data = payload.get("data")
-        if not isinstance(data, list):
-            logger.warning(
-                "n2ex_cycle: missing or invalid data[] for %s",
-                settlement_date,
-            )
-            return
-
-        out = _mid_build_upsert_rows(data, settlement_date, fetched_at)
-
-        if not out:
-            logger.warning(
-                "n2ex_cycle: no MID rows to upsert for %s (data len=%s)",
-                settlement_date,
-                len(data),
-            )
-            return
-
-        await upsert_market_prices_http(http, out)
-
-        avg_price = sum(x["price_gbp_mwh"] for x in out) / len(out)
-        logger.info(
-            "n2ex_cycle: upserted %s rows for %s (average price: £%.2f/MWh)",
-            len(out),
-            settlement_date,
-            avg_price,
-        )
+async def run_historical_backfill(
+    days: int,
+    *,
+    nbp: bool = True,
+    mid: bool = True,
+    mid_pause_s: float = 0.25,
+) -> None:
+    """CLI entry: fill gas_prices (NBP) and/or market_prices (MID) for recent history."""
+    if days < 1:
+        raise ValueError("days must be at least 1")
+    if not nbp and not mid:
+        raise ValueError("Nothing to do: enable nbp and/or mid.")
+    if nbp:
+        await backfill_nbp_stooq_historical(days)
+    if mid:
+        await backfill_mid_historical(days, pause_s=mid_pause_s)
 
 
 def scheduled_market_prices() -> None:
@@ -5905,4 +6133,53 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "backfill":
+        bp = argparse.ArgumentParser(
+            description=(
+                "Backfill NBP (Stooq d/l) and/or GB day-ahead MID (Elexon) into "
+                "Supabase. Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. "
+                "Optional: ELEXON_API_KEY (same as live MID ingestion)."
+            ),
+        )
+        bp.add_argument(
+            "--days",
+            type=int,
+            default=150,
+            help="Calendar days to cover from today (UTC), inclusive of endpoints window",
+        )
+        bg = bp.add_mutually_exclusive_group()
+        bg.add_argument(
+            "--nbp-only",
+            action="store_true",
+            help="Only backfill NBP in gas_prices from Stooq",
+        )
+        bg.add_argument(
+            "--mid-only",
+            action="store_true",
+            help="Only backfill N2EX/APX market_prices from Elexon MID (per day)",
+        )
+        bp.add_argument(
+            "--mid-pause",
+            type=float,
+            default=0.25,
+            help="Seconds to wait between Elexon requests (default 0.25)",
+        )
+        args = bp.parse_args(sys.argv[2:])
+        do_nbp = not args.mid_only
+        do_mid = not args.nbp_only
+        if args.days < 1:
+            bp.error("--days must be at least 1")
+        try:
+            asyncio.run(
+                run_historical_backfill(
+                    args.days,
+                    nbp=do_nbp,
+                    mid=do_mid,
+                    mid_pause_s=args.mid_pause,
+                )
+            )
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+    else:
+        main()
