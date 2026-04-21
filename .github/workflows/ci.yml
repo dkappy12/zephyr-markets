@@ -47,3 +47,17 @@ jobs:
           # Use QUALITY_GATE_STRICT=1 locally or in trust-report for release gating.
           export QUALITY_GATE_STRICT=0
           npm run quality:gate
+
+      # Regression guard against feed/backfill bugs that land silently-wrong
+      # rows in gas_prices or carbon_prices. Mirrors the ingestion-agent
+      # write-time sanity ranges (python-agents/ingestion-agent/main.py) so
+      # that any ad-hoc script bypassing ingestion still gets caught here.
+      # Non-strict on merges so a legacy bad row cannot wedge the queue;
+      # release/trust-report jobs should run with DATA_HEALTH_STRICT=1.
+      - name: Data-health check (gas_prices, carbon_prices)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATA_HEALTH_STRICT: "0"
+        run: npm run data:health

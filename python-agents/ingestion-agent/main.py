@@ -128,6 +128,19 @@ STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
 # lib/portfolio/gas-aggregate.ts.
 NBP_SANITY_MIN_PTH = 30.0
 NBP_SANITY_MAX_PTH = 300.0
+
+# Same defense applied to EUA/UKA carbon prices written by fetch_carbon_prices.
+# EUA has traded €5-100/t across Phase 3 and Phase 4 of the EU ETS; we widen
+# to €300/t at the top to allow for a genuine crisis-level spike without
+# fighting the data. Values below €5/t suggest a unit-confusion bug (cents
+# vs euros, $/tCO2e-of-CO2e vs $/tCO2) or a broken OilPriceAPI response.
+# UKA is derived from EUA minus the ~£18 CPS in the same function, so a
+# sane EUA implies a sane UKA automatically; we still guard it explicitly
+# to catch a CPS-mispriced scenario or a broken FX rate.
+EUA_SANITY_MIN_EUR_T = 5.0
+EUA_SANITY_MAX_EUR_T = 300.0
+UKA_SANITY_MIN_GBP_T = 5.0
+UKA_SANITY_MAX_GBP_T = 300.0
 OILPRICE_API_URL = "https://api.oilpriceapi.com/v1/prices/latest"
 OILPRICE_API_KEY = os.environ.get("OILPRICE_API_KEY", "").strip()
 ELEXON_FUELINST_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELINST"
@@ -3841,6 +3854,40 @@ async def fetch_carbon_prices(http: httpx.AsyncClient) -> None:
 
     eua_gbp_per_t = eua_eur_per_t * gbp_per_eur
     uka_gbp_per_t = max(0.0, eua_gbp_per_t - CPS_GBP_PER_T)
+
+    # Write-time sanity range for carbon. Same pattern as the NBP guardrail:
+    # reject the whole cycle rather than upsert silently-wrong values. Catches
+    # OilPriceAPI unit drift, bad FX rates that scale EUA_GBP implausibly, or
+    # any future manual backfill that targets carbon_prices with broken math.
+    if (
+        not math.isfinite(eua_eur_per_t)
+        or not (EUA_SANITY_MIN_EUR_T <= eua_eur_per_t <= EUA_SANITY_MAX_EUR_T)
+    ):
+        logger.error(
+            "carbon_cycle: EUA %.3f €/t is outside sanity range [%.0f, %.0f]; "
+            "suspected feed artefact, wrong units, or broken ticker. "
+            "Skipping upsert to avoid poisoning carbon_prices.",
+            eua_eur_per_t,
+            EUA_SANITY_MIN_EUR_T,
+            EUA_SANITY_MAX_EUR_T,
+        )
+        return
+    if (
+        not math.isfinite(uka_gbp_per_t)
+        or not (UKA_SANITY_MIN_GBP_T <= uka_gbp_per_t <= UKA_SANITY_MAX_GBP_T)
+    ):
+        logger.error(
+            "carbon_cycle: UKA %.3f £/t (derived from EUA=%.3f €/t, FX=%.4f, "
+            "CPS=%.2f) is outside sanity range [%.0f, %.0f]; suspected broken "
+            "FX or CPS value. Skipping upsert.",
+            uka_gbp_per_t,
+            eua_eur_per_t,
+            gbp_per_eur,
+            CPS_GBP_PER_T,
+            UKA_SANITY_MIN_GBP_T,
+            UKA_SANITY_MAX_GBP_T,
+        )
+        return
 
     fetched_at = datetime.now(timezone.utc).isoformat()
     rows = [
