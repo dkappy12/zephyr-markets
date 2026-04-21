@@ -10,7 +10,8 @@ Zephyr Markets ingestion agent — REMIT (Elexon BMRS) + weather (Open-Meteo ECM
   (upsert by report_date + location).
 - N2EX MID: polls BMRS `datasets/MID` (optional `MID/stream` fallback) → Supabase
   `market_prices` (upsert by price_date + settlement_period + market). One-off
-  historical: `python main.py backfill [--days 150] [--nbp-only|--mid-only]`.
+  historical: `python main.py backfill …` or
+  `python main.py backfill --ttf-deprecated-nbp --days 150` (TTF → NBP proxy).
 - TTF/NBP gas: EEX NGP CSV → Supabase `gas_prices` (upsert on price_time + hub).
 - FX rates: Frankfurter EUR/GBP daily fix → Supabase `fx_rates` (upsert on rate_date + base + quote).
 - Carbon: Ember EUA + derived UKA → Supabase `carbon_prices` (upsert on price_date + hub).
@@ -156,6 +157,11 @@ GAS_PRICE_SOURCE_DEFAULT = "EEX NGP"
 SOLAR_SOURCE_DEFAULT = "Sheffield Solar PV_Live"
 HUB_TTF = "TTF"
 HUB_NBP = "NBP"
+# Must match `NBP_DEPRECATED_YAHOO_HUB` in `lib/portfolio/gas-aggregate.ts`.
+HUB_NBP_DEPRECATED = "NBP_DEPRECATED_YAHOO_BACKFILL"
+# Match `book.ts` / `gas-aggregate.ts` for TTF → implied NBP p/th sanity.
+MWH_TO_THERM = 34.121
+TTF_DERIV_GBP_PER_EUR_DEFAULT = 0.86
 HUB_EUA = "EUA"
 HUB_UKA = "UKA"
 # Reference URL for EUA market context (ingestion uses Ember API + DB fallback).
@@ -2340,6 +2346,202 @@ async def backfill_nbp_stooq_historical(
             )
             d0 = d1 + timedelta(days=1)
     logger.info("nbp_backfill: total gas_prices rows upserted: %d", written)
+    return written
+
+
+def _ttf_eur_mwh_to_nbp_pth(ttf_eur_mwh: float, gbp_per_eur: float) -> float:
+    """Match `ttfToNbpPencePerTherm` in `lib/portfolio/book.ts`."""
+    gbp_mwh = ttf_eur_mwh * gbp_per_eur
+    return (gbp_mwh / MWH_TO_THERM) * 100.0
+
+
+async def _load_fx_gbp_per_eur_by_date(
+    client: httpx.AsyncClient, start: date, end: date
+) -> dict[date, float]:
+    """EUR→GBP spot by `rate_date` (one row per day from `fx_rates`)."""
+    h = {**_supabase_auth_headers(), "Range-Unit": "items"}
+    out: dict[date, float] = {}
+    # Include end date in the filter.
+    end_next = end + timedelta(days=1)
+    u = (
+        f"{_fx_rates_rest_url()}"
+        f"?base=eq.EUR&quote=eq.GBP"
+        f"&rate_date=gte.{start.isoformat()}"
+        f"&rate_date=lt.{end_next.isoformat()}"
+        f"&select=rate_date,rate&order=rate_date.asc&limit=1000"
+    )
+    r = await client.get(u, headers=h, timeout=HTTP_TIMEOUT)
+    r.raise_for_status()
+    rows = r.json()
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rd = row.get("rate_date")
+        try:
+            if rd is not None and str(rd).strip():
+                d = date.fromisoformat(str(rd)[:10])
+            else:
+                continue
+        except ValueError:
+            continue
+        try:
+            rate = float(row.get("rate"))
+        except (TypeError, ValueError):
+            continue
+        if rate > 0 and math.isfinite(rate):
+            out[d] = rate
+    return out
+
+
+def _fx_forward_fill(
+    by_date: dict[date, float], start: date, end: date, default: float
+) -> dict[date, float]:
+    """Per calendar day in [start, end], use known FX or carry forward (else default)."""
+    out: dict[date, float] = {}
+    last = default
+    d = start
+    while d <= end:
+        if d in by_date:
+            last = by_date[d]
+        out[d] = last
+        d += timedelta(days=1)
+    return out
+
+
+async def _load_ttf_mean_eur_mwh_by_date(
+    client: httpx.AsyncClient, start: date, end: date
+) -> dict[date, float]:
+    """Mean TTF (€/MWh) for each UTC day from `gas_prices` hub TTF, paginated."""
+    start_ts = datetime(
+        start.year, start.month, start.day, 0, 0, 0, tzinfo=timezone.utc
+    )
+    end_ts = datetime(
+        end.year, end.month, end.day, 0, 0, 0, tzinfo=timezone.utc
+    ) + timedelta(days=1)
+    base_url = (
+        f"{_gas_prices_rest_url()}"
+        f"?hub=eq.TTF&price_time=gte.{quote(start_ts.isoformat())}"
+        f"&price_time=lt.{quote(end_ts.isoformat())}"
+        f"&select=price_eur_mwh,price_time&order=price_time.asc"
+    )
+    h_base = {**_supabase_auth_headers(), "Range-Unit": "items"}
+    acc: dict[date, list[float]] = defaultdict(list)
+    offset = 0
+    page = 2000
+    while True:
+        headers = {**h_base, "Range": f"{offset}-{offset + page - 1}"}
+        r = await client.get(base_url, headers=headers, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        rows = r.json()
+        if not isinstance(rows, list) or not rows:
+            break
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pt = row.get("price_time")
+            if pt is None:
+                continue
+            s = str(pt)
+            if len(s) < 10:
+                continue
+            try:
+                d0 = date.fromisoformat(s[:10])
+            except ValueError:
+                continue
+            if d0 < start or d0 > end:
+                continue
+            try:
+                px = float(row.get("price_eur_mwh"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(px) or px < 0.1:
+                continue
+            acc[d0].append(px)
+        if len(rows) < page:
+            break
+        offset += page
+    return {d: sum(v) / len(v) for d, v in acc.items() if v}
+
+
+async def backfill_nbp_deprecated_from_ttf(days: int) -> int:
+    """
+    Upsert `gas_prices` rows for hub NBP_DEPRECATED_YAHOO_BACKFILL: for each
+    day in the lookback, take mean TTF (€/MWh) and store it in
+    `price_eur_mwh` (same contract as the Yahoo-era proxy; the app converts with
+    FX via `buildNbpPthByDayFromGasRows`). Implied p/th is sanity-filtered
+    to [NBP_SANITY_MIN_PTH, NBP_SANITY_MAX_PTH] to match `gas-aggregate.ts`.
+    """
+    _require_supabase_env()
+    if days < 1:
+        return 0
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=60.0
+    ) as http:
+        ttf_by_day = await _load_ttf_mean_eur_mwh_by_date(http, start, end)
+        raw_fx = await _load_fx_gbp_per_eur_by_date(http, start, end)
+    fx_by_day = _fx_forward_fill(
+        raw_fx, start, end, TTF_DERIV_GBP_PER_EUR_DEFAULT
+    )
+    if not ttf_by_day:
+        logger.warning(
+            "ttf_nbp_dep_backfill: no TTF rows in gas_prices in %s – %s; "
+            "run normal TTF ingestion first (EEX NGP).",
+            start,
+            end,
+        )
+        return 0
+
+    out_rows: list[dict[str, Any]] = []
+    skipped_band = 0
+    for d in sorted(ttf_by_day.keys()):
+        ttf = ttf_by_day[d]
+        gbp_eur = fx_by_day.get(d, TTF_DERIV_GBP_PER_EUR_DEFAULT)
+        pth = _ttf_eur_mwh_to_nbp_pth(ttf, gbp_eur)
+        if pth < NBP_SANITY_MIN_PTH or pth > NBP_SANITY_MAX_PTH:
+            skipped_band += 1
+            logger.debug(
+                "ttf_nbp_dep_backfill: skip %s ttf=%.2f p/th implied=%.2f (out of band)",
+                d,
+                ttf,
+                pth,
+            )
+            continue
+        dt0 = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc)
+        out_rows.append(
+            {
+                "price_time": dt0.isoformat(),
+                "hub": HUB_NBP_DEPRECATED,
+                "price_eur_mwh": ttf,
+                "source": "EEX TTF NGP → NBP proxy backfill (deprecated hub)",
+                "fetched_at": fetched_at,
+            }
+        )
+
+    if not out_rows and ttf_by_day:
+        logger.warning(
+            "ttf_nbp_dep_backfill: 0 rows after p/th band [%s, %s] (skipped %d TTF days – "
+            "if unexpected, check TTF/FX or extend band for this job only in dev).",
+            NBP_SANITY_MIN_PTH,
+            NBP_SANITY_MAX_PTH,
+            skipped_band,
+        )
+    written = 0
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as http:
+        for i in range(0, len(out_rows), 500):
+            chunk = out_rows[i : i + 500]
+            await upsert_gas_prices_http(http, chunk)
+            written += len(chunk)
+    logger.info(
+        "ttf_nbp_dep_backfill: upserted %d NBP_DEPRECATED rows from TTF (window %s → %s)",
+        written,
+        start,
+        end,
+    )
     return written
 
 
@@ -6158,6 +6360,14 @@ if __name__ == "__main__":
             action="store_true",
             help="Only backfill N2EX/APX market_prices from Elexon MID (per day)",
         )
+        bg.add_argument(
+            "--ttf-deprecated-nbp",
+            action="store_true",
+            help=(
+                "Only backfill NBP_DEPRECATED_YAHOO_BACKFILL from existing TTF "
+                "in gas_prices (no Stooq); matches app merge with canonical NBP"
+            ),
+        )
         bp.add_argument(
             "--mid-pause",
             type=float,
@@ -6165,21 +6375,28 @@ if __name__ == "__main__":
             help="Seconds to wait between Elexon requests (default 0.25)",
         )
         args = bp.parse_args(sys.argv[2:])
-        do_nbp = not args.mid_only
-        do_mid = not args.nbp_only
         if args.days < 1:
             bp.error("--days must be at least 1")
-        try:
-            asyncio.run(
-                run_historical_backfill(
-                    args.days,
-                    nbp=do_nbp,
-                    mid=do_mid,
-                    mid_pause_s=args.mid_pause,
+        if args.ttf_deprecated_nbp:
+            try:
+                asyncio.run(backfill_nbp_deprecated_from_ttf(args.days))
+            except ValueError as e:
+                print(str(e), file=sys.stderr)
+                sys.exit(1)
+        else:
+            do_nbp = not args.mid_only
+            do_mid = not args.nbp_only
+            try:
+                asyncio.run(
+                    run_historical_backfill(
+                        args.days,
+                        nbp=do_nbp,
+                        mid=do_mid,
+                        mid_pause_s=args.mid_pause,
+                    )
                 )
-            )
-        except ValueError as e:
-            print(str(e), file=sys.stderr)
-            sys.exit(1)
+            except ValueError as e:
+                print(str(e), file=sys.stderr)
+                sys.exit(1)
     else:
         main()
