@@ -598,6 +598,28 @@ export default function RiskPage() {
     return d.toISOString().slice(0, 10);
   }, []);
 
+  /**
+   * Earliest date the user was tracking any of their current open positions on
+   * the platform. Used to visually distinguish "simulated pre-book" bars from
+   * "simulated during the user's tenure" bars in the distribution, and to clip
+   * the Worst-day tile so we don't advertise a worst-day from before the user
+   * existed.
+   *
+   * We prefer `entry_date` when provided (user-asserted trade date, which may
+   * pre-date created_at on imported historical trades) and fall back to the
+   * DB row creation date. The full 120-day simulation window is kept intact
+   * for the VaR / CVaR / volatility stats — those need the sample size.
+   */
+  const bookStartDate = useMemo<string | null>(() => {
+    let earliest: string | null = null;
+    for (const p of positions) {
+      const candidate = p.entry_date ?? p.created_at.slice(0, 10);
+      if (!candidate) continue;
+      if (earliest == null || candidate < earliest) earliest = candidate;
+    }
+    return earliest;
+  }, [positions]);
+
   const dailyPnLSeries = useMemo(
     () =>
       calculateDailyPnL(positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, {
@@ -617,11 +639,41 @@ export default function RiskPage() {
     ],
   );
 
+  /**
+   * Exact date in dailyPnLSeries on or after bookStartDate — used as the x
+   * value for the book-opened ReferenceLine. Recharts expects the x value to
+   * match a category present in the data, so we snap to the first series day
+   * rather than using the raw bookStartDate which may land on a weekend.
+   *
+   * Returns null when bookStart is before the 120d window (all bars are
+   * post-book, no marker needed) or when bookStart is after today (no series
+   * yet).
+   */
+  const bookStartMarkerDate = useMemo<string | null>(() => {
+    if (!bookStartDate) return null;
+    if (bookStartDate <= varLookbackMinDate) return null;
+    const first = dailyPnLSeries.find((d) => d.date >= bookStartDate);
+    return first?.date ?? null;
+  }, [bookStartDate, varLookbackMinDate, dailyPnLSeries]);
+
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
   const var99 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.99);
+  /**
+   * Clip Worst-day to days the user actually held these positions. VaR itself
+   * still uses the full simulation window (it needs the sample), but "your
+   * worst day was £X on 12 Dec 2025" reads as realised P&L — which is
+   * misleading if the user only opened the book last week.
+   */
+  const worstDaySeries = useMemo(
+    () =>
+      bookStartDate
+        ? dailyPnLSeries.filter((d) => d.date >= bookStartDate)
+        : dailyPnLSeries,
+    [dailyPnLSeries, bookStartDate],
+  );
   const worstDay =
-    dailyPnLSeries.length > 0
-      ? dailyPnLSeries.reduce((min, d) => (d.pnl < min.pnl ? d : min), dailyPnLSeries[0])
+    worstDaySeries.length > 0
+      ? worstDaySeries.reduce((min, d) => (d.pnl < min.pnl ? d : min), worstDaySeries[0])
       : null;
   const avgDailyPnL =
     dailyPnLSeries.length > 0
@@ -885,8 +937,19 @@ export default function RiskPage() {
                 <p className="mt-1 text-lg font-semibold tabular-nums text-[#8B3A3A]">
                   {worstDay ? formatSignedGbp(worstDay.pnl) : "—"}
                 </p>
-                <p className="mt-1 text-xs text-ink-light">
-                  {worstDay ? formatDay(worstDay.date) : "Accumulating data"}
+                <p
+                  className="mt-1 text-xs text-ink-light"
+                  title={
+                    bookStartDate
+                      ? `Worst daily P&L since you opened this book on ${formatDay(bookStartDate)}. Pre-book simulated days are excluded from this tile.`
+                      : "Worst daily P&L across the simulation window."
+                  }
+                >
+                  {worstDay
+                    ? `${formatDay(worstDay.date)} · since book opened`
+                    : bookStartDate
+                      ? "No days since book opened yet"
+                      : "Accumulating data"}
                 </p>
               </div>
             </div>
@@ -897,10 +960,10 @@ export default function RiskPage() {
           </motion.div>
 
           <section>
-            <p className={sectionLabel}>Distribution</p>
-            <h2 className="mt-1 font-serif text-xl text-ink">Daily P&amp;L Distribution</h2>
+            <p className={sectionLabel}>Stress simulation</p>
+            <h2 className="mt-1 font-serif text-xl text-ink">Simulated daily P&amp;L</h2>
             <p className="mt-1 text-xs italic text-ink-light">
-              Historical daily mark-to-market moves on your current book · accuracy improves as data accumulates
+              Reprices your current book against the last {RISK_LOOKBACK_DAYS} days of market moves. Not a record of realised P&amp;L — bars left of the &quot;book opened&quot; marker show what today&apos;s positions would have returned on days before you held them.
             </p>
             {noHistory ? (
               <p className="mt-4 text-sm text-ink-mid">
@@ -924,16 +987,43 @@ export default function RiskPage() {
                       labelStyle={rechartsTooltipLabelStyle}
                       itemStyle={rechartsTooltipItemStyle}
                       formatter={(v) => [`£${Math.round(Number(v)).toLocaleString("en-GB")}`, "P&L"]}
-                      labelFormatter={(d) => formatDay(String(d))}
+                      labelFormatter={(d) => {
+                        const dateStr = String(d);
+                        const preBook =
+                          bookStartDate != null && dateStr < bookStartDate;
+                        return `${formatDay(dateStr)}${preBook ? " · pre-book (simulated)" : ""}`;
+                      }}
                     />
                     <ReferenceLine y={0} stroke="#9ca3af" />
                     {var95 < 0 ? (
                       <ReferenceLine y={var95} stroke={TERRACOTTA} strokeDasharray="4 2" label="95% VaR" />
                     ) : null}
+                    {bookStartMarkerDate ? (
+                      <ReferenceLine
+                        x={bookStartMarkerDate}
+                        stroke="var(--ink-mid)"
+                        strokeDasharray="3 3"
+                        label={{
+                          value: "Book opened",
+                          position: "top",
+                          fill: "var(--ink-mid)",
+                          fontSize: 10,
+                        }}
+                      />
+                    ) : null}
                     <Bar dataKey="pnl">
-                      {dailyPnLSeries.map((d) => (
-                        <Cell key={d.date} fill={d.pnl >= 0 ? BRAND_GREEN : TERRACOTTA} />
-                      ))}
+                      {dailyPnLSeries.map((d) => {
+                        const preBook =
+                          bookStartDate != null && d.date < bookStartDate;
+                        const base = d.pnl >= 0 ? BRAND_GREEN : TERRACOTTA;
+                        return (
+                          <Cell
+                            key={d.date}
+                            fill={base}
+                            fillOpacity={preBook ? 0.3 : 1}
+                          />
+                        );
+                      })}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -946,7 +1036,11 @@ export default function RiskPage() {
                   )}
                 </div>
                 <p className="mt-2 text-xs italic text-ink-light">
-                  Based on {dailyPnLSeries.length} days · VaR confidence improves significantly after 20 trading days
+                  Based on {dailyPnLSeries.length} simulated days
+                  {bookStartDate
+                    ? ` · book opened ${formatDay(bookStartDate)}`
+                    : ""}{" "}
+                  · VaR confidence improves significantly after 20 trading days
                 </p>
               </div>
             )}
@@ -955,7 +1049,9 @@ export default function RiskPage() {
           <section>
             <p className={sectionLabel}>Position risk</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Risk by position</h2>
-            <p className="mt-1 text-sm text-ink-light">Contribution of each position to total portfolio VaR</p>
+            <p className="mt-1 text-sm text-ink-light">
+              Each position&apos;s contribution to portfolio VaR. Worst-day values are simulated against the last {RISK_LOOKBACK_DAYS} days of market moves, not realised P&amp;L.
+            </p>
             <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card">
               <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-left text-[13px]">
