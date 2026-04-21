@@ -68,6 +68,64 @@ describe("optimise NBP historical levels", () => {
   });
 });
 
+describe("buildHistoricalScenarios union-of-dates (post-2026-04 audit fix)", () => {
+  /**
+   * Pre-fix, the builder intersected the date sets of powerByDay, ttfByDayEur
+   * and nbpByDayPth. When NBP only had 7 days of history while power/TTF had
+   * 120+ days, the intersection collapsed to 7 days and Optimise reported
+   * `hist 0` scenarios after the sanity guards stripped them. The union
+   * semantics below keep the full 120-day sample by emitting a 0-move for
+   * the short feed on days it does not cover.
+   */
+  it("retains scenarios for dates where NBP has no print (0 move for NBP)", () => {
+    const allDays = [
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+    ];
+    const hist = buildHistoricalScenarios({
+      powerByDay: {
+        "2026-01-01": 100,
+        "2026-01-02": 102,
+        "2026-01-03": 105,
+        "2026-01-04": 103,
+      },
+      ttfByDayEur: {
+        "2026-01-01": 40,
+        "2026-01-02": 41,
+        "2026-01-03": 42,
+        "2026-01-04": 40,
+      },
+      // Short NBP history: only covers the last 2 days.
+      nbpByDayPth: { "2026-01-03": 100, "2026-01-04": 102 },
+      fxByDay: Object.fromEntries(allDays.map((d) => [d, 0.86])),
+    });
+    // Expect 3 consecutive-date pairs (01→02, 02→03, 03→04) instead of
+    // the single pair the intersection would have produced.
+    expect(hist.length).toBe(3);
+    // Day where NBP has no prev/curr → 0 move, but power/TTF still present.
+    const firstPair = hist.find((s) => s.label === "2026-01-02");
+    expect(firstPair?.nbpMovePth).toBe(0);
+    expect(firstPair?.gbPowerMove).toBeCloseTo(2, 9);
+    expect(firstPair?.ttfMoveEurMwh).toBeCloseTo(1, 9);
+    // Day where NBP has both sides → real move carried through.
+    const lastPair = hist.find((s) => s.label === "2026-01-04");
+    expect(lastPair?.nbpMovePth).toBeCloseTo(2, 9);
+  });
+
+  it("drops all-zero scenarios so VaR isn't biased toward 0", () => {
+    const hist = buildHistoricalScenarios({
+      powerByDay: { "2026-01-01": 100 },
+      ttfByDayEur: { "2026-01-02": 40 },
+      nbpByDayPth: { "2026-01-03": 100 },
+    });
+    // Three disjoint single-point dates → every consecutive pair has a gap
+    // on both sides for every market, so nothing should be emitted.
+    expect(hist.length).toBe(0);
+  });
+});
+
 describe("optimisePortfolio empty book", () => {
   it("returns no recommendations when there are no material positions", () => {
     const positions: PositionRow[] = [

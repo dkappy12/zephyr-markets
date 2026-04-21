@@ -10,7 +10,10 @@ import {
 } from "@/lib/reliability/contract";
 import { positionNotionalGbp, tenorToExpiryDate } from "@/lib/portfolio/book";
 import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
-import { aggregateDailyGasPrices } from "@/lib/portfolio/gas-aggregate";
+import {
+  aggregateDailyGasPrices,
+  buildNbpPthByDayFromGasRows,
+} from "@/lib/portfolio/gas-aggregate";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -778,30 +781,6 @@ export default function RiskPage() {
     [gasPrices],
   );
 
-  /**
-   * NOTE ON UNITS: the gas_prices table stores NBP rows under the column
-   * name `price_eur_mwh`, but for NBP the stored value is actually the raw
-   * Stooq NF.F close, which is quoted in **pence per therm**, not EUR/MWh.
-   * (See python-agents/ingestion-agent/main.py `fetch_nbp_price`.) The P&L
-   * math below divides the delta by 100 precisely because it's in pence/th,
-   * so the math is correct given the actual stored units — the column name
-   * is just a misnomer inherited from the TTF-only schema era. If NBP ever
-   * gets re-ingested as EUR/MWh, convert via ttfToNbpPencePerTherm here.
-   *
-   * The level floor inside aggregateDailyGasPrices (NBP_LEVEL_FLOOR_PTH =
-   * 30 p/th) defends against the upstream artefact where Stooq briefly
-   * prints ~15 p/th and then snaps back to a normal level, which would
-   * otherwise manufacture a fake 40+ p/th day-over-day spike.
-   */
-  const nbpPricesByDay = useMemo(
-    () =>
-      aggregateDailyGasPrices(
-        gasPrices.filter((row) => (row.hub ?? "").toUpperCase() === "NBP"),
-        { kind: "NBP" },
-      ),
-    [gasPrices],
-  );
-
   const fxByDay = useMemo(() => {
     const out: Record<string, number> = {};
     for (const row of fxRates) {
@@ -811,6 +790,18 @@ export default function RiskPage() {
     }
     return out;
   }, [fxRates]);
+
+  /**
+   * NBP daily p/th: Stooq `hub === "NBP"` (column is pence/therm despite
+   * `price_eur_mwh`) plus, for any date the live series does not cover,
+   * TTF-in-EUR/MWh from `NBP_DEPRECATED_YAHOO_BACKFILL` converted via
+   * `buildNbpPthByDayFromGasRows` + day FX. Same-day Stooq wins. Level floor
+   * in {@link aggregateDailyGasPrices} applies to both.
+   */
+  const nbpPricesByDay = useMemo(
+    () => buildNbpPthByDayFromGasRows(gasPrices, fxByDay),
+    [gasPrices, fxByDay],
+  );
 
   const ukaPricesByDay = useMemo(() => {
     const buckets = new Map<string, { sum: number; count: number }>();
@@ -1364,7 +1355,7 @@ export default function RiskPage() {
                       onClick={() => setHistogramWindow(opt.id)}
                       className={`rounded-[3px] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.08em] transition-colors ${
                         active
-                          ? "bg-ink text-ivory-bg"
+                          ? "bg-ink text-ivory"
                           : "text-ink-mid hover:bg-ivory-border/50"
                       } ${disabled ? "cursor-not-allowed opacity-40" : ""}`}
                     >

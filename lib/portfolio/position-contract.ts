@@ -116,6 +116,55 @@ function validateMarketUnitCurrency(
   return null;
 }
 
+/**
+ * Per-market plausible trade-price ranges used as fat-finger guards. These are
+ * intentionally wide (orders of magnitude larger than typical market prints)
+ * so they only catch absurd inputs, not legitimate stress scenarios.
+ */
+export function getTradePriceBounds(
+  instrumentType: string,
+  market: string,
+): { min: number; max: number; unitLabel: string } {
+  const it = instrumentType.toLowerCase();
+  const m = market.toLowerCase();
+  if (it === "spark_spread" || it === "dark_spread") {
+    return { min: -500, max: 1000, unitLabel: "£/MWh" };
+  }
+  if (it === "carbon" || m === "uka" || m === "eua") {
+    return {
+      min: 0,
+      max: 1000,
+      unitLabel: m === "eua" ? "€/tCO2" : "£/tCO2",
+    };
+  }
+  if (m === "nbp") {
+    return { min: 1, max: 1000, unitLabel: "p/therm" };
+  }
+  if (m === "ttf") {
+    return { min: -100, max: 500, unitLabel: "€/MWh" };
+  }
+  if (it === "power_forward" || it === "other_energy" || m.endsWith("_power")) {
+    return { min: -500, max: 5000, unitLabel: "/MWh" };
+  }
+  if (it === "gas_forward") {
+    return { min: 0, max: 1000, unitLabel: "/unit" };
+  }
+  return { min: -1_000_000, max: 1_000_000, unitLabel: "/unit" };
+}
+
+function validateTradePrice(
+  instrumentType: string,
+  market: string,
+  tradePrice: number | null,
+): string | null {
+  if (tradePrice == null) return null;
+  const bounds = getTradePriceBounds(instrumentType, market);
+  if (tradePrice < bounds.min || tradePrice > bounds.max) {
+    return `Trade price ${tradePrice} is outside the plausible range (${bounds.min} to ${bounds.max} ${bounds.unitLabel}) for ${market}.`;
+  }
+  return null;
+}
+
 function defaultEntryDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -150,8 +199,8 @@ export function normalisePositionInput(
   if (!direction) return { ok: false, error: "Direction must be long or short." };
 
   const size = asNumber(input.size);
-  if (size == null || size === 0) {
-    return { ok: false, error: "Size must be a non-zero number." };
+  if (size == null || size <= 0) {
+    return { ok: false, error: "Size must be a positive number. Use direction (long/short) to express sign." };
   }
 
   const unit = normaliseUnit(input.unit);
@@ -163,6 +212,10 @@ export function normalisePositionInput(
   const compatibilityError = validateMarketUnitCurrency(market, unit, currency);
   if (compatibilityError) {
     return { ok: false, error: compatibilityError };
+  }
+  const priceError = validateTradePrice(instrumentType, market, tradePrice);
+  if (priceError) {
+    return { ok: false, error: priceError };
   }
   const entryDate = normaliseDate(input.entry_date) ?? defaultEntryDate();
   const expiryDate = normaliseDate(input.expiry_date);

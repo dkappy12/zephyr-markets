@@ -11,6 +11,8 @@ import {
 } from "@/lib/portfolio/power-aggregate";
 import {
   aggregateDailyGasPrices,
+  buildNbpPthByDayFromGasRows,
+  NBP_DEPRECATED_YAHOO_HUB,
   type GasPriceSample,
 } from "@/lib/portfolio/gas-aggregate";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
@@ -187,7 +189,7 @@ export async function GET(req: Request) {
       createAdminClient()
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
-        .in("hub", ["TTF", "NBP"])
+        .in("hub", ["TTF", "NBP", NBP_DEPRECATED_YAHOO_HUB])
         .gte("price_time", `${sinceDate}T00:00:00`)
         .order("price_time", { ascending: true }),
       supabase
@@ -235,26 +237,28 @@ export async function GET(req: Request) {
     const ttfSamples: GasPriceSample[] = gasRows.filter(
       (r) => String(r.hub ?? "").toUpperCase() === "TTF",
     );
-    const nbpSamples: GasPriceSample[] = gasRows.filter(
-      (r) => String(r.hub ?? "").toUpperCase() === "NBP",
-    );
     const ttfByDay = aggregateDailyGasPrices(ttfSamples, { kind: "TTF" });
-    const nbpRawPthByDay = aggregateDailyGasPrices(nbpSamples, {
-      kind: "NBP",
-    });
-    let nbpProxyUsed = false;
-    for (const day of Object.keys(ttfByDay)) {
-      const d = new Date(day + "T12:00:00Z");
-      const dow = d.getUTCDay();
-      if (dow === 0 || dow === 6) continue;
-      if (nbpRawPthByDay[day] == null) nbpProxyUsed = true;
-    }
     const fxByDay: Record<string, number> = {};
     for (const row of (fxRes.error ? [] : fxRes.data) ?? []) {
       const day = parseDateOnly(String(row.rate_date ?? ""));
       const rate = parseNum(row.rate);
       if (!day || rate == null) continue;
       fxByDay[day] = rate;
+    }
+
+    const nbpStooqOnly = aggregateDailyGasPrices(
+      gasRows.filter(
+        (r) => String(r.hub ?? "").toUpperCase() === "NBP",
+      ) as GasPriceSample[],
+      { kind: "NBP" },
+    );
+    const nbpRawPthByDay = buildNbpPthByDayFromGasRows(gasRows, fxByDay);
+    let nbpProxyUsed = false;
+    for (const day of Object.keys(ttfByDay)) {
+      const d = new Date(day + "T12:00:00Z");
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      if (nbpStooqOnly[day] == null) nbpProxyUsed = true;
     }
 
     const nbpByDayPth = nbpLevelsPthByDay(nbpRawPthByDay);

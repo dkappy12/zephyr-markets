@@ -1,3 +1,15 @@
+import { GBP_PER_EUR, ttfToNbpPencePerTherm } from "@/lib/portfolio/book";
+
+/**
+ * `gas_prices` hub for Yahoo/TTF-derived NBP *levels* backfilled before the
+ * Stooq NF.F series existed. `price_eur_mwh` holds **TTF in EUR/MWh** (not
+ * pence/therm) — see ingestion comments re the broken p/th backfill. For
+ * historical VaR / simulated P&L we map these to pence/therm via
+ * {@link ttfToNbpPencePerTherm} and day FX, and **prefer** any same-day
+ * canonical `NBP` (Stooq) print when both exist.
+ */
+export const NBP_DEPRECATED_YAHOO_HUB = "NBP_DEPRECATED_YAHOO_BACKFILL";
+
 /**
  * Daily gas price aggregation shared between Risk and Optimise.
  *
@@ -80,4 +92,66 @@ export function aggregateDailyGasPrices(
     out[day] = cell.sum / cell.count;
   }
   return out;
+}
+
+export type GasHubRow = {
+  price_time: string;
+  price_eur_mwh: number | null;
+  hub: string | null;
+};
+
+function normaliseHub(h: string | null | undefined): string {
+  return (h ?? "").trim().toUpperCase();
+}
+
+/**
+ * TTF-style EUR/MWh rows on {@link NBP_DEPRECATED_YAHOO_HUB} → p/th for each
+ * day. Uses {@link ttfToNbpPencePerTherm} and `fxByDay[day] ??` {@link GBP_PER_EUR}.
+ * Applies the same {@link NBP_LEVEL_FLOOR_PTH} as Stooq NBP aggregation.
+ */
+function aggregateDeprecatedNbpProxyPth(
+  rows: GasHubRow[],
+  fxByDay: Record<string, number>,
+): Record<string, number> {
+  const floor = NBP_LEVEL_FLOOR_PTH;
+  const buckets = new Map<string, { sum: number; count: number }>();
+  for (const row of rows) {
+    if (normaliseHub(row.hub) !== NBP_DEPRECATED_YAHOO_HUB) continue;
+    const timestamp = row.price_time ?? "";
+    if (typeof timestamp !== "string" || timestamp.length < 10) continue;
+    const day = timestamp.slice(0, 10);
+    const ttfEurMwh = Number(row.price_eur_mwh);
+    if (!Number.isFinite(ttfEurMwh) || ttfEurMwh <= 0) continue;
+    const fx = fxByDay[day] ?? GBP_PER_EUR;
+    const pth = ttfToNbpPencePerTherm(ttfEurMwh, fx);
+    if (pth < floor) continue;
+    const cell = buckets.get(day) ?? { sum: 0, count: 0 };
+    cell.sum += pth;
+    cell.count += 1;
+    buckets.set(day, cell);
+  }
+  const out: Record<string, number> = {};
+  for (const [day, cell] of buckets) {
+    if (cell.count === 0) continue;
+    out[day] = cell.sum / cell.count;
+  }
+  return out;
+}
+
+/**
+ * Merged NBP p/th (Stooq) with deprecated Yahoo TTF proxy for gaps. Same-day:
+ * Stooq NBP always wins. Used by Risk + Optimise so historical NBP is not
+ * empty when the live hub only has a short Stooq history.
+ */
+export function buildNbpPthByDayFromGasRows(
+  rows: GasHubRow[],
+  fxByDay: Record<string, number>,
+): Record<string, number> {
+  const stooq = aggregateDailyGasPrices(
+    rows.filter((r) => normaliseHub(r.hub) === "NBP"),
+    { kind: "NBP" },
+  );
+  const fromDeprecated = aggregateDeprecatedNbpProxyPth(rows, fxByDay);
+  // Prefer Stooq on any day with both; start from deprecated then overwrite.
+  return { ...fromDeprecated, ...stooq };
 }

@@ -124,6 +124,33 @@ function pricePoints(
 /** Entry column: always `trade_price` from DB, formatted by market/currency (never live). */
 const formatEntryPrice = formatPositionEntryPrice;
 
+/**
+ * Numeric version of the current mark in the position's natural units (GBP/MWh,
+ * p/therm, EUR/MWh, GBP/tCO2, EUR/tCO2). Returns null when there is no usable
+ * mark source — callers must fall back to a sensible default (e.g. leave the
+ * input blank rather than reusing the entry price).
+ */
+function getCurrentMarkNumeric(
+  p: PositionRow,
+  lp: LivePrices | null,
+): number | null {
+  if (!lp) return null;
+  const market = normaliseMarket(p.market);
+  if (market === "GB_POWER") return lp.gbPowerGbpMwh ?? null;
+  if (market === "OTHER_POWER") return null;
+  if (market === "TTF") return lp.ttfEurMwh ?? null;
+  if (market === "NBP") return lp.nbpPencePerTherm ?? null;
+  if (market === "UKA") return lp.ukaGbpPerT ?? null;
+  if (market === "EUA") return lp.euaEurPerT ?? null;
+  if (market === "OTHER_GAS") {
+    const unit = (p.unit ?? "").toLowerCase();
+    if (unit.includes("therm")) return lp.nbpPencePerTherm ?? null;
+    if ((p.currency ?? "").toUpperCase() === "EUR") return lp.ttfEurMwh ?? null;
+    return lp.ttfGbpMwh ?? null;
+  }
+  return null;
+}
+
 /** Current column: live marks only (never reuse entry). */
 function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   if (!lp) return "—";
@@ -1103,11 +1130,8 @@ export function BookPageClient() {
                             title="Close"
                             onClick={() => {
                               setCloseModal(p);
-                              setClosePrice(
-                                p.trade_price != null
-                                  ? String(p.trade_price)
-                                  : "",
-                              );
+                              const mark = getCurrentMarkNumeric(p, livePrices);
+                              setClosePrice(mark != null ? String(mark) : "");
                               setCloseDate(utcToday());
                             }}
                             className="rounded p-1.5 text-ink-mid hover:bg-ivory-dark hover:text-ink"

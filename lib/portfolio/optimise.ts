@@ -618,29 +618,67 @@ export function buildHistoricalScenarios(input: {
   nbpByDayPth: Record<string, number>;
   fxByDay?: Record<string, number>;
 }): Scenario[] {
-  const dates = Object.keys(input.powerByDay)
-    .filter((d) => d in input.ttfByDayEur && d in input.nbpByDayPth)
-    .sort();
+  // Union of all dates where any series has a print. Markets with a gap on
+  // either side of a consecutive-date pair contribute a 0 move for that
+  // scenario rather than dropping the whole date (which would zero the sample
+  // set whenever one feed has a shorter history than the others — the bug
+  // that left Optimise with `hist 0` scenarios pre-fix).
+  const dateUniverse = new Set<string>([
+    ...Object.keys(input.powerByDay),
+    ...Object.keys(input.ttfByDayEur),
+    ...Object.keys(input.nbpByDayPth),
+  ]);
+  const dates = Array.from(dateUniverse).sort();
+  // Returns the clamped delta when both prev and curr prints are finite, or
+  // null when either side is missing. Null signals "no data" so callers can
+  // tell a genuine flat market (0) apart from a feed gap (skip).
+  const diff = (
+    byDay: Record<string, number>,
+    prev: string,
+    curr: string,
+    cap: number,
+  ): number | null => {
+    const p = byDay[prev];
+    const c = byDay[curr];
+    if (p == null || c == null || !Number.isFinite(p) || !Number.isFinite(c)) {
+      return null;
+    }
+    return clamp(c - p, cap);
+  };
   const rows: Scenario[] = [];
   for (let i = 1; i < dates.length; i++) {
     const prev = dates[i - 1];
     const curr = dates[i];
+    const gbPowerDelta = diff(
+      input.powerByDay,
+      prev,
+      curr,
+      HISTORICAL_MOVE_CAPS.gbPowerMove,
+    );
+    const ttfDelta = diff(
+      input.ttfByDayEur,
+      prev,
+      curr,
+      HISTORICAL_MOVE_CAPS.ttfMoveEurMwh,
+    );
+    const nbpDelta = diff(
+      input.nbpByDayPth,
+      prev,
+      curr,
+      HISTORICAL_MOVE_CAPS.nbpMovePth,
+    );
+    if (gbPowerDelta == null && ttfDelta == null && nbpDelta == null) {
+      // No market had both prev and curr prints; skip rather than emit a
+      // sample the callers can't distinguish from a flat day.
+      continue;
+    }
     rows.push({
       id: `hist-${curr}`,
       label: curr,
       source: "historical",
-      gbPowerMove: clamp(
-        (input.powerByDay[curr] ?? 0) - (input.powerByDay[prev] ?? 0),
-        HISTORICAL_MOVE_CAPS.gbPowerMove,
-      ),
-      ttfMoveEurMwh: clamp(
-        (input.ttfByDayEur[curr] ?? 0) - (input.ttfByDayEur[prev] ?? 0),
-        HISTORICAL_MOVE_CAPS.ttfMoveEurMwh,
-      ),
-      nbpMovePth: clamp(
-        (input.nbpByDayPth[curr] ?? 0) - (input.nbpByDayPth[prev] ?? 0),
-        HISTORICAL_MOVE_CAPS.nbpMovePth,
-      ),
+      gbPowerMove: gbPowerDelta ?? 0,
+      ttfMoveEurMwh: ttfDelta ?? 0,
+      nbpMovePth: nbpDelta ?? 0,
       gbpPerEur: input.fxByDay?.[curr],
     });
   }

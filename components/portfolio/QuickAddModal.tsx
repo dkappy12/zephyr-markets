@@ -2,6 +2,7 @@
 
 import type { PositionRow } from "@/lib/portfolio/book";
 import { tenorToExpiryDate } from "@/lib/portfolio/book";
+import { getTradePriceBounds } from "@/lib/portfolio/position-contract";
 import { useEffect, useMemo, useState } from "react";
 
 const INSTRUMENTS = [
@@ -161,12 +162,20 @@ export function QuickAddModal({
     e.preventDefault();
     const sz = Number(size);
     const tp = Number(tradePrice);
-    if (!Number.isFinite(sz) || sz === 0) {
-      onToast("Enter a valid size", "err");
+    if (!Number.isFinite(sz) || sz <= 0) {
+      onToast("Size must be a positive number", "err");
       return;
     }
     if (!Number.isFinite(tp)) {
       onToast("Enter a valid trade price", "err");
+      return;
+    }
+    const priceBounds = getTradePriceBounds(sel.instrument_type, sel.market);
+    if (tp < priceBounds.min || tp > priceBounds.max) {
+      onToast(
+        `Trade price is outside the plausible range for ${sel.label} (${priceBounds.min} to ${priceBounds.max} ${priceBounds.unitLabel})`,
+        "err",
+      );
       return;
     }
     if (!tenor.trim()) {
@@ -295,6 +304,7 @@ export function QuickAddModal({
               <input
                 type="number"
                 step="any"
+                min="0"
                 required
                 value={size}
                 onChange={(e) => setSize(e.target.value)}
