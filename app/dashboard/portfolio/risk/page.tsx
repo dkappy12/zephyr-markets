@@ -17,6 +17,7 @@ import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
 import {
   aggregateDailyGasPrices,
   buildNbpPthByDayFromGasRows,
+  NBP_DEPRECATED_YAHOO_HUB,
 } from "@/lib/portfolio/gas-aggregate";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
@@ -45,6 +46,15 @@ const HISTORICAL_GBP_PER_EUR = 0.86;
  * show contradictory VaR numbers for the same book.
  */
 const RISK_LOOKBACK_DAYS = 120;
+
+/**
+ * PostgREST returns at most `max_rows` (default 1000) per request. Unbounded
+ * `order by … asc` on `market_prices` / `gas_prices` was returning the oldest
+ * chunk of the table, not the 120-day lookback. Scope each query to `sinceDate`
+ * and set an explicit high limit — matches {@link RISK_LOOKBACK_DAYS} and
+ * app/api/optimise/recommendations/route.ts.
+ */
+const RISK_PRICE_FETCH_LIMIT = 50_000;
 
 type PositionRow = {
   id: string;
@@ -640,6 +650,10 @@ export default function RiskPage() {
         return Number.isFinite(n) ? String(n) : "";
       };
 
+      const lookbackStart = new Date();
+      lookbackStart.setUTCDate(lookbackStart.getUTCDate() - RISK_LOOKBACK_DAYS);
+      const sinceDate = lookbackStart.toISOString().slice(0, 10);
+
       const [
         { data: positionsData, error: positionsError },
         { data: powerData, error: powerError },
@@ -665,23 +679,32 @@ export default function RiskPage() {
               "price_gbp_mwh, price_date, settlement_period, market, source, volume, fetched_at",
             )
             .or("market.eq.N2EX,market.eq.APX")
+            .gte("price_date", sinceDate)
             .order("price_date", { ascending: true })
-            .order("settlement_period", { ascending: true }),
+            .order("settlement_period", { ascending: true })
+            .limit(RISK_PRICE_FETCH_LIMIT),
           supabase
             .from("gas_prices")
             .select("price_eur_mwh, price_time, hub, source, fetched_at")
-            .order("price_time", { ascending: true }),
+            .in("hub", ["TTF", "NBP", NBP_DEPRECATED_YAHOO_HUB])
+            .gte("price_time", `${sinceDate}T00:00:00.000Z`)
+            .order("price_time", { ascending: true })
+            .limit(RISK_PRICE_FETCH_LIMIT),
           supabase
             .from("fx_rates")
             .select("rate_date, rate")
             .eq("base", "EUR")
             .eq("quote", "GBP")
-            .order("rate_date", { ascending: true }),
+            .gte("rate_date", sinceDate)
+            .order("rate_date", { ascending: true })
+            .limit(500),
           supabase
             .from("carbon_prices")
             .select("price_gbp_per_t, price_eur_per_t, price_date, hub")
             .in("hub", ["UKA", "EUA"])
-            .order("price_date", { ascending: true }),
+            .gte("price_date", sinceDate)
+            .order("price_date", { ascending: true })
+            .limit(5000),
           supabase
             .from("risk_limits")
             .select("max_position_mw, max_var_gbp, max_drawdown_gbp")
