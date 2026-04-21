@@ -1,11 +1,7 @@
 "use client";
 
 import { TierGate } from "@/components/billing/TierGate";
-import {
-  rechartsTooltipContentStyle,
-  rechartsTooltipItemStyle,
-  rechartsTooltipLabelStyle,
-} from "@/lib/charts/recharts-tooltip-styles";
+import { chartTooltipBoxStyle } from "@/lib/charts/recharts-tooltip-styles";
 import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 import {
@@ -100,7 +96,24 @@ type FxRateRow = {
   rate: number | null;
 };
 
-type DailyPnL = { date: string; pnl: number };
+type MarketKey = "GB_POWER" | "TTF" | "NBP" | "UKA" | "EUA";
+
+type DailyPnLBreakdown = {
+  /** Per-market P&L contribution to the day, in GBP. */
+  byMarket: Partial<Record<MarketKey, number>>;
+  /**
+   * Raw day-over-day moves in each market's native units so the tooltip can
+   * explain "why" without the reader having to re-derive them:
+   *   - GB_POWER: £/MWh (δ in GBP/MWh)
+   *   - TTF:      EUR/MWh (pre-FX)
+   *   - NBP:      pence/therm
+   *   - UKA:      £/t
+   *   - EUA:      EUR/t (pre-FX)
+   */
+  moves: Partial<Record<MarketKey, number>>;
+};
+
+type DailyPnL = { date: string; pnl: number } & DailyPnLBreakdown;
 
 type Scenario = {
   name: string;
@@ -152,6 +165,133 @@ function formatDay(d: string): string {
   } catch {
     return d;
   }
+}
+
+const MARKET_ORDER: MarketKey[] = ["GB_POWER", "TTF", "NBP", "UKA", "EUA"];
+const MARKET_LABEL: Record<MarketKey, string> = {
+  GB_POWER: "GB Power",
+  TTF: "TTF",
+  NBP: "NBP",
+  UKA: "UKA",
+  EUA: "EUA",
+};
+
+/** Human-friendly native-unit formatter for the per-market raw move row. */
+function formatMove(market: MarketKey, move: number): string {
+  const sign = move >= 0 ? "+" : "−";
+  const abs = Math.abs(move);
+  switch (market) {
+    case "GB_POWER":
+      return `${sign}£${abs.toFixed(2)}/MWh`;
+    case "TTF":
+      return `${sign}€${abs.toFixed(2)}/MWh`;
+    case "NBP":
+      return `${sign}${abs.toFixed(2)}p/th`;
+    case "UKA":
+      return `${sign}£${abs.toFixed(2)}/t`;
+    case "EUA":
+      return `${sign}€${abs.toFixed(2)}/t`;
+  }
+}
+
+type DailyPnlTooltipProps = {
+  active?: boolean;
+  payload?: Array<{ payload?: DailyPnL }>;
+  label?: string;
+  bookStartDate: string | null;
+};
+
+/**
+ * Replaces the default Recharts tooltip with a drill-down that explains how
+ * each day's simulated P&L was assembled. Without this, a £18k outlier is
+ * opaque — the reader can't tell whether it came from a genuine GB power
+ * spike, a TTF move, or a data artefact. The breakdown shows:
+ *   - Total P&L for the day
+ *   - Per-market contribution to that total (GBP)
+ *   - The underlying native-unit move that drove each contribution
+ *
+ * When all bars are tiny except one, hovering the outlier immediately tells
+ * you which feed spiked — if no single market dominates, the outlier is
+ * likely a legitimate correlated move; if one market does, that's the one
+ * to verify in the raw price table.
+ */
+function DailyPnlTooltip({
+  active,
+  payload,
+  label,
+  bookStartDate,
+}: DailyPnlTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  const datum = payload[0]?.payload;
+  if (!datum) return null;
+  const dateStr = String(label ?? datum.date);
+  const preBook = bookStartDate != null && dateStr < bookStartDate;
+  const entries = MARKET_ORDER.filter(
+    (m) =>
+      (datum.byMarket[m] != null && datum.byMarket[m] !== 0) ||
+      datum.moves[m] != null,
+  );
+  return (
+    <div style={chartTooltipBoxStyle}>
+      <div style={{ color: "var(--ink-mid)", fontWeight: 500 }}>
+        {formatDay(dateStr)}
+        {preBook ? " · pre-book (simulated)" : ""}
+      </div>
+      <div
+        style={{
+          marginTop: 4,
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          fontWeight: 600,
+        }}
+      >
+        <span>Total P&amp;L</span>
+        <span>{formatSignedGbp(datum.pnl)}</span>
+      </div>
+      {entries.length > 0 ? (
+        <div
+          style={{
+            marginTop: 6,
+            borderTop: "0.5px solid var(--ivory-border)",
+            paddingTop: 6,
+            display: "grid",
+            rowGap: 2,
+          }}
+        >
+          {entries.map((m) => {
+            const contribution = datum.byMarket[m] ?? 0;
+            const rawMove = datum.moves[m];
+            return (
+              <div
+                key={m}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "64px 72px 1fr",
+                  gap: 8,
+                  color: "var(--ink-mid)",
+                }}
+              >
+                <span style={{ color: "var(--ink)" }}>{MARKET_LABEL[m]}</span>
+                <span
+                  style={{
+                    textAlign: "right",
+                    fontVariantNumeric: "tabular-nums",
+                    color: "var(--ink)",
+                  }}
+                >
+                  {formatSignedGbp(contribution)}
+                </span>
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {rawMove != null ? `Δ ${formatMove(m, rawMove)}` : "—"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 type LimitSeverity = "warn" | "over";
@@ -252,6 +392,11 @@ const calculateDailyPnL = (
     }
     let dayPnL = 0;
     let hasContributingSeries = false;
+    const byMarket: Partial<Record<MarketKey, number>> = {};
+    const moves: Partial<Record<MarketKey, number>> = {};
+    const addContribution = (market: MarketKey, contribution: number) => {
+      byMarket[market] = (byMarket[market] ?? 0) + contribution;
+    };
 
     for (const pos of positions) {
       const direction = pos.direction === "long" ? 1 : -1;
@@ -266,7 +411,10 @@ const calculateDailyPnL = (
         // slip past the aggregator (e.g. one settlement period in the day
         // still triggered an imbalance spike despite coverage thresholding).
         if (Math.abs(move) > POWER_MOVE_SANITY_CAP_GBP_MWH) continue;
-        dayPnL += move * size * direction;
+        const contribution = move * size * direction;
+        dayPnL += contribution;
+        addContribution("GB_POWER", contribution);
+        moves.GB_POWER = move;
         hasContributingSeries = true;
       } else if (pos.market === "TTF") {
         const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
@@ -279,7 +427,10 @@ const calculateDailyPnL = (
         if (Math.abs(currTtf - prevTtf) > TTF_MOVE_SANITY_CAP_EUR_MWH) continue;
         const prevPrice = prevTtf * prevFx;
         const currPrice = currTtf * currFx;
-        dayPnL += (currPrice - prevPrice) * size * direction;
+        const contribution = (currPrice - prevPrice) * size * direction;
+        dayPnL += contribution;
+        addContribution("TTF", contribution);
+        moves.TTF = currTtf - prevTtf;
         hasContributingSeries = true;
       } else if (pos.market === "NBP") {
         const prevNbp = nbpPricesByDay[prevDate];
@@ -289,14 +440,20 @@ const calculateDailyPnL = (
         // NBP feed occasionally prints stale/placeholder values; cap wild
         // day-over-day p/th moves so they can't manufacture a fake VaR tail.
         if (Math.abs(move) > NBP_MOVE_SANITY_CAP_PTH) continue;
-        dayPnL += (move * size * direction) / 100;
+        const contribution = (move * size * direction) / 100;
+        dayPnL += contribution;
+        addContribution("NBP", contribution);
+        moves.NBP = move;
         hasContributingSeries = true;
       } else if (isUkaMarket(pos.market)) {
         // UKA is stored in GBP/t; size is in tCO2.
         const prevPrice = ukaPricesByDay[prevDate];
         const currPrice = ukaPricesByDay[currDate];
         if (prevPrice == null || currPrice == null) continue;
-        dayPnL += (currPrice - prevPrice) * size * direction;
+        const contribution = (currPrice - prevPrice) * size * direction;
+        dayPnL += contribution;
+        addContribution("UKA", contribution);
+        moves.UKA = currPrice - prevPrice;
         hasContributingSeries = true;
       } else if (isEuaMarket(pos.market)) {
         // EUA is stored in EUR/t; FX-adjust each leg before differencing to
@@ -308,12 +465,15 @@ const calculateDailyPnL = (
         if (prevEua == null || currEua == null) continue;
         const prevPrice = prevEua * prevFx;
         const currPrice = currEua * currFx;
-        dayPnL += (currPrice - prevPrice) * size * direction;
+        const contribution = (currPrice - prevPrice) * size * direction;
+        dayPnL += contribution;
+        addContribution("EUA", contribution);
+        moves.EUA = currEua - prevEua;
         hasContributingSeries = true;
       }
     }
     if (hasContributingSeries) {
-      result.push({ date: currDate, pnl: dayPnL });
+      result.push({ date: currDate, pnl: dayPnL, byMarket, moves });
     }
   }
   return result;
@@ -832,6 +992,32 @@ export default function RiskPage() {
   const visibleSharpe =
     visibleDailyVol > 0 ? (visibleAvgPnL / visibleDailyVol) * Math.sqrt(252) : 0;
 
+  /**
+   * Flag the single biggest |P&L| day when it dwarfs the rest of the window.
+   * Without this, a 5σ outlier (legitimate or data artefact) silently
+   * dominates daily vol / annualised vol / Sharpe without any visual cue
+   * beyond "one bar is tall". Surfacing it in text makes it audit-able.
+   *
+   * Threshold: the day's |pnl| exceeds 3× the std dev of the *other* days
+   * in the visible window AND is > £5k in absolute terms, so small books
+   * with naturally noisy histories don't trigger spurious warnings.
+   */
+  const outlierDay = useMemo(() => {
+    if (visibleSeries.length < 5) return null;
+    const sorted = [...visibleSeries].sort(
+      (a, b) => Math.abs(b.pnl) - Math.abs(a.pnl),
+    );
+    const top = sorted[0];
+    const rest = sorted.slice(1);
+    if (rest.length < 2) return null;
+    const restMean = rest.reduce((s, d) => s + d.pnl, 0) / rest.length;
+    const restVar =
+      rest.reduce((s, d) => s + (d.pnl - restMean) ** 2, 0) / rest.length;
+    const restStd = Math.sqrt(restVar);
+    const threshold = Math.max(5000, restStd * 3);
+    return Math.abs(top.pnl) > threshold ? { day: top, restStd } : null;
+  }, [visibleSeries]);
+
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
       const series = calculateDailyPnL(
@@ -1219,16 +1405,10 @@ export default function RiskPage() {
                       tick={{ fontSize: 10, fill: "var(--ink-mid)" }}
                     />
                     <Tooltip
-                      contentStyle={rechartsTooltipContentStyle}
-                      labelStyle={rechartsTooltipLabelStyle}
-                      itemStyle={rechartsTooltipItemStyle}
-                      formatter={(v) => [`£${Math.round(Number(v)).toLocaleString("en-GB")}`, "P&L"]}
-                      labelFormatter={(d) => {
-                        const dateStr = String(d);
-                        const preBook =
-                          bookStartDate != null && dateStr < bookStartDate;
-                        return `${formatDay(dateStr)}${preBook ? " · pre-book (simulated)" : ""}`;
-                      }}
+                      content={
+                        <DailyPnlTooltip bookStartDate={bookStartDate} />
+                      }
+                      cursor={{ fill: "rgba(0,0,0,0.04)" }}
                     />
                     <ReferenceLine y={0} stroke="#9ca3af" />
                     {var95 < 0 ? (
@@ -1278,6 +1458,49 @@ export default function RiskPage() {
                     : ""}
                   · VaR tiles above use the full {RISK_LOOKBACK_DAYS}-day sample regardless of this selection
                 </p>
+                {outlierDay ? (
+                  <div
+                    className="mt-3 rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-3 py-2"
+                    role="status"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
+                      Outlier day
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                      <span className="font-semibold">
+                        {formatDay(outlierDay.day.date)}
+                      </span>{" "}
+                      {formatSignedGbp(outlierDay.day.pnl)} is{" "}
+                      {(
+                        Math.abs(outlierDay.day.pnl) /
+                        Math.max(outlierDay.restStd, 1)
+                      ).toFixed(1)}
+                      σ vs the rest of this window. Biggest contributors:{" "}
+                      {MARKET_ORDER.filter(
+                        (m) =>
+                          outlierDay.day.byMarket[m] != null &&
+                          outlierDay.day.byMarket[m] !== 0,
+                      )
+                        .sort(
+                          (a, b) =>
+                            Math.abs(outlierDay.day.byMarket[b] ?? 0) -
+                            Math.abs(outlierDay.day.byMarket[a] ?? 0),
+                        )
+                        .slice(0, 3)
+                        .map((m) => {
+                          const contrib = outlierDay.day.byMarket[m] ?? 0;
+                          const move = outlierDay.day.moves[m];
+                          return `${MARKET_LABEL[m]} ${formatSignedGbp(contrib)}${
+                            move != null ? ` (Δ ${formatMove(m, move)})` : ""
+                          }`;
+                        })
+                        .join(" · ") || "—"}
+                      . One large day can dominate daily vol and Sharpe; hover
+                      the bar for the full breakdown and verify the raw price
+                      move is real before trusting the headline numbers.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             )}
           </section>
