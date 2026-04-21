@@ -1,5 +1,10 @@
 /**
  * Canonical portfolio stress scenarios (Optimise + Risk). Keep numeric moves in sync.
+ *
+ * Carbon moves (UKA GBP/t, EUA EUR/t) are desk estimates for each period.
+ * They are optional so the Optimise engine (which ignores carbon today)
+ * continues to work, while the Risk page can surface a realistic carbon
+ * impact for UKA/EUA positions instead of silently zeroing them.
  */
 export type StressScenarioData = {
   id: string;
@@ -12,6 +17,8 @@ export type StressScenarioData = {
   gbPowerMove: number;
   ttfMoveEurMwh: number;
   nbpMovePth: number;
+  ukaMoveGbpT?: number;
+  euaMoveEurT?: number;
 };
 
 export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
@@ -25,6 +32,10 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: 400,
     ttfMoveEurMwh: 100,
     nbpMovePth: 150,
+    // EUA traded in a €80-€95 range that month; UKA was a fresh launch still
+    // finding parity with EUA. Both drifted up with gas-marginal dispatch.
+    ukaMoveGbpT: 10,
+    euaMoveEurT: 12,
   },
   {
     id: "stress-ukraine-invasion",
@@ -36,6 +47,9 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: 150,
     ttfMoveEurMwh: 50,
     nbpMovePth: 60,
+    // Risk-off sell-off in carbon as funds liquidated EUA in early March.
+    ukaMoveGbpT: -18,
+    euaMoveEurT: -22,
   },
   {
     id: "stress-gas-supply-crisis",
@@ -47,6 +61,9 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: 200,
     ttfMoveEurMwh: 80,
     nbpMovePth: 100,
+    // Gas→coal switching drove EUA from ~€55 to ~€65.
+    ukaMoveGbpT: 15,
+    euaMoveEurT: 18,
   },
   {
     id: "stress-wind-drought",
@@ -58,6 +75,8 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: 80,
     ttfMoveEurMwh: 5,
     nbpMovePth: 8,
+    ukaMoveGbpT: 4,
+    euaMoveEurT: 5,
   },
   {
     id: "stress-renewables-oversupply",
@@ -69,6 +88,8 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: -40,
     ttfMoveEurMwh: -2,
     nbpMovePth: -3,
+    ukaMoveGbpT: -2,
+    euaMoveEurT: -3,
   },
   {
     id: "stress-2023-spring-tightness",
@@ -80,5 +101,7 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     gbPowerMove: 175,
     ttfMoveEurMwh: 42,
     nbpMovePth: 58,
+    ukaMoveGbpT: 8,
+    euaMoveEurT: 10,
   },
 ];

@@ -75,6 +75,13 @@ type PowerPriceRow = {
  * HISTORICAL_MOVE_CAPS used by the Optimise engine. */
 const POWER_MOVE_SANITY_CAP_GBP_MWH = 250;
 
+/** Matches HISTORICAL_MOVE_CAPS in optimise.ts. NBP is stored in p/th so a
+ * day-over-day move above 80 p/th is almost certainly a feed artefact. */
+const NBP_MOVE_SANITY_CAP_PTH = 80;
+
+/** EUR/MWh. Above this is typically a Stooq print spike rather than a real move. */
+const TTF_MOVE_SANITY_CAP_EUR_MWH = 60;
+
 type GasPriceRow = {
   price_eur_mwh: number | null;
   price_time: string;
@@ -99,14 +106,26 @@ type Scenario = {
   name: string;
   period: string;
   description: string;
-  moves: { GB_power: number; TTF: number; NBP: number };
+  moves: {
+    GB_power: number;
+    TTF: number;
+    NBP: number;
+    UKA: number;
+    EUA: number;
+  };
 };
 
 const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
   name: s.name,
   period: s.period,
   description: s.description,
-  moves: { GB_power: s.gbPowerMove, TTF: s.ttfMoveEurMwh, NBP: s.nbpMovePth },
+  moves: {
+    GB_power: s.gbPowerMove,
+    TTF: s.ttfMoveEurMwh,
+    NBP: s.nbpMovePth,
+    UKA: s.ukaMoveGbpT ?? 0,
+    EUA: s.euaMoveEurT ?? 0,
+  },
 }));
 
 function asNum(v: unknown): number {
@@ -183,6 +202,23 @@ function isEuaMarket(market: string | null | undefined): boolean {
   return (market ?? "").toLowerCase().replace(/[\s_]/g, "") === "eua";
 }
 
+/**
+ * True for markets the Risk engine actually marks to market. Anything
+ * outside this set (e.g. OTHER_POWER, OTHER_GAS variants, custom
+ * instruments) is silently excluded from VaR, CVaR and stress impacts,
+ * so the Risk page surfaces a banner to the user.
+ */
+function isRiskMarkableMarket(market: string | null | undefined): boolean {
+  const normalised = (market ?? "").toUpperCase().replace(/\s/g, "_");
+  return (
+    isGbPowerMarket(market) ||
+    normalised === "TTF" ||
+    normalised === "NBP" ||
+    isUkaMarket(market) ||
+    isEuaMarket(market)
+  );
+}
+
 const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
@@ -238,6 +274,9 @@ const calculateDailyPnL = (
         const prevTtf = ttfPricesByDay[prevDate];
         const currTtf = ttfPricesByDay[currDate];
         if (prevTtf == null || currTtf == null) continue;
+        // Reject bogus moves in the underlying EUR/MWh series before FX is
+        // applied — once FX has scaled the print, the clean signal is lost.
+        if (Math.abs(currTtf - prevTtf) > TTF_MOVE_SANITY_CAP_EUR_MWH) continue;
         const prevPrice = prevTtf * prevFx;
         const currPrice = currTtf * currFx;
         dayPnL += (currPrice - prevPrice) * size * direction;
@@ -246,7 +285,11 @@ const calculateDailyPnL = (
         const prevNbp = nbpPricesByDay[prevDate];
         const currNbp = nbpPricesByDay[currDate];
         if (prevNbp == null || currNbp == null) continue;
-        dayPnL += ((currNbp - prevNbp) * size) / 100 * direction;
+        const move = currNbp - prevNbp;
+        // NBP feed occasionally prints stale/placeholder values; cap wild
+        // day-over-day p/th moves so they can't manufacture a fake VaR tail.
+        if (Math.abs(move) > NBP_MOVE_SANITY_CAP_PTH) continue;
+        dayPnL += (move * size * direction) / 100;
         hasContributingSeries = true;
       } else if (isUkaMarket(pos.market)) {
         // UKA is stored in GBP/t; size is in tCO2.
@@ -303,6 +346,12 @@ const calculateScenarioImpact = (
       positionImpact = scenario.moves.TTF * gbpEurRate * size * direction;
     } else if (market === "NBP") {
       positionImpact = (scenario.moves.NBP * size * direction) / 100;
+    } else if (market === "UKA") {
+      // UKA positions: GBP/t × tCO2 → GBP directly.
+      positionImpact = scenario.moves.UKA * size * direction;
+    } else if (market === "EUA") {
+      // EUA positions: EUR/t × tCO2 × FX → GBP.
+      positionImpact = scenario.moves.EUA * gbpEurRate * size * direction;
     }
 
     total += positionImpact;
@@ -816,7 +865,11 @@ export default function RiskPage() {
     0,
   );
   const diversificationBenefit = sumIndividualVaRs - Math.abs(var95);
-  const totalRiskBase = Math.max(Math.abs(var95), 1);
+  // Normalise by gross risk (sum of abs per-position worst-day losses) so the
+  // column is a share that always sums to 100%. Previously it divided by
+  // portfolio VaR95, which produced 200%+ per row on concentrated books —
+  // technically valid but visually alarming and hard to read at a glance.
+  const grossRiskBase = Math.max(sumIndividualVaRs, 1);
 
   const scenarioResults = useMemo(
     () => STRESS_SCENARIOS.map((s) => ({ scenario: s, ...calculateScenarioImpact(s, positions, gbpEurRate) })),
@@ -929,7 +982,22 @@ export default function RiskPage() {
 
   const hasPositions = positions.length > 0;
   const noHistory = dailyPnLSeries.length === 0;
-  const coveragePct = Math.min(100, (dailyPnLSeries.length / 20) * 100);
+  // Positions with markets we can't mark are silently skipped in VaR/CVaR
+  // and stress — list them so traders know the headline numbers are
+  // incomplete.
+  const unmarkablePositions = useMemo(
+    () => positions.filter((p) => !isRiskMarkableMarket(p.market)),
+    [positions],
+  );
+  // Coverage = how much of the 120-day risk lookback we actually have
+  // simulated daily P&L for. Previously this divided by 20 (the minimum
+  // days for a meaningful empirical VaR), so a book with just 21 days of
+  // simulated P&L would show "100% coverage" — true to the reliability
+  // threshold but misleading as a data-depth signal for traders.
+  const coveragePct = Math.min(
+    100,
+    (dailyPnLSeries.length / RISK_LOOKBACK_DAYS) * 100,
+  );
   const reliabilityLabel = formatReliabilityConfidenceDesk(
     reliabilityConfidenceFromVaRHistoryDays(dailyPnLSeries.length),
   );
@@ -996,6 +1064,31 @@ export default function RiskPage() {
               metrics will appear once price series data is available.
             </p>
           ) : null}
+          {unmarkablePositions.length > 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3"
+              role="status"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
+                No mark source
+              </p>
+              <p className="mt-1 text-sm text-amber-900">
+                {unmarkablePositions.length === 1
+                  ? "1 position is"
+                  : `${unmarkablePositions.length} positions are`}{" "}
+                excluded from VaR, CVaR and stress calculations because no live
+                mark series is wired up for{" "}
+                {Array.from(
+                  new Set(
+                    unmarkablePositions.map((p) => p.market ?? "unknown"),
+                  ),
+                ).join(", ")}
+                . Supported markets: GB Power, TTF, NBP, UKA, EUA.
+              </p>
+            </motion.div>
+          ) : null}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1019,11 +1112,15 @@ export default function RiskPage() {
               <div className="flex-1 min-w-0 sm:border-r-[0.5px] sm:border-ivory-border sm:pr-6 sm:mr-6">
                 <p className={sectionLabel}>99% 1-day VaR</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                  {dailyPnLSeries.length < 30 ? "—" : formatGbp(Math.abs(var99))}
+                  {/* Empirical 99% VaR reads the ~1st-worst day in the series; with
+                      fewer than 100 days that estimate is pinned to one outlier
+                      and carries no real information. Hold the tile until depth
+                      is meaningful. */}
+                  {dailyPnLSeries.length < 100 ? "—" : formatGbp(Math.abs(var99))}
                 </p>
                 <p className="mt-1 text-xs text-ink-light">
-                  {dailyPnLSeries.length < 30
-                    ? `Need 30+ days (have ${dailyPnLSeries.length})`
+                  {dailyPnLSeries.length < 100
+                    ? `Need 100+ days (have ${dailyPnLSeries.length})`
                     : `Historical · ${dailyPnLSeries.length} days`}
                 </p>
               </div>
@@ -1200,13 +1297,20 @@ export default function RiskPage() {
                     <th className="px-3 py-3">Dir</th>
                     <th className="px-3 py-3">Size</th>
                     <th className="px-3 py-3">Worst day</th>
-                    <th className="px-3 py-3">% of total risk</th>
+                    <th
+                      className="px-3 py-3"
+                      title="Share of gross portfolio risk — each position's worst-day loss divided by the sum of every position's worst-day loss (absolute). Rows add to 100%."
+                    >
+                      Share of gross risk
+                    </th>
                     <th className="px-4 py-3">Market</th>
                   </tr>
                 </thead>
                 <tbody>
                   {perPositionRisk.map(({ position, worst }) => {
-                    const pct = noHistory ? 0 : (Math.abs(worst?.pnl ?? 0) / totalRiskBase) * 100;
+                    const pct = noHistory
+                      ? 0
+                      : (Math.abs(worst?.pnl ?? 0) / grossRiskBase) * 100;
                     return (
                       <tr key={position.id} className="border-b border-ivory-border/80">
                         <td className="px-4 py-3 text-ink">{position.instrument ?? "—"}</td>
@@ -1236,7 +1340,9 @@ export default function RiskPage() {
               </div>
               <div className="border-t-[0.5px] border-ivory-border px-4 pt-3 mt-3 pb-3">
                 <p className="text-[11px] text-ink-light">
-                  Individual positions can exceed 100% when others offset portfolio risk.
+                  Share of gross risk sums to 100% across rows. Portfolio VaR can be
+                  lower than the sum of individual worst-day losses when positions
+                  offset each other — that gap is the diversification benefit below.
                 </p>
                 {diversificationBenefit > 0 ? (
                   <p className="mt-2 text-[11px] text-ink">
