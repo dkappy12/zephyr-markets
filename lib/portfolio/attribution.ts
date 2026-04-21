@@ -9,7 +9,12 @@ import {
   type LivePrices,
 } from "@/lib/portfolio/book";
 
-/** £/MWh per €/MWh TTF move (EUR → GBP at 0.86). */
+/**
+ * Fallback EUR→GBP for gas attribution when no live rate is available.
+ * Prefer passing the live `LivePrices.gbpPerEur` through to the
+ * attribution helpers; this constant is kept only as a last-resort
+ * default for legacy call sites.
+ */
 export const GAS_TTF_GBP_PER_EUR_MWH = GBP_PER_EUR;
 
 /** Canonical NBP conversion shared with Book/Risk/Optimise. */
@@ -169,6 +174,7 @@ export function gasAttributionForPosition(
   ttfStart: number,
   ttfCurrent: number,
   p: PositionRow,
+  gbpPerEur: number = GAS_TTF_GBP_PER_EUR_MWH,
 ): number {
   if (!isGasMarket(p)) return 0;
   const dm = dirMult(p.direction);
@@ -178,11 +184,11 @@ export function gasAttributionForPosition(
   const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
   const deltaTtf = ttfCurrent - ttfStart;
   if (m === "ttf" || m === "other_gas") {
-    return deltaTtf * GAS_TTF_GBP_PER_EUR_MWH * sz * dm;
+    return deltaTtf * gbpPerEur * sz * dm;
   }
   if (m === "nbp") {
-    const pStart = attributionTtfToNbpPencePerTherm(ttfStart);
-    const pEnd = attributionTtfToNbpPencePerTherm(ttfCurrent);
+    const pStart = attributionTtfToNbpPencePerTherm(ttfStart, gbpPerEur);
+    const pEnd = attributionTtfToNbpPencePerTherm(ttfCurrent, gbpPerEur);
     return nbpPnlGbp(p.direction, pStart, pEnd, sz) ?? 0;
   }
   return 0;
@@ -204,6 +210,7 @@ export function sumGasAttribution(
   positions: PositionRow[],
   ttfStart: number | null,
   ttfCurrent: number | null,
+  gbpPerEur: number = GAS_TTF_GBP_PER_EUR_MWH,
 ): number {
   if (
     ttfStart == null ||
@@ -215,7 +222,7 @@ export function sumGasAttribution(
   }
   let s = 0;
   for (const p of positions) {
-    s += gasAttributionForPosition(ttfStart, ttfCurrent, p);
+    s += gasAttributionForPosition(ttfStart, ttfCurrent, p, gbpPerEur);
   }
   return s;
 }

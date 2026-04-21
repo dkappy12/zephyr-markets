@@ -339,7 +339,7 @@ export function AttributionPageClient() {
         .maybeSingle(),
       supabase
         .from("fx_rates")
-        .select("rate")
+        .select("rate, rate_date")
         .eq("base", "EUR")
         .eq("quote", "GBP")
         .order("rate_date", { ascending: false })
@@ -379,14 +379,32 @@ export function AttributionPageClient() {
         : NaN;
 
     const fxData = fxLatest.data;
-    const liveFxRate =
+    const hasLiveFx =
       fxData != null &&
       typeof fxData === "object" &&
       "rate" in fxData &&
-      fxData.rate != null
-        ? Number((fxData as { rate: unknown }).rate)
-        : GBP_PER_EUR;
+      fxData.rate != null &&
+      Number.isFinite(Number((fxData as { rate: unknown }).rate));
+    const liveFxRate = hasLiveFx
+      ? Number((fxData as { rate: unknown }).rate)
+      : GBP_PER_EUR;
     const gbpPerEur = Number.isFinite(liveFxRate) ? liveFxRate : GBP_PER_EUR;
+    const fxRateDate =
+      hasLiveFx &&
+      fxData != null &&
+      typeof fxData === "object" &&
+      "rate_date" in fxData
+        ? String((fxData as { rate_date: unknown }).rate_date ?? "")
+        : null;
+    const gbpPerEurAgeDays = fxRateDate
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.now() - new Date(`${fxRateDate}T00:00:00.000Z`).getTime()) /
+              (24 * 60 * 60 * 1000),
+          ),
+        )
+      : undefined;
 
     const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * gbpPerEur : null;
     const ttfOpenGbp = Number.isFinite(ttfEurOpen)
@@ -417,6 +435,8 @@ export function AttributionPageClient() {
           ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
           : null,
       gbpPerEur,
+      gbpPerEurIsFallback: !hasLiveFx,
+      gbpPerEurAgeDays,
       ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
       euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
       euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
@@ -431,6 +451,7 @@ export function AttributionPageClient() {
 
     const today = utcToday();
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const since120 = format(subDays(new Date(), 120), "yyyy-MM-dd");
 
     const [
@@ -458,11 +479,15 @@ export function AttributionPageClient() {
         .order("calculated_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // 7-day wind baseline: matches the "Δwind vs 7d baseline" caption in
+      // the driver bar. Previously queried the last 2016 rows with no date
+      // filter, so the window silently grew longer when ingestion slowed or
+      // shorter when it sped up — the "7d" caption was aspirational.
       supabase
         .from("physical_premium")
         .select("wind_gw")
-        .order("calculated_at", { ascending: false })
-        .limit(2016),
+        .gte("calculated_at", since7d)
+        .order("calculated_at", { ascending: false }),
       supabase
         .from("market_prices")
         .select("price_gbp_mwh")
@@ -594,8 +619,14 @@ export function AttributionPageClient() {
     [positions, deltaWindGw, currentWindGw],
   );
   const gasAttRaw = useMemo(
-    () => sumGasAttribution(positions, ttfStart, ttfCurrent),
-    [positions, ttfStart, ttfCurrent],
+    () =>
+      sumGasAttribution(
+        positions,
+        ttfStart,
+        ttfCurrent,
+        livePrices?.gbpPerEur ?? GBP_PER_EUR,
+      ),
+    [positions, ttfStart, ttfCurrent, livePrices?.gbpPerEur],
   );
   const remitAtt = useMemo(
     () => sumRemitAttribution(positions, deltaRemitMw, residualDemandGw),
@@ -631,29 +662,40 @@ export function AttributionPageClient() {
       ),
     [positions, priceResidualMoveGbpMwh],
   );
+  // Demand / interconnector attribution collapses multiple signals in the
+  // same direction to a single mean-magnitude impact rather than summing
+  // them. Previously each REMIT-like mention added its own £/MWh push, so
+  // a day with 10 demand signals scaled 10× vs a day with 1 — regardless
+  // of whether the underlying system state was any different. Mean-of-mag
+  // by direction keeps the sign information while removing the volume
+  // inflation; netGbMw is applied once at the end.
   const demandAtt = useMemo(() => {
     if (netGbMw === 0) return 0;
-    let total = 0;
+    const byDir: Record<-1 | 1, number[]> = { [-1]: [], [1]: [] };
     for (const s of demandSignals) {
-      const sign = signalDirectionSign(s);
+      const sign = signalDirectionSign(s) as -1 | 0 | 1;
       if (sign === 0) continue;
       const gw = parseSignalMagnitudeGw(s.description) ?? 0.5;
-      const priceImpactGbpMwh = gw * 1.2 * sign;
-      total += priceImpactGbpMwh * netGbMw;
+      byDir[sign].push(gw * 1.2);
     }
-    return Math.round(total / 10) * 10;
+    const mean = (xs: number[]) =>
+      xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+    const priceImpactGbpMwh = mean(byDir[1]) - mean(byDir[-1]);
+    return Math.round((priceImpactGbpMwh * netGbMw) / 10) * 10;
   }, [demandSignals, netGbMw]);
   const interconnectorAtt = useMemo(() => {
     if (netGbMw === 0) return 0;
-    let total = 0;
+    const byDir: Record<-1 | 1, number[]> = { [-1]: [], [1]: [] };
     for (const s of interconnectorSignals) {
-      const sign = interconnectorSign(s);
+      const sign = interconnectorSign(s) as -1 | 0 | 1;
       if (sign === 0) continue;
       const gw = parseSignalMagnitudeGw(s.description) ?? 0.4;
-      const priceImpactGbpMwh = gw * 0.9 * sign;
-      total += priceImpactGbpMwh * netGbMw;
+      byDir[sign].push(gw * 0.9);
     }
-    return Math.round(total / 10) * 10;
+    const mean = (xs: number[]) =>
+      xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+    const priceImpactGbpMwh = mean(byDir[1]) - mean(byDir[-1]);
+    return Math.round((priceImpactGbpMwh * netGbMw) / 10) * 10;
   }, [interconnectorSignals, netGbMw]);
 
   const calibration = useMemo(() => {
@@ -1166,6 +1208,28 @@ export function AttributionPageClient() {
             </p>
           ) : null}
 
+          {livePrices?.gbpPerEurIsFallback ||
+          (livePrices?.gbpPerEurAgeDays != null &&
+            livePrices.gbpPerEurAgeDays > 3) ? (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3"
+              role="status"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
+                Stale FX
+              </p>
+              <p className="mt-1 text-sm text-amber-900">
+                {livePrices.gbpPerEurIsFallback
+                  ? `Using hardcoded fallback EUR→GBP = ${GBP_PER_EUR.toFixed(4)} — no rows in fx_rates.`
+                  : `EUR→GBP rate is ${livePrices.gbpPerEurAgeDays} days old.`}{" "}
+                Gas attribution and EUA-denominated P&amp;L may be slightly off
+                until the FX loader catches up.
+              </p>
+            </motion.div>
+          ) : null}
+
           {/* Top stats */}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
@@ -1285,11 +1349,15 @@ export function AttributionPageClient() {
                         dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
-                        name: "Carbon (UKA)",
+                        name: "Carbon (SRMC split)",
                         impact: carbonAttCal,
-                        dir: `UKA ref £${CARBON_UKA_GBP_PER_TCO2}/t · EF ${CARBON_EF_TCO2_PER_MWH.toFixed(3)} t/MWh · ${(
-                          carbonShare * 100
-                        ).toFixed(0)}% of gas stack`,
+                        // This driver is the carbon-cost share of the gas
+                        // driver, split using the SRMC stack (fuel vs carbon
+                        // vs fixed). It is NOT a response to UKA forward
+                        // moves — UKA mark-to-market P&L lives in the
+                        // position-level desk view. Label accordingly so
+                        // traders don't read it as carbon-market exposure.
+                        dir: `${(carbonShare * 100).toFixed(0)}% of SRMC stack · UKA ref £${CARBON_UKA_GBP_PER_TCO2}/t · EF ${CARBON_EF_TCO2_PER_MWH.toFixed(3)} t/MWh`,
                       },
                       {
                         name: "REMIT outages",
@@ -1399,6 +1467,7 @@ export function AttributionPageClient() {
                     ttfStart ?? 0,
                     ttfCurrent ?? 0,
                     p,
+                    livePrices?.gbpPerEur ?? GBP_PER_EUR,
                   );
                   const c = gTotal * carbonShare;
                   const g = gTotal * (1 - carbonShare);
@@ -1446,7 +1515,7 @@ export function AttributionPageClient() {
                         ) : null}
                         {c !== 0 ? (
                           <li>
-                            Carbon factor:{" "}
+                            Carbon-cost split:{" "}
                             <span className={formatGbpColored(c).className}>
                               {formatGbpColored(c).text}
                             </span>

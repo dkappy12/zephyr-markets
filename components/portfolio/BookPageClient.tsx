@@ -374,7 +374,7 @@ export function BookPageClient() {
         .maybeSingle(),
       supabase
         .from("fx_rates")
-        .select("rate")
+        .select("rate, rate_date")
         .eq("base", "EUR")
         .eq("quote", "GBP")
         .order("rate_date", { ascending: false })
@@ -421,7 +421,29 @@ export function BookPageClient() {
       fxData.rate != null
         ? Number((fxData as { rate: unknown }).rate)
         : GBP_PER_EUR;
+    const hasLiveFx =
+      fxData != null &&
+      typeof fxData === "object" &&
+      "rate" in fxData &&
+      fxData.rate != null &&
+      Number.isFinite(Number((fxData as { rate: unknown }).rate));
     const gbpPerEur = Number.isFinite(liveFxRate) ? liveFxRate : GBP_PER_EUR;
+    const fxRateDate =
+      hasLiveFx &&
+      fxData != null &&
+      typeof fxData === "object" &&
+      "rate_date" in fxData
+        ? String((fxData as { rate_date: unknown }).rate_date ?? "")
+        : null;
+    const gbpPerEurAgeDays = fxRateDate
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.now() - new Date(`${fxRateDate}T00:00:00.000Z`).getTime()) /
+              (24 * 60 * 60 * 1000),
+          ),
+        )
+      : undefined;
 
     const ttfGbp = Number.isFinite(ttfEur) ? ttfEur * gbpPerEur : null;
     const ttfOpenGbp = Number.isFinite(ttfEurOpen)
@@ -452,6 +474,8 @@ export function BookPageClient() {
           ? ttfToNbpPencePerTherm(ttfEurOpen, gbpPerEur)
           : null,
       gbpPerEur,
+      gbpPerEurIsFallback: !hasLiveFx,
+      gbpPerEurAgeDays,
       ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
       euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
       euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
@@ -762,6 +786,27 @@ export function BookPageClient() {
         </div>
       ) : (
         <>
+          {livePrices?.gbpPerEurIsFallback ||
+          (livePrices?.gbpPerEurAgeDays != null &&
+            livePrices.gbpPerEurAgeDays > 3) ? (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3"
+              role="status"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
+                Stale FX
+              </p>
+              <p className="mt-1 text-sm text-amber-900">
+                {livePrices.gbpPerEurIsFallback
+                  ? `Using hardcoded fallback EUR→GBP = ${GBP_PER_EUR.toFixed(4)} — no rows in fx_rates.`
+                  : `EUR→GBP rate is ${livePrices.gbpPerEurAgeDays} days old.`}{" "}
+                TTF £ marks, EUA £ bridges, and gas attribution may be slightly
+                off until the FX loader catches up.
+              </p>
+            </motion.div>
+          ) : null}
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}

@@ -173,6 +173,19 @@ export type LivePrices = {
   nbpOpenPencePerTherm: number | null;
   /** EUR→GBP for TTF £ bridge and TTF P&amp;L (live from fx_rates or {@link GBP_PER_EUR}). */
   gbpPerEur: number;
+  /**
+   * True when `gbpPerEur` is the hardcoded {@link GBP_PER_EUR} fallback
+   * rather than a value fetched from the `fx_rates` table. UI surfaces
+   * a warning badge when this flag is set so users know EUR-denominated
+   * P&amp;L, TTF £ marks and gas attribution may be slightly stale.
+   */
+  gbpPerEurIsFallback?: boolean;
+  /**
+   * Age in days of the newest `fx_rates` EUR→GBP row used. Undefined
+   * when the table is empty (fallback is used). Values &gt; 3 suggest
+   * the daily FX loader has stalled.
+   */
+  gbpPerEurAgeDays?: number;
   ukaGbpPerT: number | null;
   euaEurPerT: number | null;
   euaGbpPerT: number | null;

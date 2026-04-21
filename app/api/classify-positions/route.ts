@@ -627,9 +627,27 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
   if (!market) warnings.push("Unknown market; defaulted to null.");
   const unit = normaliseUnitValue(entry.unit, market);
   if (!safeString(entry.unit)) warnings.push("Missing unit; inferred default unit.");
-  const currency = normaliseCurrencyValue(entry.currency, market, unit);
+  let currency = normaliseCurrencyValue(entry.currency, market, unit);
   if (!safeString(entry.currency))
     warnings.push("Missing currency; inferred default currency.");
+  // UKA trades settle in GBP, EUA trades settle in EUR. When a user-supplied
+  // currency contradicts the market convention the trade_price is almost
+  // always already in the conventional currency and the tag is a CSV
+  // mis-label — coercing silently produced wrong P&L before (a UKA position
+  // tagged EUR would be FX-converted at import). Coerce back to the
+  // convention and emit a warning so the user can audit the row.
+  if (market === "UKA" && currency === "EUR") {
+    warnings.push(
+      "UKA settles in GBP; overriding EUR tag. If trade_price is actually EUR/tCO2, re-upload with market=EUA.",
+    );
+    currency = "GBP";
+  }
+  if (market === "EUA" && currency === "GBP") {
+    warnings.push(
+      "EUA settles in EUR; overriding GBP tag. If trade_price is actually GBP/tCO2, re-upload with market=UKA.",
+    );
+    currency = "EUR";
+  }
   const direction = normaliseDirectionValue(entry.direction);
   if (!direction) warnings.push("Missing direction.");
   const size = parseLooseNumber(entry.size);
