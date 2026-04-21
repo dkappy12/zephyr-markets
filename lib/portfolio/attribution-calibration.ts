@@ -167,8 +167,10 @@ export function attributionConfidenceFromMetrics(opts: {
   calibration: CalibrationResult;
 }): "High" | "Medium" | "Low" {
   const explained = clamp(opts.explainedRatio, 0, 1);
-  const relResidual =
-    opts.totalPnlAbs > 1 ? opts.residualAbs / opts.totalPnlAbs : 1;
+  // relResidual is the noise share of driver magnitudes, i.e. the complement
+  // of explained. Kept in sync with the driver-share explainedRatio computed
+  // at the call site so offsetting drivers don't inflate noise artificially.
+  const relResidual = 1 - explained;
   if (opts.calibration.fallbackUsed || opts.calibration.sampleSize < MIN_SAMPLE_SIZE) {
     return "Low";
   }

@@ -761,11 +761,11 @@ export default function RiskPage() {
               <div className="flex-1 min-w-0 sm:border-r-[0.5px] sm:border-ivory-border sm:pr-6 sm:mr-6">
                 <p className={sectionLabel}>99% 1-day VaR</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                  {dailyPnLSeries.length < 5 ? "—" : formatGbp(Math.abs(var99))}
+                  {dailyPnLSeries.length < 30 ? "—" : formatGbp(Math.abs(var99))}
                 </p>
                 <p className="mt-1 text-xs text-ink-light">
-                  {dailyPnLSeries.length < 5
-                    ? "Need 5+ days of data"
+                  {dailyPnLSeries.length < 30
+                    ? `Need 30+ days (have ${dailyPnLSeries.length})`
                     : `Historical · ${dailyPnLSeries.length} days`}
                 </p>
               </div>

@@ -95,13 +95,23 @@ function parseDeratedMwFromDescription(description: string | null): number | nul
   return Number.isFinite(n) ? n : null;
 }
 
-/** £/MWh price lift per MW offline × user's net GB power MW; rounded to nearest £10. */
+/**
+ * Per-signal £ impact on the book, using the SAME sensitivity curve as the
+ * calibrated REMIT driver row (remitPriceImpactGbpPerMwh) and the SAME
+ * multiplier. This guarantees the per-signal cards and the driver row are
+ * internally consistent instead of two independent estimators.
+ */
 function unplannedSignalImpactGbp(
   mwOffline: number,
   netPowerMw: number,
+  residualDemandGw: number,
+  remitMultiplier: number,
 ): number {
-  const priceImpactGbpPerMwh = mwOffline * 0.05;
-  const bookImpact = priceImpactGbpPerMwh * netPowerMw;
+  const priceImpactGbpPerMwh = remitPriceImpactGbpPerMwh(
+    mwOffline,
+    residualDemandGw,
+  );
+  const bookImpact = priceImpactGbpPerMwh * netPowerMw * remitMultiplier;
   return Math.round(bookImpact / 10) * 10;
 }
 
@@ -693,12 +703,19 @@ export function AttributionPageClient() {
     demandAttCal -
     interconnectorAttCal;
   const explainedPnl = totalPnl - residual;
+  const explainedAbs = Math.abs(explainedPnl);
+  const residualAbs = Math.abs(residual);
+  // Share of driver magnitudes captured by the model. Robust to offsetting
+  // drivers (unlike |explained| / |totalPnl|, which collapses when drivers
+  // cancel each other on a near-flat day).
   const explainedRatio =
-    Math.abs(totalPnl) > 1 ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalPnl)) : 0;
+    explainedAbs + residualAbs > 1e-6
+      ? explainedAbs / (explainedAbs + residualAbs)
+      : 0;
   const explainedPct = Math.round(explainedRatio * 100);
   const attributionConfidence = attributionConfidenceFromMetrics({
     explainedRatio,
-    residualAbs: Math.abs(residual),
+    residualAbs,
     totalPnlAbs: Math.abs(totalPnl),
     calibration,
   });
@@ -1465,7 +1482,12 @@ export function AttributionPageClient() {
                   const netMw = gbNet.isMixed ? 0 : gbNet.signedMw;
                   const est =
                     mwOffline != null && mwOffline > 0
-                      ? unplannedSignalImpactGbp(mwOffline, netMw)
+                      ? unplannedSignalImpactGbp(
+                          mwOffline,
+                          netMw,
+                          residualDemandGw,
+                          calibration.multipliers.remit,
+                        )
                       : 0;
                   const estFmt = formatGbpColored(est);
                   const gbPos = positions.find((p) => isGbPowerMarket(p));

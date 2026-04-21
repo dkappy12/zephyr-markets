@@ -25,6 +25,7 @@ import {
   PositionRow,
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
+import { totalTodayPnlGbp } from "@/lib/portfolio/attribution";
 import { Check, Pencil, Trash2, Wind } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -65,9 +66,13 @@ function pricePoints(
 ): number | null {
   if (!lp) return null;
   const market = normaliseMarket(p.market);
-  if (market === "GB_POWER" || market === "OTHER_POWER") {
+  if (market === "GB_POWER") {
     return which === "current" ? lp.gbPowerGbpMwh : lp.gbPowerOpenGbpMwh;
   }
+  // Non-UK power (Nordic / German / French / etc.) has no mark source wired up
+  // yet; return null rather than re-using the GB day-ahead, which would inject
+  // a spurious P&L.
+  if (market === "OTHER_POWER") return null;
   if (market === "TTF") {
     return which === "current" ? lp.ttfEurMwh : lp.ttfOpenEurMwh;
   }
@@ -117,10 +122,11 @@ function formatEntryPrice(p: PositionRow): string {
 function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   if (!lp) return "—";
   const market = normaliseMarket(p.market);
-  if (market === "GB_POWER" || market === "OTHER_POWER") {
+  if (market === "GB_POWER") {
     const v = lp.gbPowerGbpMwh;
     return v != null ? `£${v.toFixed(2)}` : "—";
   }
+  if (market === "OTHER_POWER") return "—";
   if (market === "TTF") {
     const v = lp.ttfEurMwh;
     return v != null ? `€${v.toFixed(2)}/MWh` : "—";
@@ -160,7 +166,10 @@ function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null
   }
   const market = normaliseMarket(p.market);
   if (market === "OTHER") return "No mark source configured for this market.";
-  if (market === "GB_POWER" || market === "OTHER_POWER") {
+  if (market === "OTHER_POWER") {
+    return "No mark source configured for this market — supported power markets: GB Power (N2EX/APX).";
+  }
+  if (market === "GB_POWER") {
     return lp.gbPowerGbpMwh == null ? "Missing GB power market mark." : null;
   }
   if (market === "TTF") {
@@ -185,7 +194,8 @@ function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null
 function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
   if (!lp) return false;
   const market = normaliseMarket(p.market);
-  if (market === "GB_POWER" || market === "OTHER_POWER") return lp.gbPowerGbpMwh != null;
+  if (market === "GB_POWER") return lp.gbPowerGbpMwh != null;
+  if (market === "OTHER_POWER") return false;
   if (market === "TTF") return lp.ttfEurMwh != null;
   if (market === "NBP") return lp.nbpPencePerTherm != null;
   if (market === "UKA") return lp.ukaGbpPerT != null;
@@ -463,13 +473,19 @@ export function BookPageClient() {
         : positions.reduce((a, b) =>
             a.created_at > b.created_at ? a : b,
           );
+    const todayPnl = livePrices ? totalTodayPnlGbp(positions, livePrices) : null;
+    const todayPnlFmt =
+      todayPnl != null && Number.isFinite(todayPnl)
+        ? formatGbpColored(todayPnl)
+        : null;
     return {
       net,
       openCount: positions.length,
       markets,
       bookUpdated: latest?.created_at ?? null,
+      todayPnl: todayPnlFmt,
     };
-  }, [positions]);
+  }, [positions, livePrices]);
 
   function handleClassified(payload: {
     headers: string[];
@@ -747,6 +763,17 @@ export function BookPageClient() {
               <p className={sectionLabel}>Net delta</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
                 {stats.net.label}
+              </p>
+            </div>
+            <div>
+              <p className={sectionLabel}>Today P&amp;L</p>
+              <p
+                className={`mt-1 text-lg font-semibold tabular-nums ${
+                  stats.todayPnl?.className ?? "text-ink"
+                }`}
+                title="Aggregated from priced positions only. Rows without a mark source are excluded."
+              >
+                {stats.todayPnl?.text ?? "—"}
               </p>
             </div>
             <div>
