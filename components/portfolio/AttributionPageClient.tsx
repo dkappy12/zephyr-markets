@@ -755,6 +755,9 @@ export function AttributionPageClient() {
       ? explainedAbs / (explainedAbs + residualAbs)
       : 0;
   const explainedPct = Math.round(explainedRatio * 100);
+  /** “97% explained” is misleading when the calibration fit is unusable (R²≈0). */
+  const showExplainedVariancePct =
+    !calibration.fallbackUsed && calibration.r2 >= 0.1;
   const attributionConfidence = attributionConfidenceFromMetrics({
     explainedRatio,
     residualAbs,
@@ -1269,10 +1272,12 @@ export function AttributionPageClient() {
             <div>
               <p className={sectionLabel}>Explained</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {explainedPct}%
+                {showExplainedVariancePct ? `${explainedPct}%` : "—"}
               </p>
               <p className="mt-1 text-[11px] text-ink-mid">
-                {attributionConfidence} confidence
+                {showExplainedVariancePct
+                  ? `${attributionConfidence} confidence`
+                  : "Share hidden — need R² ≥ 0.1 and ≥30 history rows (or calibration fallback is active)."}
               </p>
             </div>
           </motion.div>
@@ -1429,8 +1434,19 @@ export function AttributionPageClient() {
               </table>
             </div>
             <p className="mt-3 text-xs text-ink-light">
-              Model explains {explainedPct}% of today&apos;s P&amp;L ({formatSignedGbp(explainedPnl)} explained,{" "}
-              {formatSignedGbp(residual)} residual) · confidence: {attributionConfidence}.
+              {showExplainedVariancePct ? (
+                <>
+                  Model explains {explainedPct}% of today&apos;s P&amp;L ({formatSignedGbp(explainedPnl)} explained,{" "}
+                  {formatSignedGbp(residual)} residual) · confidence: {attributionConfidence}.
+                </>
+              ) : (
+                <>
+                  Explained % is not shown while calibration has R² = {calibration.r2.toFixed(2)} on n=
+                  {calibration.sampleSize}
+                  (minimum fit quality for this headline is R² ≥ 0.1 with ≥{MIN_SAMPLE_SIZE} days). Driver
+                  waterfall still uses best-effort multipliers.
+                </>
+              )}
             </p>
             {diagnostics.length > 0 ? (
               <div className="mt-2 space-y-1">

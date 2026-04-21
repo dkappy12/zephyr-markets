@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHistoricalScenarios,
+  minHistoricalScenariosForConfidence,
   nbpLevelsPthByDay,
   optimisePortfolio,
   stressScenarios,
@@ -126,6 +127,13 @@ describe("buildHistoricalScenarios union-of-dates (post-2026-04 audit fix)", () 
   });
 });
 
+describe("minHistoricalScenariosForConfidence", () => {
+  it("matches the usual 95% (≈20) and 99% (100) day rules", () => {
+    expect(minHistoricalScenariosForConfidence(0.95)).toBe(20);
+    expect(minHistoricalScenariosForConfidence(0.99)).toBe(100);
+  });
+});
+
 describe("optimisePortfolio empty book", () => {
   it("returns no recommendations when there are no material positions", () => {
     const positions: PositionRow[] = [
@@ -167,6 +175,7 @@ describe("optimisePortfolio empty book", () => {
     expect(result.diagnostics.noAction).toBe(true);
     expect(result.diagnostics.noActionReason).toBe("No open positions to hedge.");
     expect(result.diagnostics.candidatePackageCount).toBe(0);
+    expect(result.diagnostics.historicalTailReliable).toBe(false);
   });
 });
 

@@ -8,7 +8,11 @@ import {
   formatReliabilityConfidenceDesk,
   reliabilityConfidenceFromVaRHistoryDays,
 } from "@/lib/reliability/contract";
-import { positionNotionalGbp, tenorToExpiryDate } from "@/lib/portfolio/book";
+import {
+  normaliseMarketBucket,
+  positionNotionalGbp,
+  tenorToExpiryDate,
+} from "@/lib/portfolio/book";
 import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
 import {
   aggregateDailyGasPrices,
@@ -342,8 +346,7 @@ function parseOptionalLimitNumber(raw: string): number | null {
 }
 
 function isGbPowerMarket(market: string | null | undefined): boolean {
-  const m = (market ?? "").toLowerCase().replace(/[\s_]/g, "");
-  return m === "gbpower" || m === "n2ex" || m === "apx";
+  return normaliseMarketBucket(market) === "GB_POWER";
 }
 
 function isUkaMarket(market: string | null | undefined): boolean {

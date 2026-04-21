@@ -71,6 +71,13 @@ export type OptimiseResult = {
     historicalScenarioCount: number;
     stressScenarioCount: number;
     fallbackUsed: boolean;
+    /**
+     * True when we have enough **historical** (non-fallback) scenarios to
+     * estimate the requested tail quantile. If false, VaR/CVaR from
+     * `computeRiskMetrics` are not meaningfully distinct across confidence
+     * levels and the UI should show an em dash instead of a number.
+     */
+    historicalTailReliable: boolean;
     candidatePackageCount: number;
     nbpProxyUsed: boolean;
     stabilityIndex: number;
@@ -200,9 +207,24 @@ function asSyntheticPosition(trade: HedgeTrade): PositionRow {
 
 function quantileLoss(sortedLossesAsc: number[], confidence: number): number {
   if (sortedLossesAsc.length === 0) return 0;
+  // `loss` is −(scenario P&L), sorted ascending: worst drawdowns sit at the
+  // *high* end, so the (1−α) tail is indexed from the top — same as the
+  // pre-2024 implementation (`floor(confidence * n)`), not the P&L-based
+  // `floor((1−confidence)*n)` in `risk/page.tsx` which works on sign-flipped
+  // P&L directly.
   const idx = Math.floor(confidence * sortedLossesAsc.length);
   const bounded = Math.min(sortedLossesAsc.length - 1, Math.max(0, idx));
   return sortedLossesAsc[bounded];
+}
+
+/**
+ * How many i.i.d. historical loss draws we need to pin the (1−α) tail, same
+ * rule of thumb as {@link app/dashboard/portfolio/risk} “Need 100+ days” for
+ * 99% 1-day VaR (with α = 1−confidence in loss space, aligned to `quantileLoss`).
+ */
+export function minHistoricalScenariosForConfidence(confidence: number): number {
+  const c = Math.min(0.999, Math.max(0.5, confidence));
+  return Math.max(1, Math.ceil(1 / (1 - c)));
 }
 
 function computeRiskMetrics(
@@ -410,6 +432,10 @@ export function optimisePortfolio(input: {
   const empiricalScenarios =
     historicalScenarios.length > 0 ? historicalScenarios : STRESS_SCENARIOS;
   const fallbackUsed = historicalScenarios.length === 0;
+  const historicalTailReliable =
+    !fallbackUsed &&
+    historicalScenarios.length >=
+      minHistoricalScenariosForConfidence(confidence);
 
   const before = computeRiskMetrics(
     positions,
@@ -435,6 +461,7 @@ export function optimisePortfolio(input: {
         historicalScenarioCount: historicalScenarios.length,
         stressScenarioCount: stressOnlyScenarios.length,
         fallbackUsed,
+        historicalTailReliable: false,
         candidatePackageCount: 0,
         nbpProxyUsed,
         stabilityIndex: 0,
@@ -595,6 +622,7 @@ export function optimisePortfolio(input: {
       historicalScenarioCount: historicalScenarios.length,
       stressScenarioCount: stressOnlyScenarios.length,
       fallbackUsed,
+      historicalTailReliable,
       candidatePackageCount: combos.length,
       nbpProxyUsed,
       stabilityIndex,

@@ -6,7 +6,10 @@ import {
   rechartsTooltipItemStyle,
   rechartsTooltipLabelStyle,
 } from "@/lib/charts/recharts-tooltip-styles";
-import type { HedgeTrade } from "@/lib/portfolio/optimise";
+import {
+  type HedgeTrade,
+  minHistoricalScenariosForConfidence,
+} from "@/lib/portfolio/optimise";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
@@ -30,6 +33,8 @@ type ApiResponse = {
   maxTrades: number;
   includeStress: boolean;
   gbpPerEur: number;
+  /** When false, VaR/CVaR are not a meaningful read for this confidence. */
+  historicalTailReliable: boolean;
   quality: "high" | "medium" | "low";
   qualityWarnings: string[];
   blocked: boolean;
@@ -92,6 +97,7 @@ type ApiResponse = {
     historicalScenarioCount: number;
     stressScenarioCount: number;
     fallbackUsed: boolean;
+    historicalTailReliable: boolean;
     candidatePackageCount: number;
     nbpProxyUsed: boolean;
     stabilityIndex: number;
@@ -186,27 +192,35 @@ export default function OptimisePage() {
 
   const cards = useMemo(() => {
     if (!data) return [];
+    const pct = Math.round(confidence * 100);
+    const tailOk = data.historicalTailReliable !== false;
     return [
       {
-        label: "VaR 95",
+        kind: "tail" as const,
+        label: `VaR ${pct}%`,
         before: data.before.varLoss,
         after: data.after.varLoss,
         delta: data.deltas.var95Reduction,
+        showValues: tailOk,
       },
       {
-        label: "CVaR 95",
+        kind: "tail" as const,
+        label: `CVaR ${pct}%`,
         before: data.before.cvarLoss,
         after: data.after.cvarLoss,
         delta: data.deltas.cvar95Reduction,
+        showValues: tailOk,
       },
       {
-        label: "Worst Stress",
+        kind: "stress" as const,
+        label: "Worst stress",
         before: data.before.worstStressLoss,
         after: data.after.worstStressLoss,
         delta: data.deltas.worstStressReduction,
+        showValues: data.includeStress,
       },
     ];
-  }, [data]);
+  }, [data, confidence]);
 
   const frontierData = useMemo(() => {
     if (!data) return null;
@@ -229,7 +243,9 @@ export default function OptimisePage() {
     };
   }, [data, objective]);
 
-  const tailRiskAxisLabel = objective === "cvar" ? "CVaR loss" : "VaR loss";
+  const confPct = Math.round(confidence * 100);
+  const tailRiskAxisLabel =
+    objective === "cvar" ? `CVaR ${confPct}% loss` : `VaR ${confPct}% loss`;
 
   return (
     <TierGate
@@ -293,8 +309,8 @@ export default function OptimisePage() {
             onChange={(e) => setObjective(e.target.value as "cvar" | "var")}
             className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
           >
-            <option value="cvar">Minimise CVaR 95</option>
-            <option value="var">Minimise VaR 95</option>
+            <option value="cvar">Minimise CVaR (tail at confidence below)</option>
+            <option value="var">Minimise VaR (tail at confidence below)</option>
           </select>
         </label>
         <label className="text-xs text-ink-mid">
@@ -531,47 +547,61 @@ export default function OptimisePage() {
           </section>
 
           <section className="grid gap-3 md:grid-cols-3">
-            {cards.map((c) => (
-              <article
-                key={c.label}
-                className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
-              >
-                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-                  {c.label}
-                </p>
-                <div className="mt-3 space-y-1">
-                  <p className="text-xs text-ink-mid">Before {formatGbp(c.before)}</p>
-                  <p className="text-xs text-ink-mid">After {formatGbp(c.after)}</p>
-                </div>
-                <div className="mt-4">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-ivory-border/50">
-                    <div
-                      className="h-full rounded-full bg-[#1D6B4E]/70"
-                      style={{
-                        width: `${Math.max(
-                          0,
-                          Math.min(
-                            100,
-                            c.before > 0 ? (1 - c.after / c.before) * 100 : 0,
-                          ),
-                        )}%`,
-                      }}
-                      aria-hidden
-                    />
+            {cards.map((c) => {
+              const show = c.showValues;
+              const pctRed =
+                show && c.before > 0
+                  ? Math.max(0, Math.min(100, (1 - c.after / c.before) * 100))
+                  : 0;
+              return (
+                <article
+                  key={c.label}
+                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
+                >
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                    {c.label}
+                  </p>
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs text-ink-mid">
+                      Before {show ? formatGbp(c.before) : "—"}
+                    </p>
+                    <p className="text-xs text-ink-mid">
+                      After {show ? formatGbp(c.after) : "—"}
+                    </p>
                   </div>
-                </div>
-                <p className="mt-4 font-serif text-2xl text-[#1D6B4E]">
-                  {formatGbp(c.delta)}
-                </p>
-                <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
-                  {Math.round(
-                    Math.max(0, Math.min(100, c.before > 0 ? (1 - c.after / c.before) * 100 : 0)),
-                  )}
-                  % reduction
-                </p>
-              </article>
-            ))}
+                  <div className="mt-4">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-ivory-border/50">
+                      <div
+                        className="h-full rounded-full bg-[#1D6B4E]/70"
+                        style={{ width: `${show ? Math.max(0, Math.min(100, pctRed)) : 0}%` }}
+                        aria-hidden
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-4 font-serif text-2xl text-[#1D6B4E]">
+                    {show ? formatGbp(c.delta) : "—"}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-light">
+                    {show ? `${Math.round(pctRed)}% reduction` : "—"}
+                  </p>
+                </article>
+              );
+            })}
           </section>
+          {data && data.historicalTailReliable === false ? (
+            <p className="text-xs text-ink-mid" role="status">
+              VaR and CVaR are hidden: need at least{" "}
+              {minHistoricalScenariosForConfidence(confidence)} days of non-fallback
+              history for a {Math.round(confidence * 100)}% tail (have{" "}
+              {data.diagnostics.historicalScenarioCount}).
+            </p>
+          ) : null}
+          {data && !data.includeStress ? (
+            <p className="text-xs text-ink-mid" role="status">
+              Worst-stress is off — stress leg is excluded from the optimiser; the third card
+              is blank by design.
+            </p>
+          ) : null}
 
           <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">

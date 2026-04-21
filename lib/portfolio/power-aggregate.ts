@@ -17,11 +17,15 @@ export type PowerPriceSample = {
 };
 
 /**
- * Minimum distinct settlement periods required for a day's mark to be
- * published. Below this, the day is dropped to avoid manufacturing fake
- * day-over-day deltas between a fully-covered day and a peak-only day.
+ * Minimum distinct settlement periods we prefer for a "full" day-ahead curve.
+ * Historically 24+ was required before publishing *any* daily mark; that
+ * dropped every day when the table only had sparse backfill (1 row/day) and
+ * made GB Power invisible in the Risk/Optimise history paths even though
+ * day-on-day moves are still guarded in `calculateDailyPnL` (power move cap
+ * in `app/dashboard/portfolio/risk/page.tsx`) and the Optimise engine.
+ * We only skip a day if there is **no** price row at all for that date.
  */
-export const MIN_POWER_PERIODS_PER_DAY = 24;
+export const MIN_POWER_PERIODS_PER_DAY = 1;
 
 /**
  * Build a single daily GBP/MWh mark per date by:

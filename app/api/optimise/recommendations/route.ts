@@ -327,6 +327,7 @@ export async function GET(req: Request) {
       maxTrades,
       includeStress,
       gbpPerEur,
+      historicalTailReliable: result.diagnostics.historicalTailReliable,
       quality: quality.quality,
       qualityWarnings: quality.warnings,
       blocked,
