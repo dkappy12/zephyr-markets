@@ -579,8 +579,11 @@ export default function OptimisePage() {
             </p>
             {data.recommendations.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
-                {data.diagnostics.noActionReason ??
-                  "No hedge package improves the selected objective under current constraints."}
+                {data.blocked
+                  ? (data.blockedReason ??
+                    "Recommendations are blocked because model quality is low.")
+                  : (data.diagnostics.noActionReason ??
+                    "No hedge package improves the selected objective under current constraints.")}
               </p>
             ) : (
               <div className="mt-3 space-y-3">

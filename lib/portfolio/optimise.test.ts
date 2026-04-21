@@ -1,55 +1,69 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHistoricalScenarios,
-  nbpEurMwhLevelsToPthByDay,
+  nbpLevelsPthByDay,
   optimisePortfolio,
   stressScenarios,
-  ttfEurMwhToNbpPth,
 } from "@/lib/portfolio/optimise";
 import type { PositionRow } from "@/lib/portfolio/book";
 
 describe("optimise NBP historical levels", () => {
   const gbpPerEur = 0.86;
+  const fx = (days: string[]): Record<string, number> =>
+    Object.fromEntries(days.map((d) => [d, gbpPerEur]));
 
-  it("maps flat EUR/MWh NBP levels to flat p/th so day-over-day NBP move is ~0", () => {
-    const nbpEur = { "2026-01-01": 40, "2026-01-02": 40, "2026-01-03": 40 };
-    const fx: Record<string, number> = {
-      "2026-01-01": gbpPerEur,
-      "2026-01-02": gbpPerEur,
-      "2026-01-03": gbpPerEur,
-    };
-    const nbpPth = nbpEurMwhLevelsToPthByDay(nbpEur, fx, gbpPerEur);
+  it("passes through NBP p/th levels without scaling (flat in → flat out)", () => {
+    const days = ["2026-01-01", "2026-01-02", "2026-01-03"];
+    const nbpPth = nbpLevelsPthByDay({
+      "2026-01-01": 105,
+      "2026-01-02": 105,
+      "2026-01-03": 105,
+    });
     const hist = buildHistoricalScenarios({
       powerByDay: { "2026-01-01": 100, "2026-01-02": 100, "2026-01-03": 100 },
       ttfByDayEur: { "2026-01-01": 40, "2026-01-02": 40, "2026-01-03": 40 },
       nbpByDayPth: nbpPth,
-      fxByDay: fx,
+      fxByDay: fx(days),
     });
     expect(hist.length).toBe(2);
     expect(Math.abs(hist[0]!.nbpMovePth)).toBeLessThan(1e-9);
     expect(Math.abs(hist[1]!.nbpMovePth)).toBeLessThan(1e-9);
   });
 
-  it("produces bounded non-zero NBP move when EUR/MWh level steps", () => {
-    const nbpEur = { "2026-01-01": 40, "2026-01-02": 45, "2026-01-03": 45 };
-    const fx: Record<string, number> = {
-      "2026-01-01": gbpPerEur,
-      "2026-01-02": gbpPerEur,
-      "2026-01-03": gbpPerEur,
-    };
-    const nbpPth = nbpEurMwhLevelsToPthByDay(nbpEur, fx, gbpPerEur);
-    const step =
-      ttfEurMwhToNbpPth(45, gbpPerEur) - ttfEurMwhToNbpPth(40, gbpPerEur);
+  it("preserves raw p/th day-over-day step magnitude (5 p/th in → 5 p/th delta out)", () => {
+    const days = ["2026-01-01", "2026-01-02", "2026-01-03"];
+    // Realistic NBP p/th levels: +5 p/th step from day 1 to day 2.
+    const nbpPth = nbpLevelsPthByDay({
+      "2026-01-01": 100,
+      "2026-01-02": 105,
+      "2026-01-03": 105,
+    });
     const hist = buildHistoricalScenarios({
       powerByDay: { "2026-01-01": 100, "2026-01-02": 100, "2026-01-03": 100 },
       ttfByDayEur: { "2026-01-01": 40, "2026-01-02": 45, "2026-01-03": 45 },
       nbpByDayPth: nbpPth,
-      fxByDay: fx,
+      fxByDay: fx(days),
     });
     expect(hist.length).toBe(2);
-    expect(hist[0]!.nbpMovePth).toBeCloseTo(step, 5);
-    expect(Math.abs(hist[0]!.nbpMovePth)).toBeGreaterThan(0.01);
-    expect(Math.abs(hist[0]!.nbpMovePth)).toBeLessThanOrEqual(80);
+    expect(hist[0]!.nbpMovePth).toBeCloseTo(5, 9);
+    expect(hist[1]!.nbpMovePth).toBeCloseTo(0, 9);
+  });
+
+  it("caps extreme p/th moves at the historical move cap (80 p/th)", () => {
+    const days = ["2026-01-01", "2026-01-02"];
+    const nbpPth = nbpLevelsPthByDay({
+      "2026-01-01": 100,
+      "2026-01-02": 250,
+    });
+    const hist = buildHistoricalScenarios({
+      powerByDay: { "2026-01-01": 100, "2026-01-02": 100 },
+      ttfByDayEur: { "2026-01-01": 40, "2026-01-02": 40 },
+      nbpByDayPth: nbpPth,
+      fxByDay: fx(days),
+    });
+    expect(hist.length).toBe(1);
+    // +150 p/th raw move clamps to HISTORICAL_MOVE_CAPS.nbpMovePth = 80.
+    expect(hist[0]!.nbpMovePth).toBe(80);
   });
 });
 

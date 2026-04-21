@@ -90,7 +90,6 @@ const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
   nbpMovePth: s.nbpMovePth,
 }));
 
-const EUR_MWH_PER_THERM = 293.1;
 const HISTORICAL_MOVE_CAPS = {
   gbPowerMove: 250,
   ttfMoveEurMwh: 60,
@@ -454,13 +453,22 @@ export function optimisePortfolio(input: {
     return { trades, after, objectiveValue };
   });
 
-  const STRESS_GUARDRAIL_TOLERANCE = 0.02;
+  // Allow a hedge package to worsen the worst-stress scenario by at most 8%
+  // of the current worst-stress loss, with a £100 floor so small books are
+  // not held hostage to tiny absolute moves. Previously 2% with a £1 floor,
+  // which caused most candidate packages to be filtered on small books even
+  // when they delivered large CVaR improvements for trivial stress worsening.
+  const STRESS_GUARDRAIL_TOLERANCE = 0.08;
+  const STRESS_GUARDRAIL_FLOOR_GBP = 100;
   const MIN_RELATIVE_IMPROVEMENT = 0.02;
   const beforeObjective = objectiveLoss(before, objective);
   const guardrailScored = scored.filter((row) => {
     const stressWorsening = row.after.worstStressLoss - before.worstStressLoss;
     if (stressWorsening <= 0) return true;
-    const allowed = Math.max(1, before.worstStressLoss * STRESS_GUARDRAIL_TOLERANCE);
+    const allowed = Math.max(
+      STRESS_GUARDRAIL_FLOOR_GBP,
+      before.worstStressLoss * STRESS_GUARDRAIL_TOLERANCE,
+    );
     return stressWorsening <= allowed;
   });
   const guardrailFilteredCount = Math.max(0, scored.length - guardrailScored.length);
@@ -628,20 +636,20 @@ export function buildHistoricalScenarios(input: {
   return rows;
 }
 
-export function ttfEurMwhToNbpPth(ttf: number, gbpPerEur: number): number {
-  return (ttf * gbpPerEur * 100) / EUR_MWH_PER_THERM;
-}
-
-/** Convert NBP hub daily EUR/MWh levels to implied p/th price levels (same therm basis as stress scenarios). */
-export function nbpEurMwhLevelsToPthByDay(
-  nbpByDayEurMwh: Record<string, number>,
-  fxByDay: Record<string, number> | undefined,
-  gbpPerEurFallback: number,
+/**
+ * NBP rows in `gas_prices` are stored in pence/therm despite the column being
+ * named `price_eur_mwh` (Stooq NF.F is natively p/th). Pass through unchanged
+ * so `nbpMovePth` day-over-day deltas match the same unit used by stress
+ * scenarios. Fx map is unused but kept in the signature for call-site parity
+ * in case the underlying feed ever switches to a truly EUR/MWh-denominated
+ * source and needs conversion via `ttfToNbpPencePerTherm` from `book.ts`.
+ */
+export function nbpLevelsPthByDay(
+  nbpByDayPth: Record<string, number>,
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const [day, eurMwh] of Object.entries(nbpByDayEurMwh)) {
-    const fx = fxByDay?.[day] ?? gbpPerEurFallback;
-    out[day] = ttfEurMwhToNbpPth(eurMwh, fx);
+  for (const [day, pth] of Object.entries(nbpByDayPth)) {
+    if (Number.isFinite(pth)) out[day] = pth;
   }
   return out;
 }

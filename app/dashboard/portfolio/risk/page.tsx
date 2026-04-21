@@ -13,6 +13,7 @@ import {
   reliabilityConfidenceFromVaRHistoryDays,
 } from "@/lib/reliability/contract";
 import { positionNotionalGbp, tenorToExpiryDate } from "@/lib/portfolio/book";
+import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -67,16 +68,6 @@ type PowerPriceRow = {
   source: string | null;
   volume: number | null;
 };
-
-/**
- * GB power daily marks are built by volume-weighting all settlement periods on
- * a given day. Days with fewer than this many distinct settlement periods are
- * dropped so we don't manufacture a spurious daily "move" when one day has a
- * full 48-period print and the adjacent day only has a handful of peak-only
- * rows. 24 = half the day, which tolerates DA-only coverage but excludes
- * partial-window ingests. Tune upward if you want stricter marks.
- */
-const MIN_POWER_PERIODS_PER_DAY = 24;
 
 /** Safety cap on inferred day-over-day GB power move (£/MWh). Moves above this
  * threshold are almost always data-pipeline artefacts (imbalance-price spikes,
@@ -555,75 +546,10 @@ export default function RiskPage() {
     maxDrawdownGbpInput,
   ]);
 
-  const powerPricesByDay = useMemo(() => {
-    /**
-     * Build a single daily mark per GB power date by:
-     *   1. De-duplicating rows by (date, settlement_period). Repeated ingests
-     *      of the same period (e.g. MID rebuilds) must not count twice.
-     *   2. Volume-weighting when a `volume` is present — a few MWh at
-     *      £2,000/MWh during a system-stress half-hour shouldn't pull a
-     *      day's mark up as much as a 5,000 MWh base-load print.
-     *   3. Requiring at least MIN_POWER_PERIODS_PER_DAY distinct settlement
-     *      periods. This filters out days with peak-only or off-peak-only
-     *      coverage that would otherwise manufacture a fake day-over-day
-     *      delta when the neighbour day is fully populated.
-     */
-    type Cell = {
-      weightedSum: number;
-      weight: number;
-      unweightedSum: number;
-      unweightedCount: number;
-    };
-    const bySettlement = new Map<string, Map<number, number>>(); // date -> period -> price
-    for (const row of powerPrices) {
-      const d = row.price_date;
-      const p = asNum(row.price_gbp_mwh);
-      if (!Number.isFinite(p) || p <= 0) continue;
-      const period = row.settlement_period ?? 0;
-      let dayMap = bySettlement.get(d);
-      if (!dayMap) {
-        dayMap = new Map<number, number>();
-        bySettlement.set(d, dayMap);
-      }
-      // Last-write-wins per (date, period) — ingestion upserts on that key.
-      dayMap.set(period, p);
-    }
-    const volumeByKey = new Map<string, number>();
-    for (const row of powerPrices) {
-      const v = row.volume == null ? null : Number(row.volume);
-      if (v == null || !Number.isFinite(v) || v <= 0) continue;
-      const key = `${row.price_date}#${row.settlement_period ?? 0}`;
-      volumeByKey.set(key, v);
-    }
-    const aggregated = new Map<string, Cell>();
-    for (const [date, periodMap] of bySettlement) {
-      for (const [period, price] of periodMap) {
-        const cell = aggregated.get(date) ?? {
-          weightedSum: 0,
-          weight: 0,
-          unweightedSum: 0,
-          unweightedCount: 0,
-        };
-        const vol = volumeByKey.get(`${date}#${period}`) ?? 0;
-        if (vol > 0) {
-          cell.weightedSum += price * vol;
-          cell.weight += vol;
-        }
-        cell.unweightedSum += price;
-        cell.unweightedCount += 1;
-        aggregated.set(date, cell);
-      }
-    }
-    const out: Record<string, number> = {};
-    for (const [date, cell] of aggregated) {
-      if (cell.unweightedCount < MIN_POWER_PERIODS_PER_DAY) continue;
-      out[date] =
-        cell.weight > 0
-          ? cell.weightedSum / cell.weight
-          : cell.unweightedSum / cell.unweightedCount;
-    }
-    return out;
-  }, [powerPrices]);
+  const powerPricesByDay = useMemo(
+    () => aggregateDailyPowerPrices(powerPrices),
+    [powerPrices],
+  );
 
   const ttfPricesByDay = useMemo(() => {
     const buckets = new Map<string, { sum: number; count: number }>();

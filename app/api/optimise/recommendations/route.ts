@@ -1,10 +1,14 @@
 import {
   buildHistoricalScenarios,
-  nbpEurMwhLevelsToPthByDay,
+  nbpLevelsPthByDay,
   optimisePortfolio,
   stressScenarios,
   type OptimiseObjective,
 } from "@/lib/portfolio/optimise";
+import {
+  aggregateDailyPowerPrices,
+  type PowerPriceSample,
+} from "@/lib/portfolio/power-aggregate";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
@@ -189,9 +193,17 @@ export async function GET(req: Request) {
         .select("*")
         .eq("user_id", user.id)
         .eq("is_closed", false),
-      createAdminClient().rpc("get_daily_power_prices", {
-        since_date: sinceDate,
-      }),
+      // Query market_prices directly and aggregate client-side so Optimise
+      // uses the same coverage-gated, volume-weighted daily mark as the Risk
+      // page. Scope to GB day-ahead hubs (N2EX/APX) to exclude imbalance
+      // prints and one-off backfills that would contaminate the series.
+      createAdminClient()
+        .from("market_prices")
+        .select("price_gbp_mwh, price_date, settlement_period, volume")
+        .or("market.eq.N2EX,market.eq.APX")
+        .gte("price_date", sinceDate)
+        .order("price_date", { ascending: true })
+        .order("settlement_period", { ascending: true }),
       createAdminClient()
         .from("gas_prices")
         .select("price_time, price_eur_mwh, hub")
@@ -227,33 +239,29 @@ export async function GET(req: Request) {
     }
 
     const gbpPerEur = await fetchGbpPerEur();
-    const powerAgg: Record<string, { sum: number; count: number }> = {};
-    for (const row of powerRes.data ?? []) {
-      const day = parseDateOnly(row.price_date);
-      const px = parseNum(row.avg_price_gbp_mwh);
-      if (!day || px == null) continue;
-      addDailySample(powerAgg, day, px);
-    }
+    const powerByDay = aggregateDailyPowerPrices(
+      (powerRes.data ?? []) as PowerPriceSample[],
+    );
 
     const ttfAgg: Record<string, { sum: number; count: number }> = {};
     const nbpAgg: Record<string, { sum: number; count: number }> = {};
     let nbpProxyUsed = false;
     for (const row of gasRes.data ?? []) {
       const day = parseDateOnly(row.price_time);
-      const ttf = parseNum(row.price_eur_mwh);
+      const px = parseNum(row.price_eur_mwh);
       const hub = String(row.hub ?? "").toUpperCase();
-      if (!day || ttf == null) continue;
-      if (hub === "TTF") addDailySample(ttfAgg, day, ttf);
-      if (hub === "NBP") addDailySample(nbpAgg, day, ttf);
+      if (!day || px == null) continue;
+      if (hub === "TTF") addDailySample(ttfAgg, day, px);
+      // NBP rows store pence/therm in price_eur_mwh (Stooq NF.F); use as-is.
+      if (hub === "NBP") addDailySample(nbpAgg, day, px);
     }
-    const powerByDay = finaliseDailyAverage(powerAgg);
     const ttfByDay = finaliseDailyAverage(ttfAgg);
-    const nbpByDayEurMwh = finaliseDailyAverage(nbpAgg);
+    const nbpRawPthByDay = finaliseDailyAverage(nbpAgg);
     for (const day of Object.keys(ttfByDay)) {
       const d = new Date(day + "T12:00:00Z");
       const dow = d.getUTCDay();
       if (dow === 0 || dow === 6) continue;
-      if (nbpByDayEurMwh[day] == null) nbpProxyUsed = true;
+      if (nbpRawPthByDay[day] == null) nbpProxyUsed = true;
     }
     const fxByDay: Record<string, number> = {};
     for (const row of (fxRes.error ? [] : fxRes.data) ?? []) {
@@ -263,7 +271,7 @@ export async function GET(req: Request) {
       fxByDay[day] = rate;
     }
 
-    const nbpByDayPth = nbpEurMwhLevelsToPthByDay(nbpByDayEurMwh, fxByDay, gbpPerEur);
+    const nbpByDayPth = nbpLevelsPthByDay(nbpRawPthByDay);
 
     const scenarios = [
       ...buildHistoricalScenarios({
@@ -339,7 +347,7 @@ export async function GET(req: Request) {
       provenance: {
         power: "market_prices (N2EX/APX daily avg)",
         gas:
-          "gas_prices (TTF+NBP hub EUR/MWh daily avg; NBP converted to p/th levels before return diffs)",
+          "gas_prices (TTF daily avg in EUR/MWh; NBP daily avg in p/th, Stooq NF.F)",
         fx: "Frankfurter ECB latest + fx_rates historical",
         windowDays: 120,
         sinceDate,
@@ -347,6 +355,18 @@ export async function GET(req: Request) {
       ...result,
       recommendations: blocked ? [] : result.recommendations,
       alternatives: blocked ? [] : result.alternatives,
+      // When the package is blocked, the "after" metrics describe a hedge the
+      // user cannot execute — displaying them alongside an empty
+      // recommendation list produces a misleading "97% reduction" on the cards.
+      // Collapse to before == after so the UI shows an honest 0% reduction.
+      after: blocked ? result.before : result.after,
+      deltas: blocked
+        ? {
+            var95Reduction: 0,
+            cvar95Reduction: 0,
+            worstStressReduction: 0,
+          }
+        : result.deltas,
     });
   } catch (error: unknown) {
     await logAuthAuditEvent({
