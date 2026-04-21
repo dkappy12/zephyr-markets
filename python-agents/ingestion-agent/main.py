@@ -45,6 +45,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 from collections import defaultdict
 import re
@@ -112,8 +113,21 @@ MARKET_MID_SOURCE = "Elexon BMRS MID"
 MARKET_INDEX_POLL_MINUTES = 30
 
 TTF_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/TTF_NGP_15_Mins.csv"
-NBP_NGP_CSV_URL = "https://gasandregistry.eex.com/Gas/NGP/NBP_NGP_15_Mins.csv"
 STOOQ_NBP_QUOTE_URL = "https://stooq.com/q/l/?s=nf.f&i=d"
+
+# Absolute sanity bounds on NBP close values published by the Stooq NF.F
+# feed. These are write-time guardrails: if Stooq ever prints a value outside
+# this band (feed glitch, wrong ticker, unit confusion) we skip the upsert
+# rather than poison gas_prices. Modern-era NBP day-ahead has not traded
+# below ~60 p/th since the UK ETS launched, and the 2022 war peaks stayed
+# comfortably under 300 p/th at the daily-close level. The [30, 300] window
+# is deliberately wide so a real but dramatic market move still goes
+# through; the point is to catch structural errors like the 2026-04 Yahoo/
+# TTF-derived backfill that wrote ~15 p/th rows because of a broken
+# conversion. Keep in sync with NBP_LEVEL_FLOOR_PTH in the app's
+# lib/portfolio/gas-aggregate.ts.
+NBP_SANITY_MIN_PTH = 30.0
+NBP_SANITY_MAX_PTH = 300.0
 OILPRICE_API_URL = "https://api.oilpriceapi.com/v1/prices/latest"
 OILPRICE_API_KEY = os.environ.get("OILPRICE_API_KEY", "").strip()
 ELEXON_FUELINST_URL = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELINST"
@@ -2447,6 +2461,23 @@ async def fetch_nbp_price() -> None:
         return
 
     gas_day_label = d.strftime("%Y-%m-%d")
+    # Write-time sanity range. Blocks the class of bug that produced the
+    # 2026-04 "Yahoo Finance / TTF-derived" residue (342 rows at ~15 p/th
+    # from a broken TTF→NBP conversion) and any future Stooq unit/ticker
+    # drift. Skip the upsert rather than coerce: a missing row is far less
+    # damaging to Risk/Optimise P&L than a silently wrong one.
+    if not math.isfinite(px) or not (NBP_SANITY_MIN_PTH <= px <= NBP_SANITY_MAX_PTH):
+        logger.error(
+            "nbp_cycle: Stooq NBP close %.3f p/th is outside sanity range "
+            "[%.0f, %.0f]; suspected feed artefact, wrong units, or broken "
+            "ticker. Skipping upsert to avoid poisoning gas_prices. "
+            "gas_day=%s",
+            px,
+            NBP_SANITY_MIN_PTH,
+            NBP_SANITY_MAX_PTH,
+            gas_day_label,
+        )
+        return
     now_utc = datetime.now(timezone.utc)
     age_days = (now_utc.date() - d.date()).days
     if age_days > 3:
