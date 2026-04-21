@@ -176,6 +176,64 @@ export function nbpPnlGbp(
 }
 
 /**
+ * Canonical market bucket derived from the free-text `market` column. Mirrors
+ * the narrower switch used by the Book page so helpers that need the same
+ * market-specific unit suffixes (entry price formatting, notional computation,
+ * import preview) stay in sync.
+ */
+export type MarketBucket =
+  | "GB_POWER"
+  | "TTF"
+  | "NBP"
+  | "UKA"
+  | "EUA"
+  | "OTHER_POWER"
+  | "OTHER_GAS"
+  | "OTHER";
+
+export function normaliseMarketBucket(
+  value: string | null | undefined,
+): MarketBucket {
+  const raw = (value ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "gb_power" || raw === "n2ex" || raw === "apx") return "GB_POWER";
+  if (raw === "ttf") return "TTF";
+  if (raw === "nbp") return "NBP";
+  if (raw === "uka") return "UKA";
+  if (raw === "eua") return "EUA";
+  if (raw === "other_power" || raw.includes("power")) return "OTHER_POWER";
+  if (raw === "other_gas" || raw.includes("gas")) return "OTHER_GAS";
+  return "OTHER";
+}
+
+/**
+ * Format the entry `trade_price` for display with the correct unit suffix
+ * per market: £/MWh for GB power, €/MWh for TTF / NW European power, p/th for
+ * NBP, £/t or €/t for UKA / EUA. Shared by the Book grid and the CSV import
+ * preview so both surfaces agree (previously the preview labelled every EUR
+ * quote `@ X EUR` and every GBP quote `@ £X/MWh`, which mis-labelled UKA and
+ * EUA).
+ */
+export function formatPositionEntryPrice(
+  p: Pick<PositionRow, "trade_price" | "market" | "unit" | "currency">,
+): string {
+  if (p.trade_price == null || !Number.isFinite(p.trade_price)) return "—";
+  const market = normaliseMarketBucket(p.market);
+  const unit = (p.unit ?? "").toLowerCase();
+  const ccy = (p.currency ?? "").toUpperCase();
+  const price = p.trade_price.toFixed(2);
+
+  if (market === "NBP" || unit.includes("therm")) return `${price}p/th`;
+  if (market === "GB_POWER") return `£${price}/MWh`;
+  if (market === "TTF") return `€${price}/MWh`;
+  if (market === "UKA") return `£${price}/t`;
+  if (market === "EUA") return ccy === "GBP" ? `£${price}/t` : `€${price}/t`;
+  if (market === "OTHER_POWER" || market === "OTHER_GAS") {
+    return ccy === "EUR" ? `€${price}/MWh` : `£${price}/MWh`;
+  }
+  return ccy === "EUR" ? `€${price}` : `£${price}`;
+}
+
+/**
  * Best-effort derivation of an ISO expiry date (YYYY-MM-DD) from a free-text
  * tenor label. Handles the canonical tenor shapes produced by QuickAddModal
  * (Spot / Day-ahead / Balance of month / Month+N / Q1-Q4 YYYY / Win YYYY-YY

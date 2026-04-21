@@ -299,10 +299,49 @@ function clamp(n: number, absCap: number): number {
   return Math.max(-absCap, Math.min(absCap, n));
 }
 
-function tradeCostPenalty(trades: HedgeTrade[]): number {
+/**
+ * Reference quote prices used to convert a hedge trade's `size` into a rough
+ * monthly-delivery £ notional. These let us score trade cost on a like-for-like
+ * basis across markets — previously the penalty formula was `size × bps × 1000`,
+ * which gives GB_POWER (size in MW, typically ~50) a penalty of £20, while NBP
+ * (size in therms, typically ~50,000) got £30,000 for an equivalent-notional
+ * hedge. The result was NBP being systematically excluded from recommendations
+ * even when it was the dominant tail-risk leg.
+ */
+const HEDGE_COST_REFERENCE_PRICE = {
+  GB_POWER: 100, // £/MWh
+  TTF: 35, // EUR/MWh (converted via gbpPerEur at call site)
+  NBP: 100, // pence/therm (converted via /100 to £/therm at call site)
+} as const;
+const HEDGE_COST_BPS = {
+  GB_POWER: 0.0004,
+  TTF: 0.0004,
+  NBP: 0.0006,
+} as const;
+const HOURS_PER_MONTH = 720;
+
+function tradeCostPenalty(trades: HedgeTrade[], gbpPerEur: number): number {
   return trades.reduce((sum, t) => {
-    const bps = t.market === "NBP" ? 0.0006 : 0.0004;
-    return sum + t.size * bps * 1000;
+    const bps = HEDGE_COST_BPS[t.market];
+    if (t.market === "GB_POWER") {
+      // MW × £/MWh × h/month × bps
+      return (
+        sum +
+        t.size * HEDGE_COST_REFERENCE_PRICE.GB_POWER * HOURS_PER_MONTH * bps
+      );
+    }
+    if (t.market === "TTF") {
+      return (
+        sum +
+        t.size *
+          HEDGE_COST_REFERENCE_PRICE.TTF *
+          gbpPerEur *
+          HOURS_PER_MONTH *
+          bps
+      );
+    }
+    // NBP: size is therms (total), price is pence/therm → £/therm at /100.
+    return sum + t.size * (HEDGE_COST_REFERENCE_PRICE.NBP / 100) * bps;
   }, 0);
 }
 
@@ -411,7 +450,7 @@ export function optimisePortfolio(input: {
       confidence,
     );
     const objectiveValue =
-      objectiveLoss(after, objective) + tradeCostPenalty(trades);
+      objectiveLoss(after, objective) + tradeCostPenalty(trades, gbpPerEur);
     return { trades, after, objectiveValue };
   });
 

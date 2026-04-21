@@ -16,6 +16,7 @@ import {
 import {
   eurMwhPnlToGbp,
   formatGbpColored,
+  formatPositionEntryPrice,
   GBP_PER_EUR,
   linearPnl,
   LivePrices,
@@ -99,25 +100,7 @@ function pricePoints(
 }
 
 /** Entry column: always `trade_price` from DB, formatted by market/currency (never live). */
-function formatEntryPrice(p: PositionRow): string {
-  if (p.trade_price == null || !Number.isFinite(p.trade_price)) return "—";
-  const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
-  const u = (p.unit ?? "").toLowerCase();
-  const ccy = (p.currency ?? "").toUpperCase();
-  if (m === "nbp" || u.includes("therm")) {
-    return `${p.trade_price.toFixed(2)}p/th`;
-  }
-  if (
-    ccy === "EUR" ||
-    m === "ttf" ||
-    m === "german_power" ||
-    m === "french_power" ||
-    m === "nordic_power"
-  ) {
-    return `€${p.trade_price.toFixed(2)}/MWh`;
-  }
-  return `£${p.trade_price.toFixed(2)}`;
-}
+const formatEntryPrice = formatPositionEntryPrice;
 
 /** Current column: live marks only (never reuse entry). */
 function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
@@ -125,7 +108,7 @@ function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   const market = normaliseMarket(p.market);
   if (market === "GB_POWER") {
     const v = lp.gbPowerGbpMwh;
-    return v != null ? `£${v.toFixed(2)}` : "—";
+    return v != null ? `£${v.toFixed(2)}/MWh` : "—";
   }
   if (market === "OTHER_POWER") return "—";
   if (market === "TTF") {

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ClassifiedPosition } from "@/lib/portfolio/book";
-import { marketBadge } from "@/lib/portfolio/book";
+import { formatPositionEntryPrice, marketBadge } from "@/lib/portfolio/book";
 import { X } from "lucide-react";
 
 export type ReviewItem = ClassifiedPosition & { _key: string };
@@ -198,11 +198,6 @@ function truncate(s: string, n: number): string {
 }
 
 function formatPriceHint(item: ClassifiedPosition): string {
-  const p = item.trade_price;
-  if (p == null) return "—";
-  const cur = item.currency ?? "GBP";
-  if (cur === "GBP") return `@ £${p.toFixed(2)}/MWh`;
-  if (item.unit === "therm" || item.market === "NBP")
-    return `@ ${p.toFixed(2)}p/th`;
-  return `@ ${p.toFixed(2)} ${cur}`;
+  if (item.trade_price == null) return "—";
+  return `@ ${formatPositionEntryPrice(item)}`;
 }

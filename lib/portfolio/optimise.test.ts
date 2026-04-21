@@ -96,3 +96,52 @@ describe("optimisePortfolio empty book", () => {
     expect(result.diagnostics.candidatePackageCount).toBe(0);
   });
 });
+
+describe("optimisePortfolio NBP tail-risk is reachable", () => {
+  /**
+   * Regression for #10: before the trade-cost re-scale, NBP hedges were
+   * penalised ~1000× too heavily (size × 0.0006 × 1000, with size in
+   * therms). An NBP-dominated book would therefore never see NBP appear in
+   * the recommendations or alternatives even when it was the single
+   * largest tail-risk leg. This test locks in that it does now.
+   */
+  it("proposes an NBP hedge for a book whose tail risk is dominated by NBP", () => {
+    const position: PositionRow = {
+      id: "nbp-heavy",
+      user_id: "u",
+      created_at: new Date(0).toISOString(),
+      direction: "long",
+      expiry_date: null,
+      instrument: "NBP Month+1",
+      instrument_type: "gas_forward",
+      is_hypothetical: false,
+      market: "NBP",
+      size: 200_000,
+      tenor: "M+1",
+      trade_price: 100,
+      unit: "therm",
+      currency: "GBP",
+      source: "test",
+      notes: null,
+      is_closed: false,
+      close_price: null,
+      close_date: null,
+      entry_date: null,
+      raw_csv_row: null,
+    };
+    const result = optimisePortfolio({
+      positions: [position],
+      scenarios: [...stressScenarios()],
+      gbpPerEur: 0.86,
+      objective: "cvar",
+      confidence: 0.95,
+      maxTrades: 3,
+      includeStress: true,
+    });
+    const allTrades = [
+      ...result.recommendations.map((r) => r.instrument),
+      ...result.alternatives.flatMap((a) => a.trades.map((t) => t.market)),
+    ];
+    expect(allTrades).toContain("NBP");
+  });
+});
