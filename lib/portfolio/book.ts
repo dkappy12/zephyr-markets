@@ -175,6 +175,161 @@ export function nbpPnlGbp(
   return raw / 100;
 }
 
+/**
+ * Best-effort derivation of an ISO expiry date (YYYY-MM-DD) from a free-text
+ * tenor label. Handles the canonical tenor shapes produced by QuickAddModal
+ * (Spot / Day-ahead / Balance of month / Month+N / Q1-Q4 YYYY / Win YYYY-YY
+ * / Sum YYYY / Cal YYYY) plus common CSV shapes seen from broker/ETRM feeds
+ * (Jan-26, Jan 2026, Mar26, Q1-26, pure year).
+ *
+ * Returns the *last* day of the delivery window — i.e. when the contract
+ * finishes delivering — so that tenor-concentration bucketing on the Risk
+ * page has a meaningful date even when the user didn't fill in expiry_date.
+ */
+export function tenorToExpiryDate(
+  tenor: string | null | undefined,
+  referenceDate: Date = new Date(),
+): string | null {
+  if (!tenor) return null;
+  const t = tenor.trim();
+  if (!t) return null;
+  const toIso = (year: number, monthIdx0: number, day: number) => {
+    const d = new Date(Date.UTC(year, monthIdx0, day));
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  };
+  const lastDayOfMonth = (year: number, monthIdx0: number) =>
+    new Date(Date.UTC(year, monthIdx0 + 1, 0)).getUTCDate();
+  const refYear = referenceDate.getUTCFullYear();
+  const refMonth = referenceDate.getUTCMonth();
+  const normYear = (yy: number) => (yy < 100 ? 2000 + yy : yy);
+
+  const lower = t.toLowerCase();
+
+  if (lower === "spot" || lower === "prompt") {
+    return referenceDate.toISOString().slice(0, 10);
+  }
+  if (lower === "day-ahead" || lower === "day ahead" || lower === "da") {
+    const d = new Date(referenceDate);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }
+  if (lower === "balance of month" || lower === "bom") {
+    return toIso(refYear, refMonth, lastDayOfMonth(refYear, refMonth));
+  }
+
+  const monthPlus = lower.match(/^month\s*[+]?\s*(\d+)$/);
+  if (monthPlus) {
+    const n = Number(monthPlus[1]);
+    const m = refMonth + n;
+    const y = refYear + Math.floor(m / 12);
+    const mm = ((m % 12) + 12) % 12;
+    return toIso(y, mm, lastDayOfMonth(y, mm));
+  }
+
+  const cal = lower.match(/^cal\s*[- ]?\s*(\d{2,4})$/);
+  if (cal) {
+    const y = normYear(Number(cal[1]));
+    return toIso(y, 11, 31);
+  }
+
+  const q = lower.match(/^q([1-4])\s*[- ]?\s*(\d{2,4})$/);
+  if (q) {
+    const qn = Number(q[1]);
+    const y = normYear(Number(q[2]));
+    const endMonthIdx = qn * 3 - 1; // Q1→Mar(2), Q2→Jun(5), Q3→Sep(8), Q4→Dec(11)
+    return toIso(y, endMonthIdx, lastDayOfMonth(y, endMonthIdx));
+  }
+
+  const sum = lower.match(/^sum(?:mer)?\s*[- ]?\s*(\d{2,4})$/);
+  if (sum) {
+    const y = normYear(Number(sum[1]));
+    return toIso(y, 8, 30); // end of September
+  }
+
+  // Win 25-26 / Win25-26 / Win 2025-26 → 31 Mar of the second year
+  const win = lower.match(/^win(?:ter)?\s*[- ]?\s*(\d{2,4})\s*[- ]?\s*(\d{2,4})$/);
+  if (win) {
+    const y = normYear(Number(win[2]));
+    return toIso(y, 2, 31);
+  }
+
+  // Month + year shapes: Jan-26, Jan 2026, Mar26, January 2026.
+  const monthNames = [
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+  ];
+  const monthAlias: Record<string, number> = {};
+  monthNames.forEach((m, i) => {
+    monthAlias[m] = i;
+  });
+  const monthWord = lower.match(
+    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*[- ]?\s*(\d{2,4})$/,
+  );
+  if (monthWord) {
+    const mi = monthAlias[monthWord[1]];
+    const y = normYear(Number(monthWord[2]));
+    if (mi != null) return toIso(y, mi, lastDayOfMonth(y, mi));
+  }
+
+  // Pure year: "2026".
+  const yearOnly = lower.match(/^(\d{4})$/);
+  if (yearOnly) {
+    return toIso(Number(yearOnly[1]), 11, 31);
+  }
+
+  // YYYY-MM or YYYY/MM.
+  const ym = lower.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (ym) {
+    const y = Number(ym[1]);
+    const m = Number(ym[2]) - 1;
+    if (m >= 0 && m <= 11) return toIso(y, m, lastDayOfMonth(y, m));
+  }
+
+  return null;
+}
+
+/**
+ * Approximate £ notional of a position based on its entry trade_price and size.
+ *
+ * Used for like-for-like concentration comparisons across markets where sizes
+ * are quoted in incompatible native units (MW, MWh, therm, tco2). This is a
+ * coarse relative measure — it uses the trade price (not the live mark), which
+ * is fine for concentration purposes since we only care about share of the book.
+ *
+ * Returns null when the inputs don't allow a defensible conversion.
+ */
+export function positionNotionalGbp(
+  p: Pick<PositionRow, "size" | "trade_price" | "market" | "unit" | "currency">,
+  gbpPerEur: number = GBP_PER_EUR,
+): number | null {
+  const size = p.size == null ? null : Math.abs(Number(p.size));
+  if (size == null || !Number.isFinite(size) || size === 0) return null;
+  const price = p.trade_price;
+  if (price == null || !Number.isFinite(price)) return null;
+  const market = (p.market ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  const unit = (p.unit ?? "").toLowerCase();
+  const ccy = (p.currency ?? "").toUpperCase();
+
+  // NBP is quoted in pence/therm; £/therm = pence / 100.
+  if (market === "nbp" || unit.includes("therm")) {
+    return size * (price / 100);
+  }
+  // EUR-denominated (TTF, DE/FR/Nordic power) → convert to GBP.
+  if (
+    ccy === "EUR" ||
+    market === "ttf" ||
+    market === "german_power" ||
+    market === "french_power" ||
+    market === "nordic_power" ||
+    market === "eua"
+  ) {
+    return size * price * gbpPerEur;
+  }
+  // Everything else treated as GBP already (GB power £/MWh, UKA £/t, etc.).
+  return size * price;
+}
+
 export function marketBadge(m: string | null): string {
   if (!m) return "—";
   const map: Record<string, string> = {

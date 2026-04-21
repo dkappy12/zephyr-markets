@@ -5,6 +5,7 @@ import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
+import { tenorToExpiryDate } from "@/lib/portfolio/book";
 import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
 
 const MODEL = "claude-haiku-4-5-20251001";
@@ -447,6 +448,10 @@ function classifyRowHeuristic(row: Record<string, unknown>) {
           : "Gas options are not yet supported — P&L cannot be calculated"
       : "Non-energy instrument";
 
+  const tenor = inferString(row, ["tenor", "prompt", "delivery", "period", "strip"]);
+  const expiryDate =
+    inferDate(row, ["expiry_date", "expiry", "maturity", "end_date"]) ??
+    tenorToExpiryDate(tenor);
   return {
     keep: keepFinal,
     discard_reason: discardReasonFinal,
@@ -455,10 +460,10 @@ function classifyRowHeuristic(row: Record<string, unknown>) {
     direction,
     size,
     unit,
-    tenor: inferString(row, ["tenor", "prompt", "delivery", "period", "strip"]),
+    tenor,
     trade_price: tradePrice,
     currency,
-    expiry_date: inferDate(row, ["expiry_date", "expiry", "maturity", "end_date"]),
+    expiry_date: expiryDate,
     entry_date: inferDate(row, ["entry_date", "trade_date", "deal_date", "date"]),
     instrument,
     original_row: row,
@@ -659,6 +664,9 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
         ? entry.discard_reason.trim()
         : "Non-energy instrument";
 
+  const tenorValue = safeString(entry.tenor);
+  const expiryValue =
+    normaliseDateValue(entry.expiry_date) ?? tenorToExpiryDate(tenorValue);
   return {
     keep,
     discard_reason: discardReason,
@@ -667,10 +675,10 @@ function normaliseClassifiedEntry(entry: Record<string, unknown>) {
     direction,
     size,
     unit,
-    tenor: safeString(entry.tenor),
+    tenor: tenorValue,
     trade_price: tradePrice,
     currency,
-    expiry_date: normaliseDateValue(entry.expiry_date),
+    expiry_date: expiryValue,
     entry_date: normaliseDateValue(entry.entry_date),
     instrument: safeString(entry.instrument) ?? "Unclassified position",
     warnings,

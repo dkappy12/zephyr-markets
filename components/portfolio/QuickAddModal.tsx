@@ -1,6 +1,7 @@
 "use client";
 
 import type { PositionRow } from "@/lib/portfolio/book";
+import { tenorToExpiryDate } from "@/lib/portfolio/book";
 import { useEffect, useMemo, useState } from "react";
 
 const INSTRUMENTS = [
@@ -174,6 +175,8 @@ export function QuickAddModal({
     }
     setSaving(true);
     try {
+      const expiryFromTenor =
+        expiryDate.trim().length > 0 ? null : tenorToExpiryDate(tenor);
       const payload = {
         instrument: sel.label,
         instrument_type: sel.instrument_type,
@@ -185,7 +188,7 @@ export function QuickAddModal({
         trade_price: tp,
         currency: sel.currency,
         entry_date: entryDate,
-        expiry_date: expiryDate || null,
+        expiry_date: expiryDate || expiryFromTenor || null,
         notes: notes.trim() || null,
         source: "manual",
         is_hypothetical: false,

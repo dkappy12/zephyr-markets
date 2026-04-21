@@ -23,6 +23,7 @@ import {
   netDeltaMw,
   nbpPnlGbp,
   PositionRow,
+  tenorToExpiryDate,
   ttfToNbpPencePerTherm,
 } from "@/lib/portfolio/book";
 import { totalTodayPnlGbp } from "@/lib/portfolio/attribution";
@@ -521,7 +522,7 @@ export function BookPageClient() {
         tenor: item.tenor,
         trade_price: item.trade_price,
         currency: item.currency,
-        expiry_date: item.expiry_date,
+        expiry_date: item.expiry_date ?? tenorToExpiryDate(item.tenor),
         entry_date: item.entry_date ?? utcToday(),
         source: "csv",
         notes: null,

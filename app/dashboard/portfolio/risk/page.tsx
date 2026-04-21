@@ -12,6 +12,7 @@ import {
   formatReliabilityConfidenceDesk,
   reliabilityConfidenceFromVaRHistoryDays,
 } from "@/lib/reliability/contract";
+import { positionNotionalGbp, tenorToExpiryDate } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -32,6 +33,13 @@ const sectionLabel =
 const BRAND_GREEN = "#1D6B4E";
 const TERRACOTTA = "#8B3A3A";
 const HISTORICAL_GBP_PER_EUR = 0.86;
+/**
+ * Historical lookback used for VaR / CVaR / volatility on the Risk page.
+ * Matches the server-side window used by the Optimise recommendations API
+ * (see app/api/optimise/recommendations/route.ts) so the two pages can't
+ * show contradictory VaR numbers for the same book.
+ */
+const RISK_LOOKBACK_DAYS = 120;
 
 type PositionRow = {
   id: string;
@@ -47,6 +55,8 @@ type PositionRow = {
   is_closed: boolean | null;
   entry_date: string | null;
   created_at: string;
+  trade_price: number | null;
+  currency: string | null;
 };
 
 type PowerPriceRow = {
@@ -58,6 +68,13 @@ type PowerPriceRow = {
 type GasPriceRow = {
   price_eur_mwh: number | null;
   price_time: string;
+  hub: string | null;
+};
+
+type CarbonPriceRow = {
+  price_gbp_per_t: number | null;
+  price_eur_per_t: number | null;
+  price_date: string;
   hub: string | null;
 };
 
@@ -89,23 +106,6 @@ function asNum(v: unknown): number {
 
 function asDateOnly(iso: string): string {
   return iso.slice(0, 10);
-}
-
-/** Earliest calendar day the user had any row in `positions` (Book), for trimming tape-backed history. */
-function earliestBookActivityDate(
-  rows: readonly { entry_date?: string | null; created_at?: string | null }[],
-): string | null {
-  let minD: string | null = null;
-  for (const r of rows) {
-    const rawEntry = r.entry_date?.trim() ?? "";
-    const fromCreated = r.created_at ? asDateOnly(String(r.created_at)) : "";
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(rawEntry)
-      ? rawEntry
-      : fromCreated || null;
-    if (!d) continue;
-    if (minD == null || d < minD) minD = d;
-  }
-  return minD;
 }
 
 function formatGbp(v: number): string {
@@ -165,19 +165,35 @@ function isGbPowerMarket(market: string | null | undefined): boolean {
   return m === "gbpower" || m === "n2ex" || m === "apx";
 }
 
+function isUkaMarket(market: string | null | undefined): boolean {
+  return (market ?? "").toLowerCase().replace(/[\s_]/g, "") === "uka";
+}
+
+function isEuaMarket(market: string | null | undefined): boolean {
+  return (market ?? "").toLowerCase().replace(/[\s_]/g, "") === "eua";
+}
+
 const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
   ttfPricesByDay: Record<string, number>,
   nbpPricesByDay: Record<string, number>,
   fxByDay: Record<string, number>,
-  options?: { minResultDate?: string | null },
+  options?: {
+    minResultDate?: string | null;
+    ukaPricesByDay?: Record<string, number>;
+    euaPricesByDay?: Record<string, number>;
+  },
 ): DailyPnL[] => {
   const minResultDate = options?.minResultDate ?? null;
+  const ukaPricesByDay = options?.ukaPricesByDay ?? {};
+  const euaPricesByDay = options?.euaPricesByDay ?? {};
   const dateUniverse = new Set<string>([
     ...Object.keys(powerPricesByDay),
     ...Object.keys(ttfPricesByDay),
     ...Object.keys(nbpPricesByDay),
+    ...Object.keys(ukaPricesByDay),
+    ...Object.keys(euaPricesByDay),
   ]);
   const dates = Array.from(dateUniverse).sort();
   const result: DailyPnL[] = [];
@@ -216,6 +232,25 @@ const calculateDailyPnL = (
         const currNbp = nbpPricesByDay[currDate];
         if (prevNbp == null || currNbp == null) continue;
         dayPnL += ((currNbp - prevNbp) * size) / 100 * direction;
+        hasContributingSeries = true;
+      } else if (isUkaMarket(pos.market)) {
+        // UKA is stored in GBP/t; size is in tCO2.
+        const prevPrice = ukaPricesByDay[prevDate];
+        const currPrice = ukaPricesByDay[currDate];
+        if (prevPrice == null || currPrice == null) continue;
+        dayPnL += (currPrice - prevPrice) * size * direction;
+        hasContributingSeries = true;
+      } else if (isEuaMarket(pos.market)) {
+        // EUA is stored in EUR/t; FX-adjust each leg before differencing to
+        // match how TTF is handled above.
+        const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
+        const currFx = fxByDay[currDate] ?? HISTORICAL_GBP_PER_EUR;
+        const prevEua = euaPricesByDay[prevDate];
+        const currEua = euaPricesByDay[currDate];
+        if (prevEua == null || currEua == null) continue;
+        const prevPrice = prevEua * prevFx;
+        const currPrice = currEua * currFx;
+        dayPnL += (currPrice - prevPrice) * size * direction;
         hasContributingSeries = true;
       }
     }
@@ -270,6 +305,7 @@ export default function RiskPage() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [powerPrices, setPowerPrices] = useState<PowerPriceRow[]>([]);
   const [gasPrices, setGasPrices] = useState<GasPriceRow[]>([]);
+  const [carbonPrices, setCarbonPrices] = useState<CarbonPriceRow[]>([]);
   const [fxRates, setFxRates] = useState<FxRateRow[]>([]);
   const [gbpEurRate, setGbpEurRate] = useState(0.86);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -284,8 +320,6 @@ export default function RiskPage() {
   const [limitsMessage, setLimitsMessage] = useState<string | null>(null);
   const [limitsError, setLimitsError] = useState<string | null>(null);
   const [riskLimitsFetchError, setRiskLimitsFetchError] = useState<string | null>(null);
-  /** First day the user had any position in Book (all rows); trims global price backfill from charts/VaR. */
-  const [bookStartDate, setBookStartDate] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/billing/status")
@@ -315,7 +349,7 @@ export default function RiskPage() {
         setPositions([]);
         setPowerPrices([]);
         setGasPrices([]);
-        setBookStartDate(null);
+        setCarbonPrices([]);
         setMaxPositionMwInput("");
         setMaxVarGbpInput("");
         setMaxDrawdownGbpInput("");
@@ -332,10 +366,10 @@ export default function RiskPage() {
 
       const [
         { data: positionsData, error: positionsError },
-        { data: bookActivityRows, error: bookActivityError },
         { data: powerData, error: powerError },
         { data: gasData, error: gasError },
         { data: fxData, error: fxError },
+        { data: carbonData, error: carbonError },
         { data: riskLimitsData, error: riskLimitsError },
       ] = await Promise.all([
           supabase
@@ -343,10 +377,6 @@ export default function RiskPage() {
             .select("*")
             .eq("user_id", user.id)
             .eq("is_closed", false),
-          supabase
-            .from("positions")
-            .select("entry_date, created_at")
-            .eq("user_id", user.id),
           supabase
             .from("market_prices")
             .select(
@@ -364,6 +394,11 @@ export default function RiskPage() {
             .eq("base", "EUR")
             .eq("quote", "GBP")
             .order("rate_date", { ascending: true }),
+          supabase
+            .from("carbon_prices")
+            .select("price_gbp_per_t, price_eur_per_t, price_date, hub")
+            .in("hub", ["UKA", "EUA"])
+            .order("price_date", { ascending: true }),
           supabase
             .from("risk_limits")
             .select("max_position_mw, max_var_gbp, max_drawdown_gbp")
@@ -398,14 +433,10 @@ export default function RiskPage() {
       }
 
       setPositions((positionsData ?? []) as PositionRow[]);
-      setBookStartDate(
-        bookActivityError
-          ? earliestBookActivityDate(positionsData ?? [])
-          : earliestBookActivityDate(bookActivityRows ?? []),
-      );
       setPowerPrices((powerData ?? []) as PowerPriceRow[]);
       setGasPrices((gasData ?? []) as GasPriceRow[]);
       setFxRates((fxData ?? []) as FxRateRow[]);
+      setCarbonPrices(carbonError ? [] : ((carbonData ?? []) as CarbonPriceRow[]));
       setLoading(false);
     }
     void load();
@@ -519,12 +550,71 @@ export default function RiskPage() {
     return out;
   }, [fxRates]);
 
+  const ukaPricesByDay = useMemo(() => {
+    const buckets = new Map<string, { sum: number; count: number }>();
+    for (const row of carbonPrices) {
+      if ((row.hub ?? "").toUpperCase() !== "UKA") continue;
+      const d = row.price_date?.slice(0, 10);
+      if (!d) continue;
+      const p = asNum(row.price_gbp_per_t);
+      if (!Number.isFinite(p) || p <= 0) continue;
+      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
+      cur.sum += p;
+      cur.count += 1;
+      buckets.set(d, cur);
+    }
+    const out: Record<string, number> = {};
+    for (const [k, v] of buckets) {
+      if (v.count > 0) out[k] = v.sum / v.count;
+    }
+    return out;
+  }, [carbonPrices]);
+
+  const euaPricesByDay = useMemo(() => {
+    // Prefer EUR/t so FX variance shows up in the P&L path; fall back to
+    // GBP/t converted back to EUR if only the GBP column is populated.
+    const buckets = new Map<string, { sum: number; count: number }>();
+    for (const row of carbonPrices) {
+      if ((row.hub ?? "").toUpperCase() !== "EUA") continue;
+      const d = row.price_date?.slice(0, 10);
+      if (!d) continue;
+      const eur = asNum(row.price_eur_per_t);
+      if (!Number.isFinite(eur) || eur <= 0) continue;
+      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
+      cur.sum += eur;
+      cur.count += 1;
+      buckets.set(d, cur);
+    }
+    const out: Record<string, number> = {};
+    for (const [k, v] of buckets) {
+      if (v.count > 0) out[k] = v.sum / v.count;
+    }
+    return out;
+  }, [carbonPrices]);
+
+  const varLookbackMinDate = useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - RISK_LOOKBACK_DAYS);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
   const dailyPnLSeries = useMemo(
     () =>
       calculateDailyPnL(positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, {
-        minResultDate: bookStartDate,
+        minResultDate: varLookbackMinDate,
+        ukaPricesByDay,
+        euaPricesByDay,
       }),
-    [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, bookStartDate],
+    [
+      positions,
+      powerPricesByDay,
+      ttfPricesByDay,
+      nbpPricesByDay,
+      fxByDay,
+      varLookbackMinDate,
+      ukaPricesByDay,
+      euaPricesByDay,
+    ],
   );
 
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
@@ -554,12 +644,25 @@ export default function RiskPage() {
         ttfPricesByDay,
         nbpPricesByDay,
         fxByDay,
-        { minResultDate: bookStartDate },
+        {
+          minResultDate: varLookbackMinDate,
+          ukaPricesByDay,
+          euaPricesByDay,
+        },
       );
       const worst = series.length > 0 ? series.reduce((min, d) => (d.pnl < min.pnl ? d : min), series[0]) : null;
       return { position: p, worst };
     });
-  }, [positions, powerPricesByDay, ttfPricesByDay, nbpPricesByDay, fxByDay, bookStartDate]);
+  }, [
+    positions,
+    powerPricesByDay,
+    ttfPricesByDay,
+    nbpPricesByDay,
+    fxByDay,
+    varLookbackMinDate,
+    ukaPricesByDay,
+    euaPricesByDay,
+  ]);
 
   const sumIndividualVaRs = perPositionRisk.reduce(
     (sum, r) => sum + Math.abs(r.worst?.pnl ?? 0),
@@ -574,34 +677,36 @@ export default function RiskPage() {
   );
 
   const marketExposure = useMemo(() => {
-    const bucket: Record<
-      string,
-      { valueForPct: number; displayValue: number; unit: string }
-    > = {};
+    // Concentration is computed on a unified £ notional basis (|size| ×
+    // trade_price, unit/currency converted to GBP) so that tco2, MW, and
+    // therm positions are directly comparable rather than lumped on a
+    // single mixed-unit axis.
+    const bucket: Record<string, { notionalGbp: number; missing: number }> = {};
     for (const p of positions) {
       const market = (p.market ?? "Unknown").toUpperCase();
-      const size = Math.abs(p.size ?? 0);
-      const unit = (p.unit ?? "").trim() || "units";
-      const valueForPct = market === "NBP" ? size / 293.1 : size;
-      const key = market;
-      if (!bucket[key]) {
-        bucket[key] = { valueForPct: 0, displayValue: 0, unit };
+      const notional = positionNotionalGbp(p, gbpEurRate);
+      if (!bucket[market]) {
+        bucket[market] = { notionalGbp: 0, missing: 0 };
       }
-      bucket[key].valueForPct += valueForPct;
-      bucket[key].displayValue += size;
-      if (bucket[key].unit === "units") {
-        bucket[key].unit = unit;
+      if (notional != null && Number.isFinite(notional)) {
+        bucket[market].notionalGbp += notional;
+      } else {
+        bucket[market].missing += 1;
       }
     }
-    const rows = Object.entries(bucket).map(([market, v]) => ({ market, ...v }));
-    const total = rows.reduce((s, r) => s + Math.abs(r.valueForPct), 0);
+    const rows = Object.entries(bucket).map(([market, v]) => ({
+      market,
+      notionalGbp: v.notionalGbp,
+      missing: v.missing,
+    }));
+    const total = rows.reduce((s, r) => s + r.notionalGbp, 0);
     return rows
       .map((r) => ({
         ...r,
-        pct: total > 0 ? (Math.abs(r.valueForPct) / total) * 100 : 0,
+        pct: total > 0 ? (r.notionalGbp / total) * 100 : 0,
       }))
       .sort((a, b) => b.pct - a.pct);
-  }, [positions]);
+  }, [positions, gbpEurRate]);
 
   const concentrationFlag = marketExposure.find((m) => m.pct > 60);
   const tenorBuckets = useMemo(() => {
@@ -612,11 +717,15 @@ export default function RiskPage() {
     let none = 0;
     const total = positions.length || 1;
     for (const p of positions) {
-      if (!p.expiry_date) {
+      // Prefer the stored expiry_date, but fall back to deriving it from the
+      // tenor label so older positions imported before tenor->expiry
+      // back-fill was in place still bucket correctly.
+      const derived = p.expiry_date ?? tenorToExpiryDate(p.tenor);
+      if (!derived) {
         none += 1;
         continue;
       }
-      const days = (new Date(p.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+      const days = (new Date(derived).getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
       if (days <= 90) near += 1;
       else if (days <= 365) medium += 1;
       else long += 1;
@@ -680,7 +789,9 @@ export default function RiskPage() {
   const hasAnyPriceSeries =
     Object.keys(powerPricesByDay).length > 0 ||
     Object.keys(ttfPricesByDay).length > 0 ||
-    Object.keys(nbpPricesByDay).length > 0;
+    Object.keys(nbpPricesByDay).length > 0 ||
+    Object.keys(ukaPricesByDay).length > 0 ||
+    Object.keys(euaPricesByDay).length > 0;
 
   return (
     <TierGate
@@ -1004,29 +1115,44 @@ export default function RiskPage() {
             <p className="mt-1 text-sm text-ink-light">Diversification across markets, tenors, and directions</p>
             <div className="mt-4 space-y-6 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-5 py-5">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-mid">Market concentration</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  Market concentration
+                </p>
+                <p className="mt-1 text-[11px] text-ink-light">
+                  Share of book by £ notional (size × entry price, FX-adjusted).
+                </p>
                 <div className="mt-3 space-y-3">
                   {marketExposure.map((m) => (
                     <div key={m.market}>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-ink">{m.market}</span>
-                        <span className="text-ink-mid">
-                          {m.pct.toFixed(0)}% ·{" "}
-                          {m.displayValue.toLocaleString("en-GB", {
-                            maximumFractionDigits: 1,
-                          })}{" "}
-                          {m.unit}
+                        <span className="text-ink-mid tabular-nums">
+                          {m.pct.toFixed(0)}% · £
+                          {m.notionalGbp.toLocaleString("en-GB", {
+                            maximumFractionDigits: 0,
+                          })}
+                          {m.missing > 0 ? (
+                            <span
+                              className="ml-1 text-ink-light"
+                              title="Some positions in this market have no trade_price set and are excluded from the notional calculation."
+                            >
+                              ({m.missing} unpriced)
+                            </span>
+                          ) : null}
                         </span>
                       </div>
                       <div className="mt-1 h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">
-                        <div className="h-full rounded-sm" style={{ width: `${m.pct}%`, backgroundColor: BRAND_GREEN }} />
+                        <div
+                          className="h-full rounded-sm"
+                          style={{ width: `${m.pct}%`, backgroundColor: BRAND_GREEN }}
+                        />
                       </div>
                     </div>
                   ))}
                 </div>
                 {concentrationFlag ? (
                   <p className="mt-3 text-sm text-[#8B3A3A]">
-                    ⚠ Concentrated in {concentrationFlag.market} — single market represents {concentrationFlag.pct.toFixed(0)}% of exposure
+                    ⚠ Concentrated in {concentrationFlag.market} — single market represents {concentrationFlag.pct.toFixed(0)}% of book notional
                   </p>
                 ) : null}
               </div>
