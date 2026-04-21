@@ -32,7 +32,15 @@ export function isGasMarket(p: PositionRow): boolean {
   return m === "ttf" || m === "nbp" || m === "other_gas";
 }
 
-/** Same “Today P&amp;L” as Book table: open → current intraday. */
+/**
+ * Same "Today P&L" as Book table: open → current intraday.
+ *
+ * Returns null for positions that have no intraday open price (UKA, EUA,
+ * OTHER_POWER, OTHER markets) — these are excluded from intraday totals
+ * but still counted toward total P&L elsewhere. `totalTodayPnlGbp` sums
+ * the non-null values; if a future feed wires intraday opens for those
+ * markets, add a branch here and the aggregate will pick them up.
+ */
 export function positionTodayPnlGbp(
   p: PositionRow,
   lp: LivePrices | null,
@@ -56,6 +64,32 @@ export function positionTodayPnlGbp(
       p.size,
       lp.gbpPerEur ?? GBP_PER_EUR,
     );
+  }
+  if (mlow === "other_gas") {
+    const unit = (p.unit ?? "").toLowerCase();
+    const currency = (p.currency ?? "").toUpperCase();
+    if (unit.includes("therm")) {
+      const mark = lp.nbpPencePerTherm;
+      const open = lp.nbpOpenPencePerTherm;
+      if (mark == null || open == null) return null;
+      return nbpPnlGbp(p.direction, open, mark, p.size);
+    }
+    if (currency === "EUR") {
+      const curE = lp.ttfEurMwh;
+      const opE = lp.ttfOpenEurMwh;
+      if (curE == null || opE == null) return null;
+      return eurMwhPnlToGbp(
+        p.direction,
+        opE,
+        curE,
+        p.size,
+        lp.gbpPerEur ?? GBP_PER_EUR,
+      );
+    }
+    const curGbp = lp.ttfGbpMwh;
+    const opnGbp = lp.ttfOpenGbpMwh;
+    if (curGbp == null || opnGbp == null) return null;
+    return linearPnl(p.direction, opnGbp, curGbp, p.size);
   }
   const isGbPwr = isGbPowerMarket(p);
   const cur = isGbPwr ? lp.gbPowerGbpMwh : null;

@@ -22,10 +22,12 @@ import {
   LivePrices,
   marketBadge,
   netDeltaMw,
+  netDeltaMwByMarket,
   nbpPnlGbp,
   PositionRow,
   tenorToExpiryDate,
   ttfToNbpPencePerTherm,
+  type NetDeltaBucket,
 } from "@/lib/portfolio/book";
 import { totalTodayPnlGbp } from "@/lib/portfolio/attribution";
 import { Check, Pencil, Trash2, Wind } from "lucide-react";
@@ -35,6 +37,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const sectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
+
+function netDeltaBucketLabel(bucket: NetDeltaBucket): string {
+  switch (bucket) {
+    case "GB_POWER":
+      return "GB";
+    case "TTF":
+      return "TTF";
+    case "CONTINENTAL":
+      return "Continental";
+    default:
+      return "Other";
+  }
+}
+
+function formatSignedMw(mw: number): string {
+  const abs = Math.abs(mw).toLocaleString("en-GB", { maximumFractionDigits: 1 });
+  if (mw > 0) return `+${abs} MW`;
+  if (mw < 0) return `−${abs} MW`;
+  return "0 MW";
+}
 
 function normaliseMarket(value: string | null | undefined):
   | "GB_POWER"
@@ -448,6 +470,7 @@ export function BookPageClient() {
 
   const stats = useMemo(() => {
     const net = netDeltaMw(positions);
+    const netByMarket = netDeltaMwByMarket(positions);
     const markets = new Set(
       positions.map((p) => p.market).filter(Boolean),
     ).size;
@@ -464,6 +487,7 @@ export function BookPageClient() {
         : null;
     return {
       net,
+      netByMarket,
       openCount: positions.length,
       markets,
       bookUpdated: latest?.created_at ?? null,
@@ -748,6 +772,16 @@ export function BookPageClient() {
               <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
                 {stats.net.label}
               </p>
+              {stats.netByMarket.length > 1 ? (
+                <p
+                  className="mt-1 text-[10px] leading-snug text-ink-light"
+                  title="MW-unit positions only (gas in therms excluded). Split by market family so GB / TTF / Continental power aren't silently combined."
+                >
+                  {stats.netByMarket
+                    .map((b) => `${netDeltaBucketLabel(b.bucket)} ${formatSignedMw(b.mw)}`)
+                    .join(" · ")}
+                </p>
+              ) : null}
             </div>
             <div>
               <p className={sectionLabel}>Today P&amp;L</p>
@@ -850,7 +884,75 @@ export function BookPageClient() {
                         lp.gbpPerEur,
                       );
                     }
+                  } else if (market === "EUA" && lp) {
+                    // EUA marks are EUR/t, entry defaults to EUR. Convert via
+                    // live FX so the £ display doesn't silently show EUR.
+                    total = eurMwhPnlToGbp(
+                      p.direction,
+                      p.trade_price,
+                      lp.euaEurPerT ?? null,
+                      p.size,
+                      lp.gbpPerEur,
+                    );
+                    today = null;
+                  } else if (market === "UKA" && lp) {
+                    // UKA marks are already GBP/t with GBP entries — linearPnl gives £ directly.
+                    total = linearPnl(
+                      p.direction,
+                      p.trade_price,
+                      lp.ukaGbpPerT ?? null,
+                      p.size,
+                    );
+                    today = null;
+                  } else if (market === "OTHER_GAS" && lp) {
+                    const unit = (p.unit ?? "").toLowerCase();
+                    const currency = (p.currency ?? "").toUpperCase();
+                    if (unit.includes("therm")) {
+                      // Entry and mark are p/th, size is therms → pence, /100 for £.
+                      total = nbpPnlGbp(
+                        p.direction,
+                        p.trade_price,
+                        lp.nbpPencePerTherm ?? null,
+                        p.size,
+                      );
+                      const openPth = lp.nbpOpenPencePerTherm ?? null;
+                      const markPth = lp.nbpPencePerTherm ?? null;
+                      today =
+                        openPth != null && markPth != null
+                          ? nbpPnlGbp(p.direction, openPth, markPth, p.size)
+                          : null;
+                    } else if (currency === "EUR") {
+                      // Entry and mark are EUR/MWh, size is MW → EUR, × FX for £.
+                      total = eurMwhPnlToGbp(
+                        p.direction,
+                        p.trade_price,
+                        lp.ttfEurMwh,
+                        p.size,
+                        lp.gbpPerEur,
+                      );
+                      const opE = lp.ttfOpenEurMwh;
+                      const curE = lp.ttfEurMwh;
+                      today =
+                        opE != null && curE != null
+                          ? eurMwhPnlToGbp(
+                              p.direction,
+                              opE,
+                              curE,
+                              p.size,
+                              lp.gbpPerEur,
+                            )
+                          : null;
+                    } else {
+                      // Default: entry and mark are already GBP/MWh → £ direct.
+                      total = linearPnl(p.direction, p.trade_price, cur, p.size);
+                      today =
+                        opn != null && cur != null
+                          ? linearPnl(p.direction, opn, cur, p.size)
+                          : null;
+                    }
                   } else {
+                    // OTHER_POWER and genuinely unclassified markets: no mark,
+                    // `cur` will be null, linearPnl returns null safely.
                     total = linearPnl(p.direction, p.trade_price, cur, p.size);
                     today =
                       opn != null && cur != null

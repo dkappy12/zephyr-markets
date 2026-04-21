@@ -91,6 +91,54 @@ export function netDeltaMw(openPositions: PositionRow[]): {
   return { label: "0 MW flat", isMixed: false };
 }
 
+/** Bucket MW-unit positions by market family so the header can disclose that
+ * "+66 MW net long" is really GB + Continental + TTF combined. */
+export type NetDeltaBucket = "GB_POWER" | "TTF" | "CONTINENTAL" | "OTHER";
+
+function netDeltaBucket(market: string | null): NetDeltaBucket {
+  const m = (market ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (m === "gb_power" || m === "n2ex" || m === "apx") return "GB_POWER";
+  if (m === "ttf") return "TTF";
+  if (
+    m.includes("nordic") ||
+    m.includes("german") ||
+    m.includes("de_power") ||
+    m.includes("french") ||
+    m.includes("fr_power")
+  ) {
+    return "CONTINENTAL";
+  }
+  return "OTHER";
+}
+
+/**
+ * Per-market MW net delta. The Book header previously displayed a single
+ * "+X MW net long" that summed GB + TTF + Nordic + DE + FR silently — a
+ * trader would reasonably assume the number was GB-only. This breakdown
+ * lets the UI render "GB +X · TTF +Y · Continental +Z" instead.
+ */
+export function netDeltaMwByMarket(
+  openPositions: PositionRow[],
+): Array<{ bucket: NetDeltaBucket; mw: number; count: number }> {
+  const byBucket = new Map<NetDeltaBucket, { mw: number; count: number }>();
+  for (const p of openPositions) {
+    const u = (p.unit ?? "").toLowerCase();
+    if (u !== "mw") continue;
+    const bucket = netDeltaBucket(p.market);
+    const s = Number(p.size) || 0;
+    const signed =
+      p.direction === "long" ? s : p.direction === "short" ? -s : 0;
+    const existing = byBucket.get(bucket) ?? { mw: 0, count: 0 };
+    existing.mw += signed;
+    existing.count += 1;
+    byBucket.set(bucket, existing);
+  }
+  const order: NetDeltaBucket[] = ["GB_POWER", "TTF", "CONTINENTAL", "OTHER"];
+  return order
+    .filter((b) => byBucket.has(b))
+    .map((b) => ({ bucket: b, ...(byBucket.get(b) as { mw: number; count: number }) }));
+}
+
 export function linearPnl(
   direction: string | null,
   tradePrice: number | null,
