@@ -10,6 +10,7 @@ import {
 } from "@/lib/reliability/contract";
 import { positionNotionalGbp, tenorToExpiryDate } from "@/lib/portfolio/book";
 import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
+import { aggregateDailyGasPrices } from "@/lib/portfolio/gas-aggregate";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -71,12 +72,24 @@ type PowerPriceRow = {
  * HISTORICAL_MOVE_CAPS used by the Optimise engine. */
 const POWER_MOVE_SANITY_CAP_GBP_MWH = 250;
 
-/** Matches HISTORICAL_MOVE_CAPS in optimise.ts. NBP is stored in p/th so a
- * day-over-day move above 80 p/th is almost certainly a feed artefact. */
-const NBP_MOVE_SANITY_CAP_PTH = 80;
+/**
+ * Matches HISTORICAL_MOVE_CAPS in optimise.ts. NBP is stored in p/th and
+ * the feed is a single daily close from Stooq NF.F, so a Δ above 30 p/th
+ * day-over-day is almost always a feed artefact (e.g. the well-known case
+ * where the upstream source briefly prints ~15 p/th for a day or two,
+ * then snaps back to ~60 p/th and manufactures a 45 p/th fake spike).
+ * Real day-ahead NBP rarely moves > 20 p/th in a single session.
+ */
+const NBP_MOVE_SANITY_CAP_PTH = 30;
 
-/** EUR/MWh. Above this is typically a Stooq print spike rather than a real move. */
-const TTF_MOVE_SANITY_CAP_EUR_MWH = 60;
+/**
+ * EUR/MWh. TTF day-over-day moves above 25 €/MWh have historically been
+ * print errors rather than real moves — even the 2022 war spikes settled
+ * under this threshold at the daily-close level (intra-day of course
+ * moved further). Lower than the previous 60 €/MWh to catch the same
+ * Stooq-style single-print artefacts we see in NBP.
+ */
+const TTF_MOVE_SANITY_CAP_EUR_MWH = 25;
 
 type GasPriceRow = {
   price_eur_mwh: number | null;
@@ -144,10 +157,6 @@ const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
 function asNum(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-function asDateOnly(iso: string): string {
-  return iso.slice(0, 10);
 }
 
 function formatGbp(v: number): string {
@@ -760,53 +769,38 @@ export default function RiskPage() {
     [powerPrices],
   );
 
-  const ttfPricesByDay = useMemo(() => {
-    const buckets = new Map<string, { sum: number; count: number }>();
-    for (const row of gasPrices) {
-      if ((row.hub ?? "").toUpperCase() !== "TTF") continue;
-      const d = asDateOnly(row.price_time);
-      const p = asNum(row.price_eur_mwh);
-      if (!Number.isFinite(p) || p <= 0) continue;
-      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
-      cur.sum += p;
-      cur.count += 1;
-      buckets.set(d, cur);
-    }
-    const out: Record<string, number> = {};
-    for (const [k, v] of buckets) {
-      if (v.count > 0) out[k] = v.sum / v.count;
-    }
-    return out;
-  }, [gasPrices]);
+  const ttfPricesByDay = useMemo(
+    () =>
+      aggregateDailyGasPrices(
+        gasPrices.filter((row) => (row.hub ?? "").toUpperCase() === "TTF"),
+        { kind: "TTF" },
+      ),
+    [gasPrices],
+  );
 
-  const nbpPricesByDay = useMemo(() => {
-    /**
-     * NOTE ON UNITS: the gas_prices table stores NBP rows under the column
-     * name `price_eur_mwh`, but for NBP the stored value is actually the raw
-     * Stooq NF.F close, which is quoted in **pence per therm**, not EUR/MWh.
-     * (See python-agents/ingestion-agent/main.py `fetch_nbp_price`.) The P&L
-     * math below divides the delta by 100 precisely because it's in pence/th,
-     * so the math is correct given the actual stored units — the column name
-     * is just a misnomer inherited from the TTF-only schema era. If NBP ever
-     * gets re-ingested as EUR/MWh, convert via ttfToNbpPencePerTherm here.
-     */
-    const buckets = new Map<string, { sum: number; count: number }>();
-    for (const row of gasPrices) {
-      if ((row.hub ?? "").toUpperCase() !== "NBP") continue;
-      const d = asDateOnly(row.price_time);
-      const p = asNum(row.price_eur_mwh);
-      if (!Number.isFinite(p) || p <= 0) continue;
-      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
-      cur.sum += p;
-      cur.count += 1;
-      buckets.set(d, cur);
-    }
-    const out: Record<string, number> = {};
-    for (const [k, v] of buckets) {
-      if (v.count > 0) out[k] = v.sum / v.count;
-    }
-    return out;
-  }, [gasPrices]);
+  /**
+   * NOTE ON UNITS: the gas_prices table stores NBP rows under the column
+   * name `price_eur_mwh`, but for NBP the stored value is actually the raw
+   * Stooq NF.F close, which is quoted in **pence per therm**, not EUR/MWh.
+   * (See python-agents/ingestion-agent/main.py `fetch_nbp_price`.) The P&L
+   * math below divides the delta by 100 precisely because it's in pence/th,
+   * so the math is correct given the actual stored units — the column name
+   * is just a misnomer inherited from the TTF-only schema era. If NBP ever
+   * gets re-ingested as EUR/MWh, convert via ttfToNbpPencePerTherm here.
+   *
+   * The level floor inside aggregateDailyGasPrices (NBP_LEVEL_FLOOR_PTH =
+   * 30 p/th) defends against the upstream artefact where Stooq briefly
+   * prints ~15 p/th and then snaps back to a normal level, which would
+   * otherwise manufacture a fake 40+ p/th day-over-day spike.
+   */
+  const nbpPricesByDay = useMemo(
+    () =>
+      aggregateDailyGasPrices(
+        gasPrices.filter((row) => (row.hub ?? "").toUpperCase() === "NBP"),
+        { kind: "NBP" },
+      ),
+    [gasPrices],
+  );
 
   const fxByDay = useMemo(() => {
     const out: Record<string, number> = {};

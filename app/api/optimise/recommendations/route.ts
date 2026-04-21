@@ -9,6 +9,10 @@ import {
   aggregateDailyPowerPrices,
   type PowerPriceSample,
 } from "@/lib/portfolio/power-aggregate";
+import {
+  aggregateDailyGasPrices,
+  type GasPriceSample,
+} from "@/lib/portfolio/gas-aggregate";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
@@ -37,30 +41,6 @@ function parseNum(v: unknown): number | null {
 function isMissingFxTableError(message: string | undefined): boolean {
   const m = (message ?? "").toLowerCase();
   return m.includes("fx_rates") && (m.includes("does not exist") || m.includes("schema cache"));
-}
-
-function addDailySample(
-  map: Record<string, { sum: number; count: number }>,
-  day: string,
-  value: number,
-) {
-  const existing = map[day];
-  if (existing) {
-    existing.sum += value;
-    existing.count += 1;
-    return;
-  }
-  map[day] = { sum: value, count: 1 };
-}
-
-function finaliseDailyAverage(
-  map: Record<string, { sum: number; count: number }>,
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [day, agg] of Object.entries(map)) {
-    if (agg.count > 0) out[day] = agg.sum / agg.count;
-  }
-  return out;
 }
 
 function optimiserQuality(input: {
@@ -243,20 +223,26 @@ export async function GET(req: Request) {
       (powerRes.data ?? []) as PowerPriceSample[],
     );
 
-    const ttfAgg: Record<string, { sum: number; count: number }> = {};
-    const nbpAgg: Record<string, { sum: number; count: number }> = {};
+    // Shared aggregator applies absolute-level sanity floors (TTF ≥ €10,
+    // NBP ≥ 30 p/th) so feed artefacts — most notably the Stooq NF.F
+    // ~15 p/th glitches — get dropped before they poison historical
+    // scenarios rather than being silently averaged in.
+    const gasRows = (gasRes.data ?? []) as Array<{
+      price_time: string;
+      price_eur_mwh: number | null;
+      hub: string | null;
+    }>;
+    const ttfSamples: GasPriceSample[] = gasRows.filter(
+      (r) => String(r.hub ?? "").toUpperCase() === "TTF",
+    );
+    const nbpSamples: GasPriceSample[] = gasRows.filter(
+      (r) => String(r.hub ?? "").toUpperCase() === "NBP",
+    );
+    const ttfByDay = aggregateDailyGasPrices(ttfSamples, { kind: "TTF" });
+    const nbpRawPthByDay = aggregateDailyGasPrices(nbpSamples, {
+      kind: "NBP",
+    });
     let nbpProxyUsed = false;
-    for (const row of gasRes.data ?? []) {
-      const day = parseDateOnly(row.price_time);
-      const px = parseNum(row.price_eur_mwh);
-      const hub = String(row.hub ?? "").toUpperCase();
-      if (!day || px == null) continue;
-      if (hub === "TTF") addDailySample(ttfAgg, day, px);
-      // NBP rows store pence/therm in price_eur_mwh (Stooq NF.F); use as-is.
-      if (hub === "NBP") addDailySample(nbpAgg, day, px);
-    }
-    const ttfByDay = finaliseDailyAverage(ttfAgg);
-    const nbpRawPthByDay = finaliseDailyAverage(nbpAgg);
     for (const day of Object.keys(ttfByDay)) {
       const d = new Date(day + "T12:00:00Z");
       const dow = d.getUTCDay();

@@ -90,10 +90,21 @@ const STRESS_SCENARIOS: Scenario[] = PORTFOLIO_STRESS_SCENARIOS.map((s) => ({
   nbpMovePth: s.nbpMovePth,
 }));
 
+/**
+ * Safety caps for historical-scenario move synthesis. These are the last
+ * line of defense after {@link aggregateDailyGasPrices} has already
+ * rejected implausible absolute price levels — a move this large between
+ * two otherwise-accepted days almost always means the feed flipped
+ * between a bad tick and a good tick rather than a real market event.
+ *
+ * Tightened in the 2026-04 post-audit fixes after we saw a ~45 p/th
+ * fake NBP move slip past the previous 80 p/th cap and manufacture a
+ * multi-thousand-pound fake VaR tail in a real user's book.
+ */
 const HISTORICAL_MOVE_CAPS = {
   gbPowerMove: 250,
-  ttfMoveEurMwh: 60,
-  nbpMovePth: 80,
+  ttfMoveEurMwh: 25,
+  nbpMovePth: 30,
 } as const;
 
 function directionMult(direction: string | null): number {

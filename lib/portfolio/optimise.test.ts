@@ -49,7 +49,7 @@ describe("optimise NBP historical levels", () => {
     expect(hist[1]!.nbpMovePth).toBeCloseTo(0, 9);
   });
 
-  it("caps extreme p/th moves at the historical move cap (80 p/th)", () => {
+  it("caps extreme p/th moves at the historical move cap (30 p/th)", () => {
     const days = ["2026-01-01", "2026-01-02"];
     const nbpPth = nbpLevelsPthByDay({
       "2026-01-01": 100,
@@ -62,8 +62,9 @@ describe("optimise NBP historical levels", () => {
       fxByDay: fx(days),
     });
     expect(hist.length).toBe(1);
-    // +150 p/th raw move clamps to HISTORICAL_MOVE_CAPS.nbpMovePth = 80.
-    expect(hist[0]!.nbpMovePth).toBe(80);
+    // +150 p/th raw move clamps to HISTORICAL_MOVE_CAPS.nbpMovePth = 30,
+    // tightened from 80 after the 2026-04 post-audit feed-artefact fixes.
+    expect(hist[0]!.nbpMovePth).toBe(30);
   });
 });
 
