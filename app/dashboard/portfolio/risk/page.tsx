@@ -63,7 +63,26 @@ type PowerPriceRow = {
   price_gbp_mwh: number | null;
   price_date: string;
   settlement_period: number | null;
+  market: string | null;
+  source: string | null;
+  volume: number | null;
 };
+
+/**
+ * GB power daily marks are built by volume-weighting all settlement periods on
+ * a given day. Days with fewer than this many distinct settlement periods are
+ * dropped so we don't manufacture a spurious daily "move" when one day has a
+ * full 48-period print and the adjacent day only has a handful of peak-only
+ * rows. 24 = half the day, which tolerates DA-only coverage but excludes
+ * partial-window ingests. Tune upward if you want stricter marks.
+ */
+const MIN_POWER_PERIODS_PER_DAY = 24;
+
+/** Safety cap on inferred day-over-day GB power move (£/MWh). Moves above this
+ * threshold are almost always data-pipeline artefacts (imbalance-price spikes,
+ * stale rows, bad FX) rather than genuine forward-curve moves. Mirrors the
+ * HISTORICAL_MOVE_CAPS used by the Optimise engine. */
+const POWER_MOVE_SANITY_CAP_GBP_MWH = 250;
 
 type GasPriceRow = {
   price_eur_mwh: number | null;
@@ -215,7 +234,12 @@ const calculateDailyPnL = (
         const prevPrice = powerPricesByDay[prevDate];
         const currPrice = powerPricesByDay[currDate];
         if (prevPrice == null || currPrice == null) continue;
-        dayPnL += (currPrice - prevPrice) * size * direction;
+        const move = currPrice - prevPrice;
+        // Defensive guardrail: reject obviously bogus day-over-day moves that
+        // slip past the aggregator (e.g. one settlement period in the day
+        // still triggered an imbalance spike despite coverage thresholding).
+        if (Math.abs(move) > POWER_MOVE_SANITY_CAP_GBP_MWH) continue;
+        dayPnL += move * size * direction;
         hasContributingSeries = true;
       } else if (pos.market === "TTF") {
         const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
@@ -321,6 +345,43 @@ export default function RiskPage() {
   const [limitsError, setLimitsError] = useState<string | null>(null);
   const [riskLimitsFetchError, setRiskLimitsFetchError] = useState<string | null>(null);
 
+  /**
+   * Which slice of the simulated daily P&L series to show on the histogram and
+   * in the footer stats. The VaR / CVaR / volatility tiles above the chart
+   * deliberately always use the full 120-day sample (they need it to be
+   * statistically reliable); this toggle only re-scopes the *display*.
+   *
+   * Initial value is read lazily from localStorage on the client; on the
+   * server and in private-mode browsers we fall back to the 120-day default
+   * (which matches the server-rendered HTML so hydration is stable).
+   */
+  const [histogramWindow, setHistogramWindow] = useState<
+    "book" | "30d" | "90d" | "120d"
+  >(() => {
+    if (typeof window === "undefined") return "120d";
+    try {
+      const stored = window.localStorage.getItem("risk.histogramWindow");
+      if (
+        stored === "book" ||
+        stored === "30d" ||
+        stored === "90d" ||
+        stored === "120d"
+      ) {
+        return stored;
+      }
+    } catch {
+      // localStorage may be unavailable (private mode); safe to ignore.
+    }
+    return "120d";
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("risk.histogramWindow", histogramWindow);
+    } catch {
+      // See above.
+    }
+  }, [histogramWindow]);
+
   useEffect(() => {
     fetch("/api/billing/status")
       .then((r) => r.json())
@@ -377,11 +438,18 @@ export default function RiskPage() {
             .select("*")
             .eq("user_id", user.id)
             .eq("is_closed", false),
+          // Scope to GB day-ahead power (N2EX / APX). Without the filter we
+          // pick up any other row in market_prices — system/imbalance prints,
+          // non-GB markets, one-off backfill runs — and average them into a
+          // single daily "GB power" mark, which manufactures spurious
+          // day-over-day moves on the Daily P&L distribution. Matches the
+          // scoping used by AttributionPageClient and Overview.
           supabase
             .from("market_prices")
             .select(
               "price_gbp_mwh, price_date, settlement_period, market, source, volume, fetched_at",
             )
+            .or("market.eq.N2EX,market.eq.APX")
             .order("price_date", { ascending: true })
             .order("settlement_period", { ascending: true }),
           supabase
@@ -488,18 +556,71 @@ export default function RiskPage() {
   ]);
 
   const powerPricesByDay = useMemo(() => {
-    const buckets = new Map<string, { sum: number; count: number }>();
+    /**
+     * Build a single daily mark per GB power date by:
+     *   1. De-duplicating rows by (date, settlement_period). Repeated ingests
+     *      of the same period (e.g. MID rebuilds) must not count twice.
+     *   2. Volume-weighting when a `volume` is present — a few MWh at
+     *      £2,000/MWh during a system-stress half-hour shouldn't pull a
+     *      day's mark up as much as a 5,000 MWh base-load print.
+     *   3. Requiring at least MIN_POWER_PERIODS_PER_DAY distinct settlement
+     *      periods. This filters out days with peak-only or off-peak-only
+     *      coverage that would otherwise manufacture a fake day-over-day
+     *      delta when the neighbour day is fully populated.
+     */
+    type Cell = {
+      weightedSum: number;
+      weight: number;
+      unweightedSum: number;
+      unweightedCount: number;
+    };
+    const bySettlement = new Map<string, Map<number, number>>(); // date -> period -> price
     for (const row of powerPrices) {
       const d = row.price_date;
       const p = asNum(row.price_gbp_mwh);
-      const cur = buckets.get(d) ?? { sum: 0, count: 0 };
-      cur.sum += p;
-      cur.count += 1;
-      buckets.set(d, cur);
+      if (!Number.isFinite(p) || p <= 0) continue;
+      const period = row.settlement_period ?? 0;
+      let dayMap = bySettlement.get(d);
+      if (!dayMap) {
+        dayMap = new Map<number, number>();
+        bySettlement.set(d, dayMap);
+      }
+      // Last-write-wins per (date, period) — ingestion upserts on that key.
+      dayMap.set(period, p);
+    }
+    const volumeByKey = new Map<string, number>();
+    for (const row of powerPrices) {
+      const v = row.volume == null ? null : Number(row.volume);
+      if (v == null || !Number.isFinite(v) || v <= 0) continue;
+      const key = `${row.price_date}#${row.settlement_period ?? 0}`;
+      volumeByKey.set(key, v);
+    }
+    const aggregated = new Map<string, Cell>();
+    for (const [date, periodMap] of bySettlement) {
+      for (const [period, price] of periodMap) {
+        const cell = aggregated.get(date) ?? {
+          weightedSum: 0,
+          weight: 0,
+          unweightedSum: 0,
+          unweightedCount: 0,
+        };
+        const vol = volumeByKey.get(`${date}#${period}`) ?? 0;
+        if (vol > 0) {
+          cell.weightedSum += price * vol;
+          cell.weight += vol;
+        }
+        cell.unweightedSum += price;
+        cell.unweightedCount += 1;
+        aggregated.set(date, cell);
+      }
     }
     const out: Record<string, number> = {};
-    for (const [k, v] of buckets) {
-      out[k] = v.count > 0 ? v.sum / v.count : 0;
+    for (const [date, cell] of aggregated) {
+      if (cell.unweightedCount < MIN_POWER_PERIODS_PER_DAY) continue;
+      out[date] =
+        cell.weight > 0
+          ? cell.weightedSum / cell.weight
+          : cell.unweightedSum / cell.unweightedCount;
     }
     return out;
   }, [powerPrices]);
@@ -510,6 +631,7 @@ export default function RiskPage() {
       if ((row.hub ?? "").toUpperCase() !== "TTF") continue;
       const d = asDateOnly(row.price_time);
       const p = asNum(row.price_eur_mwh);
+      if (!Number.isFinite(p) || p <= 0) continue;
       const cur = buckets.get(d) ?? { sum: 0, count: 0 };
       cur.sum += p;
       cur.count += 1;
@@ -517,17 +639,28 @@ export default function RiskPage() {
     }
     const out: Record<string, number> = {};
     for (const [k, v] of buckets) {
-      out[k] = v.count > 0 ? v.sum / v.count : 0;
+      if (v.count > 0) out[k] = v.sum / v.count;
     }
     return out;
   }, [gasPrices]);
 
   const nbpPricesByDay = useMemo(() => {
+    /**
+     * NOTE ON UNITS: the gas_prices table stores NBP rows under the column
+     * name `price_eur_mwh`, but for NBP the stored value is actually the raw
+     * Stooq NF.F close, which is quoted in **pence per therm**, not EUR/MWh.
+     * (See python-agents/ingestion-agent/main.py `fetch_nbp_price`.) The P&L
+     * math below divides the delta by 100 precisely because it's in pence/th,
+     * so the math is correct given the actual stored units — the column name
+     * is just a misnomer inherited from the TTF-only schema era. If NBP ever
+     * gets re-ingested as EUR/MWh, convert via ttfToNbpPencePerTherm here.
+     */
     const buckets = new Map<string, { sum: number; count: number }>();
     for (const row of gasPrices) {
       if ((row.hub ?? "").toUpperCase() !== "NBP") continue;
       const d = asDateOnly(row.price_time);
       const p = asNum(row.price_eur_mwh);
+      if (!Number.isFinite(p) || p <= 0) continue;
       const cur = buckets.get(d) ?? { sum: 0, count: 0 };
       cur.sum += p;
       cur.count += 1;
@@ -535,7 +668,7 @@ export default function RiskPage() {
     }
     const out: Record<string, number> = {};
     for (const [k, v] of buckets) {
-      out[k] = v.count > 0 ? v.sum / v.count : 0;
+      if (v.count > 0) out[k] = v.sum / v.count;
     }
     return out;
   }, [gasPrices]);
@@ -640,21 +773,52 @@ export default function RiskPage() {
   );
 
   /**
-   * Exact date in dailyPnLSeries on or after bookStartDate — used as the x
+   * Histogram slice derived from the full dailyPnLSeries. The VaR / CVaR /
+   * volatility tiles keep using the full 120-day `dailyPnLSeries`; this is
+   * purely for the chart and its own footer stats (avg P&L, daily vol, etc.).
+   *   - "120d" → full lookback (unchanged from current behaviour).
+   *   - "90d" / "30d" → last N calendar days.
+   *   - "book" → days on or after bookStartDate (falls back to 120d when the
+   *     user has no positions yet, so we don't render an empty chart).
+   */
+  const histogramFloorDate = useMemo<string>(() => {
+    if (histogramWindow === "120d") return varLookbackMinDate;
+    if (histogramWindow === "book") {
+      return bookStartDate && bookStartDate > varLookbackMinDate
+        ? bookStartDate
+        : varLookbackMinDate;
+    }
+    const days = histogramWindow === "30d" ? 30 : 90;
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - days);
+    const iso = d.toISOString().slice(0, 10);
+    return iso < varLookbackMinDate ? varLookbackMinDate : iso;
+  }, [histogramWindow, varLookbackMinDate, bookStartDate]);
+  const visibleSeries = useMemo(
+    () => dailyPnLSeries.filter((d) => d.date >= histogramFloorDate),
+    [dailyPnLSeries, histogramFloorDate],
+  );
+
+  /**
+   * Exact date in visibleSeries on or after bookStartDate — used as the x
    * value for the book-opened ReferenceLine. Recharts expects the x value to
    * match a category present in the data, so we snap to the first series day
    * rather than using the raw bookStartDate which may land on a weekend.
    *
-   * Returns null when bookStart is before the 120d window (all bars are
-   * post-book, no marker needed) or when bookStart is after today (no series
-   * yet).
+   * Returns null when bookStart is outside the currently visible window
+   * (either before the earliest visible day — marker would sit off-chart —
+   * or after today), or when the user has no book yet.
    */
   const bookStartMarkerDate = useMemo<string | null>(() => {
     if (!bookStartDate) return null;
-    if (bookStartDate <= varLookbackMinDate) return null;
-    const first = dailyPnLSeries.find((d) => d.date >= bookStartDate);
-    return first?.date ?? null;
-  }, [bookStartDate, varLookbackMinDate, dailyPnLSeries]);
+    const first = visibleSeries.find((d) => d.date >= bookStartDate);
+    if (!first) return null;
+    // If the first visible day is ALREADY post-book, there's no pre-book
+    // region on-screen and the marker would sit at the chart's left edge,
+    // which reads as noise rather than signal. Suppress.
+    if (visibleSeries[0] && visibleSeries[0].date >= bookStartDate) return null;
+    return first.date;
+  }, [bookStartDate, visibleSeries]);
 
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
   const var99 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.99);
@@ -675,18 +839,23 @@ export default function RiskPage() {
     worstDaySeries.length > 0
       ? worstDaySeries.reduce((min, d) => (d.pnl < min.pnl ? d : min), worstDaySeries[0])
       : null;
-  const avgDailyPnL =
-    dailyPnLSeries.length > 0
-      ? dailyPnLSeries.reduce((sum, d) => sum + d.pnl, 0) / dailyPnLSeries.length
+  // Footer stats under the histogram are scoped to the *visible* window so
+  // "Average daily P&L" etc. match what the user is actually seeing. VaR /
+  // CVaR / worst-stress tiles above the chart still use the full 120-day
+  // series regardless of this toggle.
+  const visibleAvgPnL =
+    visibleSeries.length > 0
+      ? visibleSeries.reduce((sum, d) => sum + d.pnl, 0) / visibleSeries.length
       : 0;
-  const variance =
-    dailyPnLSeries.length > 0
-      ? dailyPnLSeries.reduce((sum, d) => sum + (d.pnl - avgDailyPnL) ** 2, 0) /
-        dailyPnLSeries.length
+  const visibleVariance =
+    visibleSeries.length > 0
+      ? visibleSeries.reduce((sum, d) => sum + (d.pnl - visibleAvgPnL) ** 2, 0) /
+        visibleSeries.length
       : 0;
-  const dailyVolatility = Math.sqrt(variance);
-  const annualisedVolatility = dailyVolatility * Math.sqrt(252);
-  const sharpe = dailyVolatility > 0 ? (avgDailyPnL / dailyVolatility) * Math.sqrt(252) : 0;
+  const visibleDailyVol = Math.sqrt(visibleVariance);
+  const visibleAnnualisedVol = visibleDailyVol * Math.sqrt(252);
+  const visibleSharpe =
+    visibleDailyVol > 0 ? (visibleAvgPnL / visibleDailyVol) * Math.sqrt(252) : 0;
 
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
@@ -960,19 +1129,63 @@ export default function RiskPage() {
           </motion.div>
 
           <section>
-            <p className={sectionLabel}>Stress simulation</p>
-            <h2 className="mt-1 font-serif text-xl text-ink">Simulated daily P&amp;L</h2>
-            <p className="mt-1 text-xs italic text-ink-light">
-              Reprices your current book against the last {RISK_LOOKBACK_DAYS} days of market moves. Not a record of realised P&amp;L — bars left of the &quot;book opened&quot; marker show what today&apos;s positions would have returned on days before you held them.
-            </p>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0">
+                <p className={sectionLabel}>Stress simulation</p>
+                <h2 className="mt-1 font-serif text-xl text-ink">
+                  Simulated daily P&amp;L
+                </h2>
+                <p className="mt-1 text-xs italic text-ink-light">
+                  Reprices your current book against the last {RISK_LOOKBACK_DAYS} days of market moves. Not a record of realised P&amp;L. Bars left of the &quot;book opened&quot; marker show what today&apos;s positions would have returned on days before you held them.
+                </p>
+              </div>
+              <div
+                role="group"
+                aria-label="Histogram window"
+                className="inline-flex shrink-0 rounded-[4px] border-[0.5px] border-ivory-border bg-card p-0.5"
+              >
+                {([
+                  { id: "book", label: "Since book opened" },
+                  { id: "30d", label: "30d" },
+                  { id: "90d", label: "90d" },
+                  { id: "120d", label: "120d" },
+                ] as const).map((opt) => {
+                  const active = histogramWindow === opt.id;
+                  const disabled = opt.id === "book" && !bookStartDate;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      disabled={disabled}
+                      aria-pressed={active}
+                      onClick={() => setHistogramWindow(opt.id)}
+                      className={`rounded-[3px] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.08em] transition-colors ${
+                        active
+                          ? "bg-ink text-ivory-bg"
+                          : "text-ink-mid hover:bg-ivory-border/50"
+                      } ${disabled ? "cursor-not-allowed opacity-40" : ""}`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {noHistory ? (
               <p className="mt-4 text-sm text-ink-mid">
                 No price history available yet. P&amp;L tracking begins once prices are recorded across multiple days.
               </p>
+            ) : visibleSeries.length === 0 ? (
+              <p className="mt-4 text-sm text-ink-mid">
+                No simulated days in this window. Try widening the lookback.
+              </p>
             ) : (
-              <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-3 py-3">
+              <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card px-3 pt-6 pb-3">
                 <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={dailyPnLSeries}>
+                  <BarChart
+                    data={visibleSeries}
+                    margin={{ top: 12, right: 10, left: 0, bottom: 0 }}
+                  >
                     <XAxis
                       dataKey="date"
                       tickFormatter={formatDay}
@@ -1005,14 +1218,14 @@ export default function RiskPage() {
                         strokeDasharray="3 3"
                         label={{
                           value: "Book opened",
-                          position: "top",
+                          position: "insideTopRight",
                           fill: "var(--ink-mid)",
                           fontSize: 10,
                         }}
                       />
                     ) : null}
                     <Bar dataKey="pnl">
-                      {dailyPnLSeries.map((d) => {
+                      {visibleSeries.map((d) => {
                         const preBook =
                           bookStartDate != null && d.date < bookStartDate;
                         const base = d.pnl >= 0 ? BRAND_GREEN : TERRACOTTA;
@@ -1028,19 +1241,19 @@ export default function RiskPage() {
                   </BarChart>
                 </ResponsiveContainer>
                 <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-ink-mid">
-                  <span>Average daily P&amp;L: {formatGbp(avgDailyPnL)}</span>
-                  <span>Daily volatility: {formatGbp(dailyVolatility)}</span>
-                  <span>Annualised volatility: {formatGbp(annualisedVolatility)}</span>
-                  {dailyPnLSeries.length >= 20 && (
-                    <span>Sharpe equivalent: {sharpe.toFixed(1)}</span>
+                  <span>Average daily P&amp;L: {formatGbp(visibleAvgPnL)}</span>
+                  <span>Daily volatility: {formatGbp(visibleDailyVol)}</span>
+                  <span>Annualised volatility: {formatGbp(visibleAnnualisedVol)}</span>
+                  {visibleSeries.length >= 20 && (
+                    <span>Sharpe equivalent: {visibleSharpe.toFixed(1)}</span>
                   )}
                 </div>
                 <p className="mt-2 text-xs italic text-ink-light">
-                  Based on {dailyPnLSeries.length} simulated days
+                  Based on {visibleSeries.length} simulated days in this window
                   {bookStartDate
                     ? ` · book opened ${formatDay(bookStartDate)}`
-                    : ""}{" "}
-                  · VaR confidence improves significantly after 20 trading days
+                    : ""}
+                  · VaR tiles above use the full {RISK_LOOKBACK_DAYS}-day sample regardless of this selection
                 </p>
               </div>
             )}
