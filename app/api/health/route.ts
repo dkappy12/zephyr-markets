@@ -30,6 +30,11 @@ export async function GET() {
       env: true,
       supabase: "unknown" as "ok" | "error" | "unknown",
       portfolioFeeds: "unknown" as "ok" | "warn" | "error" | "unknown",
+      portfolioTables: "unknown" as "ok" | "error" | "unknown",
+    },
+    portfolioDataPlane: {
+      portfolioPnl: "unknown" as "ok" | "error" | "unknown",
+      positions: "unknown" as "ok" | "error" | "unknown",
     },
     feedHealth: {
       powerAgeHours: null as number | null,
@@ -52,39 +57,48 @@ export async function GET() {
   try {
     const admin = createAdminClient(url, serviceRoleKey);
     // Verify DB/auth reachability without exposing business data.
-    const [authPing, powerLatest, gasLatest, fxLatest, carbonLatest] =
-      await Promise.all([
-        admin.from("auth_audit_log").select("id").limit(1),
-        admin
-          .from("market_prices")
-          .select("price_date")
-          .or("market.eq.N2EX,market.eq.APX")
-          .order("price_date", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        admin
-          .from("gas_prices")
-          .select("price_time")
-          .in("hub", ["TTF", "NBP"])
-          .order("price_time", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        admin
-          .from("fx_rates")
-          .select("rate_date")
-          .eq("base", "EUR")
-          .eq("quote", "GBP")
-          .order("rate_date", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        admin
-          .from("carbon_prices")
-          .select("price_date")
-          .in("hub", ["UKA", "EUA"])
-          .order("price_date", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
+    const [
+      authPing,
+      powerLatest,
+      gasLatest,
+      fxLatest,
+      carbonLatest,
+      portfolioPnlPing,
+      positionsPing,
+    ] = await Promise.all([
+      admin.from("auth_audit_log").select("id").limit(1),
+      admin
+        .from("market_prices")
+        .select("price_date")
+        .or("market.eq.N2EX,market.eq.APX")
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      admin
+        .from("gas_prices")
+        .select("price_time")
+        .in("hub", ["TTF", "NBP"])
+        .order("price_time", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      admin
+        .from("fx_rates")
+        .select("rate_date")
+        .eq("base", "EUR")
+        .eq("quote", "GBP")
+        .order("rate_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      admin
+        .from("carbon_prices")
+        .select("price_date")
+        .in("hub", ["UKA", "EUA"])
+        .order("price_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      admin.from("portfolio_pnl").select("user_id").limit(1),
+      admin.from("positions").select("id").limit(1),
+    ]);
 
     if (authPing.error) {
       return NextResponse.json(
@@ -141,19 +155,40 @@ export async function GET() {
     else if (carbonAgeDays > 4)
       markWarn(`Carbon feed aging: ${carbonAgeDays.toFixed(1)}d old.`);
 
+    const portfolioPnlOk = !portfolioPnlPing.error;
+    const positionsOk = !positionsPing.error;
+    if (!portfolioPnlOk) {
+      markError(
+        `portfolio_pnl table unreachable: ${portfolioPnlPing.error?.message ?? "unknown"}.`,
+      );
+    }
+    if (!positionsOk) {
+      markError(
+        `positions table unreachable: ${positionsPing.error?.message ?? "unknown"}.`,
+      );
+    }
+
     const feedStatus: "ok" | "warn" | "error" = hasError
       ? "error"
       : hasWarn
         ? "warn"
         : "ok";
 
+    const tablesStatus: "ok" | "error" =
+      portfolioPnlOk && positionsOk ? "ok" : "error";
+
     return NextResponse.json({
       ...base,
-      ok: !hasError,
+      ok: !hasError && portfolioPnlOk && positionsOk,
       checks: {
         ...base.checks,
         supabase: "ok",
         portfolioFeeds: feedStatus,
+        portfolioTables: tablesStatus,
+      },
+      portfolioDataPlane: {
+        portfolioPnl: portfolioPnlOk ? "ok" : "error",
+        positions: positionsOk ? "ok" : "error",
       },
       feedHealth: {
         powerAgeHours,

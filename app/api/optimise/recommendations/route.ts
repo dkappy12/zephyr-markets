@@ -16,6 +16,7 @@ import {
   type GasPriceSample,
 } from "@/lib/portfolio/gas-aggregate";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
+import { logEvent } from "@/lib/ops/logger";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { requireUser } from "@/lib/auth/require-user";
@@ -212,14 +213,32 @@ export async function GET(req: Request) {
       gasRes.error ||
       (fxRes.error && !isMissingFxTableError(fxRes.error.message))
     ) {
+      const detail =
+        positionsRes.error?.message ??
+        powerRes.error?.message ??
+        gasRes.error?.message ??
+        fxRes.error?.message ??
+        "Failed loading optimise data";
+      await logAuthAuditEvent({
+        event: "optimise_recommendations_data_load_failed",
+        userId: user.id,
+        status: "failure",
+        metadata: {
+          positionsErr: positionsRes.error?.message ?? null,
+          powerErr: powerRes.error?.message ?? null,
+          gasErr: gasRes.error?.message ?? null,
+          fxErr: fxRes.error?.message ?? null,
+        },
+      });
+      logEvent({
+        scope: "portfolio_api",
+        event: "optimise_data_load_failed",
+        level: "error",
+        data: { reason: detail },
+      });
       return NextResponse.json(
         {
-          error:
-            positionsRes.error?.message ??
-            powerRes.error?.message ??
-            gasRes.error?.message ??
-            fxRes.error?.message ??
-            "Failed loading optimise data",
+          error: detail,
         },
         { status: 500 },
       );
@@ -342,13 +361,20 @@ export async function GET(req: Request) {
       ...result,
     });
   } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
     await logAuthAuditEvent({
       event: "optimise_recommendations_failed",
       status: "failure",
-      metadata: { reason: error instanceof Error ? error.message : String(error) },
+      metadata: { reason },
+    });
+    logEvent({
+      scope: "portfolio_api",
+      event: "optimise_recommendations_exception",
+      level: "error",
+      data: { reason },
     });
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
+      { error: reason },
       { status: 500 },
     );
   }

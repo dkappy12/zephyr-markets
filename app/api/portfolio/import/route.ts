@@ -7,6 +7,7 @@ import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { createClient } from "@/lib/supabase/server";
 import { normalisePositionInput } from "@/lib/portfolio/position-contract";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
+import { logEvent } from "@/lib/ops/logger";
 
 type ImportItem = Record<string, unknown>;
 
@@ -116,6 +117,18 @@ export async function POST(req: Request) {
       .eq("user_id", user.id)
       .eq("is_closed", false);
     if (countError) {
+      await logAuthAuditEvent({
+        event: "portfolio_import_position_count_failed",
+        userId: user.id,
+        status: "failure",
+        metadata: { message: countError.message },
+      });
+      logEvent({
+        scope: "portfolio_api",
+        event: "import_position_count_failed",
+        level: "error",
+        data: { message: countError.message },
+      });
       return NextResponse.json(
         { code: "POSITION_COUNT_FAILED", error: countError.message },
         { status: 500 },
@@ -160,6 +173,12 @@ export async function POST(req: Request) {
       userId: user.id,
       status: "failure",
       metadata: { details: error.message },
+    });
+    logEvent({
+      scope: "portfolio_api",
+      event: "import_insert_failed",
+      level: "error",
+      data: { message: error.message },
     });
     return NextResponse.json(
       {

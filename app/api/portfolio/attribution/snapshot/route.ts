@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
+import { logEvent } from "@/lib/ops/logger";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: Request) {
@@ -62,6 +64,18 @@ export async function POST(req: Request) {
     .from("portfolio_pnl")
     .upsert(row, { onConflict: "user_id,date" });
   if (error) {
+    await logAuthAuditEvent({
+      event: "portfolio_attribution_snapshot_failed",
+      userId: user.id,
+      status: "failure",
+      metadata: { message: error.message },
+    });
+    logEvent({
+      scope: "portfolio_api",
+      event: "attribution_snapshot_upsert_failed",
+      level: "error",
+      data: { message: error.message },
+    });
     return NextResponse.json(
       { code: "SNAPSHOT_FAILED", error: error.message },
       { status: 500 },
