@@ -46,18 +46,17 @@ function isMissingFxTableError(message: string | undefined): boolean {
 }
 
 /**
- * Coarse model-health score from several independent checklist flags.
+ * Coarse model-health score from **data / scenario** checklist flags only.
+ * (Ranking stability is reported separately in `diagnostics` and is not
+ * included here, so the band is not conflated with “top packages are close”.)
  * Each met condition appends a warning; 0 / 1–2 / 3+ warnings map to
- * high / medium / low. Requiring 3+ flags for LOW avoids treating
- * “NBP gap + stability noise” (common on large books) as a crisis when
- * recommendations are still usable.
+ * high / medium / low.
  */
 function optimiserQuality(input: {
   historicalScenarioCount: number;
   candidatePackageCount: number;
   fallbackUsed: boolean;
   nbpProxyUsed: boolean;
-  stabilityPass: boolean;
 }): { quality: "high" | "medium" | "low"; warnings: string[] } {
   const warnings: string[] = [];
   if (input.fallbackUsed) {
@@ -73,9 +72,6 @@ function optimiserQuality(input: {
   }
   if (input.candidatePackageCount < 30) {
     warnings.push("Hedge search space is narrow; recommendations may be unstable.");
-  }
-  if (!input.stabilityPass) {
-    warnings.push("Top packages are unstable; recommendation ranking may be noisy.");
   }
   if (warnings.length >= 3) return { quality: "low", warnings };
   if (warnings.length >= 1) return { quality: "medium", warnings };
@@ -293,7 +289,6 @@ export async function GET(req: Request) {
       candidatePackageCount: result.diagnostics.candidatePackageCount,
       fallbackUsed: result.diagnostics.fallbackUsed,
       nbpProxyUsed: result.diagnostics.nbpProxyUsed,
-      stabilityPass: result.diagnostics.stabilityPass,
     });
     const reliability = makeReliabilityEnvelope({
       modelVersion: "optimise_v1",

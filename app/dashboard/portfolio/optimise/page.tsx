@@ -269,7 +269,7 @@ export default function OptimisePage() {
           role="status"
         >
           Model quality is LOW: interpret outputs with care — scenario depth,
-          coverage, or stability is weak.
+          coverage, or other data limits.
           {data.qualityWarnings.length > 0
             ? ` ${data.qualityWarnings.join(" ")}`
             : null}
@@ -412,24 +412,76 @@ export default function OptimisePage() {
               </div>
             </div>
 
-            <div className="mt-4 space-y-1">
+            {data.qualityWarnings.length > 0 ? (
+              <div className="mt-4 space-y-1">
+                {data.qualityWarnings.map((w) => (
+                  <p key={w} className="text-xs text-ink-light">
+                    {w}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                  Ranking stability
+                </p>
+                <p
+                  className={`mt-2 font-serif text-3xl tracking-tight ${
+                    data.diagnostics.stabilityPass
+                      ? "text-[#1D6B4E]"
+                      : "text-amber-700"
+                  }`}
+                >
+                  {data.diagnostics.stabilityPass ? "PASS" : "WATCH"}
+                </p>
+                <div className="mt-3 flex w-full max-w-[240px] gap-1">
+                  {(["watch", "pass"] as const).map((side) => {
+                    const isPass = data.diagnostics.stabilityPass;
+                    const isActive = side === "pass" ? isPass : !isPass;
+                    return (
+                      <div
+                        key={side}
+                        className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
+                          isActive
+                            ? side === "pass"
+                              ? "bg-[#1D6B4E]"
+                              : "bg-amber-700"
+                            : "bg-ivory-border/40"
+                        }`}
+                        aria-hidden
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+              {data.diagnostics.guardrailFilteredCount > 0 ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Guardrail filtered
+                    </p>
+                    <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                      {data.diagnostics.guardrailFilteredCount}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-4 space-y-2">
               <p className="text-xs text-ink-mid">
-                Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · index{" "}
-                {data.diagnostics.stabilityIndex.toFixed(3)} /{" "}
+                Index {data.diagnostics.stabilityIndex.toFixed(3)} /{" "}
                 {STABILITY_INDEX_SCALE_MAX.toFixed(2)} (PASS ≤{" "}
                 {STABILITY_INDEX_PASS_MAX.toFixed(2)})
-                {data.diagnostics.guardrailFilteredCount > 0
-                  ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered`
-                  : ""}
               </p>
-              {data.qualityWarnings.length > 0 ? (
-                <div className="mt-2 space-y-1">
-                  {data.qualityWarnings.map((w) => (
-                    <p key={w} className="text-xs text-ink-light">
-                      {w}
-                    </p>
-                  ))}
-                </div>
+              {!data.diagnostics.stabilityPass ? (
+                <p className="text-xs text-ink-light">
+                  The best few hedge packages are close in total score, so the order
+                  of ranked alternatives may be sensitive to small changes.
+                </p>
               ) : null}
             </div>
           </section>
