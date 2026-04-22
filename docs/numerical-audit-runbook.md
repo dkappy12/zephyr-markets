@@ -70,6 +70,7 @@ Classify each finding as one of:
 ## Related
 
 - `docs/numerical-audit-findings-2026-04-22.md` — latest **automated / static** audit results (re-run = new dated file).
+- `docs/numerical-audit-human-pass-2026-04-22.md` — **Playwright MCP** public/auth-boundary run (re-run = new dated file).
 - `docs/trader-trust-checklist.md` — release QA: staleness, source footnotes, empty states (complements this deeper numerical pass).
 - `docs/portfolio-book-operations-runbook.md` — operational feeds and import health.
 - `docs/pre-commercial-foundations-runbook.md` — broader go-live checklist.

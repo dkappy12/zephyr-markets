@@ -34,7 +34,8 @@ Re-run `trust:report` in CI or locally with service role to include gate and dri
 
 ### Phase 2 — Browser / “human” pass
 
-**Not executed in this run** (no logged-in session / credentials in the agent environment). **Owner action:** walk Book → Risk (120d) → Optimise → Attribution on a **pro** test account, using fixtures from Phase 0 of the runbook; capture trust-critical screens if anything looks off by order of magnitude.
+- **MCP (public + auth shell):** [`numerical-audit-human-pass-2026-04-22.md`](./numerical-audit-human-pass-2026-04-22.md) — home + `/login` + unauthenticated **Optimise** redirect with **`returnUrl` preserved**; no live login (no `E2E_TEST_*` in environment).  
+- **Signed-in Book / Risk / Optimise / Attribution with your data:** still **not** done in automation here — do the **manual 15 min** walk, or set `E2E_TEST_EMAIL` / `E2E_TEST_PASSWORD` in the process that runs Playwright and extend/re-run; see the human-pass doc.
 
 ## Phase 3 — Outcome summary
 
