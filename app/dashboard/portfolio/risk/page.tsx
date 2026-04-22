@@ -1099,32 +1099,6 @@ export default function RiskPage() {
   const visibleSharpe =
     visibleDailyVol > 0 ? (visibleAvgPnL / visibleDailyVol) * Math.sqrt(252) : 0;
 
-  /**
-   * Flag the single biggest |P&L| day when it dwarfs the rest of the window.
-   * Without this, a 5σ outlier (legitimate or data artefact) silently
-   * dominates daily vol / annualised vol / Sharpe without any visual cue
-   * beyond "one bar is tall". Surfacing it in text makes it audit-able.
-   *
-   * Threshold: the day's |pnl| exceeds 3× the std dev of the *other* days
-   * in the visible window AND is > £5k in absolute terms, so small books
-   * with naturally noisy histories don't trigger spurious warnings.
-   */
-  const outlierDay = useMemo(() => {
-    if (visibleSeries.length < 5) return null;
-    const sorted = [...visibleSeries].sort(
-      (a, b) => Math.abs(b.pnl) - Math.abs(a.pnl),
-    );
-    const top = sorted[0];
-    const rest = sorted.slice(1);
-    if (rest.length < 2) return null;
-    const restMean = rest.reduce((s, d) => s + d.pnl, 0) / rest.length;
-    const restVar =
-      rest.reduce((s, d) => s + (d.pnl - restMean) ** 2, 0) / rest.length;
-    const restStd = Math.sqrt(restVar);
-    const threshold = Math.max(5000, restStd * 3);
-    return Math.abs(top.pnl) > threshold ? { day: top, restStd } : null;
-  }, [visibleSeries]);
-
   const perPositionRisk = useMemo(() => {
     return positions.map((p) => {
       const series = calculateDailyPnL(
@@ -1568,49 +1542,6 @@ export default function RiskPage() {
                       : ""
                   } VaR tiles above use the full ${RISK_LOOKBACK_DAYS}-day sample regardless of this selection.`}
                 </p>
-                {outlierDay ? (
-                  <div
-                    className="mt-3 rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-3 py-2"
-                    role="status"
-                  >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
-                      Outlier day
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-amber-900">
-                      <span className="font-semibold">
-                        {formatDay(outlierDay.day.date)}
-                      </span>{" "}
-                      {formatSignedGbp(outlierDay.day.pnl)} is{" "}
-                      {(
-                        Math.abs(outlierDay.day.pnl) /
-                        Math.max(outlierDay.restStd, 1)
-                      ).toFixed(1)}
-                      σ vs the rest of this window. Biggest contributors:{" "}
-                      {MARKET_ORDER.filter(
-                        (m) =>
-                          outlierDay.day.byMarket[m] != null &&
-                          outlierDay.day.byMarket[m] !== 0,
-                      )
-                        .sort(
-                          (a, b) =>
-                            Math.abs(outlierDay.day.byMarket[b] ?? 0) -
-                            Math.abs(outlierDay.day.byMarket[a] ?? 0),
-                        )
-                        .slice(0, 3)
-                        .map((m) => {
-                          const contrib = outlierDay.day.byMarket[m] ?? 0;
-                          const move = outlierDay.day.moves[m];
-                          return `${MARKET_LABEL[m]} ${formatSignedGbp(contrib)}${
-                            move != null ? ` (Δ ${formatMove(m, move)})` : ""
-                          }`;
-                        })
-                        .join(" · ") || "—"}
-                      . One large day can dominate daily vol and Sharpe; hover
-                      the bar for the full breakdown and verify the raw price
-                      move is real before trusting the headline numbers.
-                    </p>
-                  </div>
-                ) : null}
               </div>
             )}
           </section>
