@@ -82,6 +82,26 @@ function buildTenorOptions(): string[] {
   return out;
 }
 
+type Inst = (typeof INSTRUMENTS)[number];
+
+/** Tenor-synthetic name for new rows (editing keeps the stored name unless type changes). */
+function defaultNewInstrumentName(sel: Inst, tenor: string): string {
+  const t = tenor.trim() || "Month+1";
+  if (sel.instrument_type === "power_forward" && sel.market === "GB_power") {
+    return `GB Baseload ${t}`;
+  }
+  if (sel.instrument_type === "gas_forward") {
+    return `${sel.market} ${t}`;
+  }
+  if (sel.instrument_type === "carbon") {
+    return `${sel.label} ${t}`;
+  }
+  if (sel.instrument_type === "spark_spread" || sel.instrument_type === "dark_spread") {
+    return `${sel.instrument_type === "spark_spread" ? "Spark" : "Dark spread"} ${t}`;
+  }
+  return `${sel.label} ${t}`;
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -161,7 +181,9 @@ export function QuickAddModal({
       setEntryDate(new Date().toISOString().slice(0, 10));
       setExpiryDate("");
       setNotes("");
-      setInstrumentName(INSTRUMENTS[0]!.label);
+      setInstrumentName(
+        defaultNewInstrumentName(INSTRUMENTS[0]!, "Month+1"),
+      );
     }
   }, [open, editPosition]);
 
@@ -272,7 +294,9 @@ export function QuickAddModal({
                 const i = Number(e.target.value);
                 setInstrumentIdx(i);
                 if (!editPosition) {
-                  setInstrumentName(INSTRUMENTS[i]!.label);
+                  setInstrumentName(
+                    defaultNewInstrumentName(INSTRUMENTS[i]!, tenor),
+                  );
                 }
               }}
               className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
@@ -363,7 +387,18 @@ export function QuickAddModal({
             </span>
             <select
               value={tenorChoices.includes(tenor) ? tenor : tenorChoices[0]!}
-              onChange={(e) => setTenor(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTenor(v);
+                if (!editPosition) {
+                  setInstrumentName(
+                    defaultNewInstrumentName(
+                      INSTRUMENTS[instrumentIdx]!,
+                      v,
+                    ),
+                  );
+                }
+              }}
               className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
             >
               {tenorChoices.map((t) => (

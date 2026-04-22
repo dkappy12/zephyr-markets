@@ -1,6 +1,11 @@
 import type { PositionRow } from "@/lib/portfolio/book";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 
+/** Top-package objective spread / mean; pass when at or below this (lower = stabler). */
+export const STABILITY_INDEX_PASS_MAX = 0.12;
+/** Theoretical max spread when means differ wildly (display scale). */
+export const STABILITY_INDEX_SCALE_MAX = 1.0;
+
 export type OptimiseObjective = "cvar" | "var";
 
 export type Scenario = {
@@ -598,7 +603,8 @@ export function optimisePortfolio(input: {
       ? objectiveValues.reduce((s, v) => s + (v - mean) ** 2, 0) / objectiveValues.length
       : 0;
   const stabilityIndex = mean > 0 ? Math.sqrt(variance) / mean : 0;
-  const stabilityPass = stabilityIndex <= 0.12;
+  /** Coefficient-of-variation style index; lower is more stable. */
+  const stabilityPass = stabilityIndex <= STABILITY_INDEX_PASS_MAX;
 
   const alternatives = topRanks.map((row, idx) => ({
     rank: idx + 1,

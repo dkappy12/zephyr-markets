@@ -9,6 +9,8 @@ import {
 import {
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
+  STABILITY_INDEX_PASS_MAX,
+  STABILITY_INDEX_SCALE_MAX,
 } from "@/lib/portfolio/optimise";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
@@ -457,8 +459,10 @@ export default function OptimisePage() {
 
             <div className="mt-4 space-y-1">
               <p className="text-xs text-ink-mid">
-                Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · Index{" "}
-                {data.diagnostics.stabilityIndex.toFixed(3)}
+                Stability {data.diagnostics.stabilityPass ? "PASS" : "WATCH"} · index{" "}
+                {data.diagnostics.stabilityIndex.toFixed(3)} /{" "}
+                {STABILITY_INDEX_SCALE_MAX.toFixed(2)} (PASS ≤{" "}
+                {STABILITY_INDEX_PASS_MAX.toFixed(2)})
                 {data.diagnostics.guardrailFilteredCount > 0
                   ? ` · ${data.diagnostics.guardrailFilteredCount} package(s) filtered`
                   : ""}

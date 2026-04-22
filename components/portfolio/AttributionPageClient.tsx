@@ -89,6 +89,15 @@ function formatSignedGbp(n: number): string {
   return `${sign}£${formatted}`;
 }
 
+/** Y-axis: minus sign before £ (not `£-5,000` from toLocaleString). */
+function pnlAxisTickGbp(v: number): string {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return "—";
+  const body = Math.abs(n).toLocaleString("en-GB");
+  if (n < 0) return `−£${body}`;
+  return `£${body}`;
+}
+
 /** REMIT body text: "derated by XXX.XMW" */
 function parseDeratedMwFromDescription(description: string | null): number | null {
   if (!description) return null;
@@ -891,6 +900,13 @@ export function AttributionPageClient() {
     return out;
   }, [pnlHistory]);
 
+  const historyOpeningCumulativeNote = useMemo(() => {
+    if (chartData.length < 1) return null;
+    const first = chartData[0]!;
+    if (Math.abs(first.pnl) < 200) return null;
+    return { date: first.d, pnl: first.pnl };
+  }, [chartData]);
+
   const chartYDomain = useMemo((): [number, number] => {
     const nums = finiteTotalPnlValues(pnlHistory);
     if (nums.length === 0) return [0, 100];
@@ -1339,9 +1355,7 @@ export function AttributionPageClient() {
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#6b6560" }} />
                   <YAxis
                     tick={{ fontSize: 10, fill: "#6b6560" }}
-                    tickFormatter={(v) =>
-                      `£${Math.round(Number(v)).toLocaleString("en-GB")}`
-                    }
+                    tickFormatter={(v) => pnlAxisTickGbp(Number(v))}
                   />
                   <Tooltip
                     contentStyle={rechartsTooltipContentStyle}
@@ -1760,8 +1774,21 @@ export function AttributionPageClient() {
                 Check back tomorrow.
               </p>
             ) : (
-              <div className="mt-4 h-[220px] rounded-[4px] border-[0.5px] border-ivory-border bg-card px-2 py-3">
-                <ResponsiveContainer width="100%" height={200}>
+              <div className="mt-4 rounded-[4px] border-[0.5px] border-ivory-border bg-card px-2 py-3">
+                {historyOpeningCumulativeNote ? (
+                  <p
+                    className="mb-2 px-1 text-[11px] leading-snug text-ink-mid"
+                    role="status"
+                  >
+                    First point ({historyOpeningCumulativeNote.date}):{" "}
+                    {formatSignedGbp(historyOpeningCumulativeNote.pnl)} cumulative — often
+                    mostly unrealised vs entry; not an extra day of trading loss.
+                  </p>
+                ) : null}
+                <ResponsiveContainer
+                  width="100%"
+                  height={historyOpeningCumulativeNote ? 176 : 200}
+                >
                   <AreaChart
                     data={chartData}
                     margin={{ top: 8, right: 12, bottom: 8, left: 8 }}
@@ -1804,9 +1831,7 @@ export function AttributionPageClient() {
                     <YAxis
                       domain={chartYDomain}
                       tick={{ fontSize: 10, fill: "#6b6560" }}
-                      tickFormatter={(value) =>
-                        `£${Math.round(Number(value)).toLocaleString("en-GB")}`
-                      }
+                      tickFormatter={(value) => pnlAxisTickGbp(Number(value))}
                     />
                     <Tooltip
                       contentStyle={{

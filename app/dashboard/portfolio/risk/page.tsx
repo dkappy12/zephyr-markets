@@ -1417,7 +1417,7 @@ export default function RiskPage() {
                 </p>
                 <p className="mt-1 text-xs text-ink-light">
                   {dailyPnLSeries.length < 100
-                    ? `Need 100+ days (have ${dailyPnLSeries.length})`
+                    ? `Need 100+ days (have ${dailyPnLSeries.length}) · about ${Math.max(0, 100 - dailyPnLSeries.length)} more trading day${100 - dailyPnLSeries.length === 1 ? "" : "s"} to unlock`
                     : `Historical · ${dailyPnLSeries.length} days`}
                 </p>
               </div>
@@ -1452,7 +1452,10 @@ export default function RiskPage() {
                   Simulated daily P&amp;L
                 </h2>
                 <p className="mt-1 text-xs italic text-ink-light">
-                  Reprices your current book against the last {RISK_LOOKBACK_DAYS} days of market moves. Not a record of realised P&amp;L. Bars left of the &quot;book opened&quot; marker show what today&apos;s positions would have returned on days before you held them.
+                  Reprices your current book against the last {RISK_LOOKBACK_DAYS}{" "}
+                  days of market moves. Not a record of realised P&amp;L. Bars left of
+                  the &quot;book opened&quot; marker show what today&apos;s positions would
+                  have returned on days before you held them.
                 </p>
               </div>
               <div
@@ -1559,11 +1562,11 @@ export default function RiskPage() {
                   )}
                 </div>
                 <p className="mt-2 text-xs italic text-ink-light">
-                  Based on {visibleSeries.length} simulated days in this window
-                  {bookStartDate
-                    ? ` · book opened ${formatDay(bookStartDate)}`
-                    : ""}
-                  · VaR tiles above use the full {RISK_LOOKBACK_DAYS}-day sample regardless of this selection
+                  {`Based on ${visibleSeries.length} simulated days in this window${
+                    bookStartDate
+                      ? `. Book opened ${formatDay(bookStartDate)}.`
+                      : ""
+                  } VaR tiles above use the full ${RISK_LOOKBACK_DAYS}-day sample regardless of this selection.`}
                 </p>
                 {outlierDay ? (
                   <div
@@ -1616,7 +1619,8 @@ export default function RiskPage() {
             <p className={sectionLabel}>Position risk</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Risk by position</h2>
             <p className="mt-1 text-sm text-ink-light">
-              Each position&apos;s contribution to portfolio VaR. Worst-day values are simulated against the last {RISK_LOOKBACK_DAYS} days of market moves, not realised P&amp;L.
+              Each position&apos;s contribution to portfolio VaR. Worst-day values are simulated against the last{" "}
+              {RISK_LOOKBACK_DAYS} days of market moves, not realised P&amp;L.
             </p>
             <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card">
               <div className="overflow-x-auto">
@@ -1707,6 +1711,12 @@ export default function RiskPage() {
                   (a, b) => Math.abs(b.impact) - Math.abs(a.impact),
                 );
                 const topLegs = sorted.slice(0, 3);
+                const totalMag = Math.max(Math.abs(total), 1e-6);
+                const tailAbsSum = sorted
+                  .slice(3)
+                  .reduce((s, b) => s + Math.abs(b.impact), 0);
+                const showLegExpand =
+                  sorted.length > 3 && tailAbsSum / totalMag >= 0.01;
                 const expanded = expandedScenarios[scenario.name] ?? false;
                 return (
                   <article
@@ -1756,7 +1766,7 @@ export default function RiskPage() {
                             </li>
                           ))}
                         </ul>
-                        {breakdown.length > 3 ? (
+                        {showLegExpand ? (
                           <button
                             type="button"
                             className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-mid transition-colors hover:text-ink"
@@ -1854,7 +1864,10 @@ export default function RiskPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-mid">Direction exposure</p>
                 <p className="mt-2 text-sm text-[#1D6B4E]">Long exposure: {netLongMW.toLocaleString("en-GB")} MW ({longPct}%)</p>
                 <p className="text-sm text-[#8B3A3A]">Short exposure: {netShortMW.toLocaleString("en-GB")} MW ({shortPct}%)</p>
-                <p className="mt-1 text-sm text-ink-mid">
+                <p
+                  className="mt-1 text-sm text-ink-mid"
+                  title="MW exposure only; NBP/therm gas is excluded — see market concentration for gas notional above."
+                >
                   Net delta: {netDelta >= 0 ? "+" : "−"}{Math.abs(netDelta).toLocaleString("en-GB")} MW {netDelta >= 0 ? "net long" : "net short"}
                 </p>
                 <div className="mt-2 flex h-2 w-full overflow-hidden rounded-sm bg-ivory-border/60">

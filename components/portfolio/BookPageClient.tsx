@@ -196,17 +196,26 @@ function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
     return v != null ? `€${v.toFixed(2)}/t` : "—";
   }
   if (market === "OTHER_GAS") {
+    const inst = (p.instrument ?? "").toLowerCase();
+    const ttfProxyTag =
+      /jkm|henry|lng/.test(inst) && !/\bnbp\b|national\s*balancing/i.test(inst)
+        ? " · TTF-based proxy"
+        : "";
     const unit = (p.unit ?? "").toLowerCase();
     if (unit.includes("therm")) {
       const v = lp.nbpPencePerTherm;
-      return v != null ? `${v.toFixed(2)}p/th` : "—";
+      return v != null
+        ? `${v.toFixed(2)}p/th${
+            /jkm|henry|lng/.test(inst) ? " · NBP-based proxy" : ""
+          }`
+        : "—";
     }
     if ((p.currency ?? "").toUpperCase() === "EUR") {
       const v = lp.ttfEurMwh;
-      return v != null ? `€${v.toFixed(2)}/MWh` : "—";
+      return v != null ? `€${v.toFixed(2)}/MWh${ttfProxyTag}` : "—";
     }
     const v = lp.ttfGbpMwh;
-    return v != null ? `£${v.toFixed(2)}/MWh` : "—";
+    return v != null ? `£${v.toFixed(2)}/MWh${ttfProxyTag}` : "—";
   }
   return "—";
 }
@@ -275,6 +284,16 @@ function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
 const NO_MARK_SOURCE_TITLE =
   "No mark source available for this instrument — P&L cannot be calculated.\nSupported markets: GB Power, TTF, NBP, UKA, EUA.";
 
+function bookMarketTableLabel(p: PositionRow): string {
+  const m = p.market;
+  if (!m) return "—";
+  const inst = (p.instrument ?? "").toLowerCase();
+  if (normaliseMarket(p.market) === "OTHER_POWER" && /fuel|crack|gasoil/.test(inst)) {
+    return "OIL/CRACK";
+  }
+  return marketBadge(m);
+}
+
 export function BookPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null>(null);
@@ -306,6 +325,10 @@ export function BookPageClient() {
     null | "positions" | "pnl" | "signals"
   >(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** Stable client-side ordering: API returns created_at desc; re-sorting avoids jumpy add/delete. */
+  const [bookTableSort, setBookTableSort] = useState<
+    "as_loaded" | "instrument" | "market" | "tenor"
+  >("as_loaded");
   /** Bumps "Book updated" on add/edit/delete/import so it does not move backward after deletes. */
   const [bookActivityIso, setBookActivityIso] = useState<string | null>(null);
   const bumpBookActivity = useCallback(() => {
@@ -659,6 +682,27 @@ export function BookPageClient() {
     };
   }, [positions, livePrices, bookActivityIso]);
 
+  const bookTableRows = useMemo(() => {
+    const list = [...positions];
+    if (bookTableSort === "as_loaded") return list;
+    return list.sort((a, b) => {
+      if (bookTableSort === "instrument") {
+        return (a.instrument ?? "").localeCompare(b.instrument ?? "", "en-GB", {
+          sensitivity: "base",
+        });
+      }
+      if (bookTableSort === "market") {
+        return (a.market ?? "").localeCompare(b.market ?? "", "en-GB", {
+          sensitivity: "base",
+        });
+      }
+      return (a.tenor ?? "").localeCompare(b.tenor ?? "", "en-GB", {
+        sensitivity: "base",
+        numeric: true,
+      });
+    });
+  }, [positions, bookTableSort]);
+
   function handleClassified(payload: {
     headers: string[];
     rows: Record<string, unknown>[];
@@ -958,7 +1002,10 @@ export function BookPageClient() {
           >
             <div>
               <p className={sectionLabel}>Net delta</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
+              <p
+                className="mt-1 text-lg font-semibold tabular-nums text-ink"
+                title="MW from power unit positions only. NBP and other gas in therms are excluded from this figure — use Risk → concentration for gas £ notional."
+              >
                 {stats.net.label}
               </p>
               {stats.netByMarket.length > 1 ? (
@@ -1019,6 +1066,25 @@ export function BookPageClient() {
             </div>
           </motion.div>
 
+          <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+            <label className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+              Sort
+              <select
+                value={bookTableSort}
+                onChange={(e) =>
+                  setBookTableSort(
+                    e.target.value as "as_loaded" | "instrument" | "market" | "tenor",
+                  )
+                }
+                className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-2 py-1.5 text-[11px] font-medium normal-case text-ink"
+              >
+                <option value="as_loaded">As loaded (newest first)</option>
+                <option value="instrument">Instrument (A–Z)</option>
+                <option value="market">Market (A–Z)</option>
+                <option value="tenor">Tenor (A–Z)</option>
+              </select>
+            </label>
+          </div>
           <div className="overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
             <table className="w-full min-w-[960px] border-collapse text-left text-[13px]">
               <thead>
@@ -1036,7 +1102,7 @@ export function BookPageClient() {
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p) => {
+                {bookTableRows.map((p) => {
                   const market = normaliseMarket(p.market);
                   const isNbp = market === "NBP";
                   const isTtf = market === "TTF";
@@ -1186,7 +1252,7 @@ export function BookPageClient() {
                         {p.instrument ?? "—"}
                       </td>
                       <td className="px-3 py-3 text-ink-mid">
-                        {marketBadge(p.market)}
+                        {bookMarketTableLabel(p)}
                       </td>
                       <td className="px-3 py-3">
                         <span
@@ -1222,7 +1288,10 @@ export function BookPageClient() {
                         {hasMarkSource(p, livePrices) ? (
                           formatCurrentPrice(p, livePrices)
                         ) : (
-                          <span className="rounded-[3px] bg-[#92400E]/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#92400E]">
+                          <span
+                            className="rounded-[3px] bg-[#92400E]/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#92400E]"
+                            title={NO_MARK_SOURCE_TITLE}
+                          >
                             No mark source
                           </span>
                         )}

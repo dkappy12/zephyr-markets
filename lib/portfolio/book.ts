@@ -278,18 +278,25 @@ export function normaliseMarketBucket(
  * quote `@ X EUR` and every GBP quote `@ £X/MWh`, which mis-labelled UKA and
  * EUA).
  */
+function fmt2(n: number): string {
+  return n.toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function formatPositionEntryPrice(
   p: Pick<PositionRow, "trade_price" | "market" | "unit" | "currency" | "instrument_type">,
 ): string {
   if (p.trade_price == null || !Number.isFinite(p.trade_price)) return "—";
   const it = (p.instrument_type ?? "").toLowerCase();
   if (it === "spark_spread" || it === "dark_spread") {
-    return `£${p.trade_price.toFixed(2)}/MWh (spread)`;
+    return `£${fmt2(p.trade_price)}/MWh (spread)`;
   }
   const market = normaliseMarketBucket(p.market);
   const unit = (p.unit ?? "").toLowerCase();
   const ccy = (p.currency ?? "").toUpperCase();
-  const price = p.trade_price.toFixed(2);
+  const price = fmt2(p.trade_price);
 
   if (market === "NBP" || unit.includes("therm")) return `${price}p/th`;
   if (market === "GB_POWER") return `£${price}/MWh`;
