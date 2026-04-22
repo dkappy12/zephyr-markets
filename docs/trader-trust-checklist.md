@@ -1,6 +1,6 @@
 # Trader trust — release QA checklist
 
-Use before shipping or when validating desk coherence. Goal: every primary surface shows **as-of / source**, honest **empty or thin-data** states, and **shared** HIGH/MEDIUM/LOW confidence language ([`lib/reliability/contract.ts`](../lib/reliability/contract.ts), [`lib/portfolio/desk-copy.ts`](../lib/portfolio/desk-copy.ts)).
+Use before shipping or when validating desk coherence. For **math invariants, units, and cross-surface numbers**, see [numerical-audit-runbook.md](./numerical-audit-runbook.md). Goal: every primary surface shows **as-of / source**, honest **empty or thin-data** states, and **shared** HIGH/MEDIUM/LOW confidence language ([`lib/reliability/contract.ts`](../lib/reliability/contract.ts), [`lib/portfolio/desk-copy.ts`](../lib/portfolio/desk-copy.ts)).
 
 | Route | Staleness / as-of | Model vs tape (where relevant) | Empty / thin data |
 |--------|-------------------|--------------------------------|-------------------|
