@@ -298,6 +298,9 @@ export function BookPageClient() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null>(null);
   const [positions, setPositions] = useState<PositionRow[]>([]);
+  const [positionsLoadError, setPositionsLoadError] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [livePrices, setLivePrices] = useState<LivePrices | null>(null);
   const [toast, setToast] = useState<{
@@ -402,6 +405,7 @@ export function BookPageClient() {
     setUserId(uid);
     if (!uid) {
       setPositions([]);
+      setPositionsLoadError(null);
       setLoading(false);
       return;
     }
@@ -413,8 +417,10 @@ export function BookPageClient() {
       .order("created_at", { ascending: false });
     if (error) {
       showToast(error.message, "err");
+      setPositionsLoadError(error.message);
       setPositions([]);
     } else {
+      setPositionsLoadError(null);
       setPositions((data ?? []) as PositionRow[]);
     }
     setLoading(false);
@@ -940,6 +946,25 @@ export function BookPageClient() {
         <p className="text-sm text-ink-mid">Loading book…</p>
       ) : !userId ? (
         <p className="text-sm text-ink-mid">Sign in to manage positions.</p>
+      ) : positionsLoadError ? (
+        <div className="rounded-[4px] border-[0.5px] border-[#8B3A3A]/25 bg-[#FDF8F7] px-6 py-12 text-center">
+          <p className="font-serif text-xl text-[#8B3A3A]">
+            Could not load your book
+          </p>
+          <p className="mt-2 max-w-md mx-auto text-sm text-ink-mid">
+            {positionsLoadError}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void loadPositions();
+            }}
+            className="mt-6 rounded-[4px] border-[0.5px] border-ink bg-ink px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] hover:opacity-90"
+          >
+            Retry
+          </button>
+        </div>
       ) : !hasPositions ? (
         <div className="flex flex-col items-center justify-center rounded-[4px] border-[0.5px] border-ivory-border bg-card px-6 py-16 text-center">
           <Wind className="mx-auto h-14 w-14 text-ink-mid/40" strokeWidth={1} />
@@ -1066,6 +1091,9 @@ export function BookPageClient() {
             </div>
           </motion.div>
 
+          <p className="mb-2 text-[11px] text-ink-mid sm:hidden">
+            Scroll horizontally to see all columns.
+          </p>
           <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
             <label className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
               Sort
@@ -1085,20 +1113,40 @@ export function BookPageClient() {
               </select>
             </label>
           </div>
-          <div className="overflow-x-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
+          <div className="max-h-[min(70vh,560px)] overflow-auto rounded-[4px] border-[0.5px] border-ivory-border bg-card">
             <table className="w-full min-w-[960px] border-collapse text-left text-[13px]">
-              <thead>
+              <thead className="relative">
                 <tr className="border-b border-ivory-border text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-mid">
-                  <th className="px-4 py-3">Instrument</th>
-                  <th className="px-3 py-3">Market</th>
-                  <th className="px-3 py-3">Dir</th>
-                  <th className="px-3 py-3">Size</th>
-                  <th className="px-3 py-3">Tenor</th>
-                  <th className="px-3 py-3">Entry price</th>
-                  <th className="px-3 py-3">Current</th>
-                  <th className="px-3 py-3">Today P&amp;L</th>
-                  <th className="px-3 py-3">Total P&amp;L</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="sticky top-0 z-10 bg-card px-4 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Instrument
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Market
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Dir
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Size
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Tenor
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Entry price
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Current
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Today P&amp;L
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-3 py-3 shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Total P&amp;L
+                  </th>
+                  <th className="sticky top-0 z-10 bg-card px-4 py-3 text-right shadow-[0_1px_0_0_rgb(228,224,217)]">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>

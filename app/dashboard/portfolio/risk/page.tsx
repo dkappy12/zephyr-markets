@@ -1,8 +1,10 @@
 "use client";
 
 import { TierGate } from "@/components/billing/TierGate";
+import { PortfolioModelTrustBanner } from "@/components/portfolio/PortfolioModelTrustBanner";
 import { chartTooltipBoxStyle } from "@/lib/charts/recharts-tooltip-styles";
 import { RISK_HISTORICAL_NOTE } from "@/lib/portfolio/desk-copy";
+import { MODEL_TRUST_SECTION_EYEBROW } from "@/lib/portfolio/model-trust-copy";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 import {
   formatReliabilityConfidenceDesk,
@@ -1262,37 +1264,38 @@ export default function RiskPage() {
       ) : (
         <>
           {loadError ? (
-            <p className="text-sm text-[#8B3A3A]">{loadError}</p>
+            <PortfolioModelTrustBanner eyebrow="Could not load risk analysis" severity="critical">
+              <p>{loadError}</p>
+            </PortfolioModelTrustBanner>
           ) : null}
           {!loadError && !hasAnyPriceSeries ? (
-            <p className="text-sm text-ink-mid">
-              Insufficient aligned market history for risk calculations. Risk
-              metrics will appear once price series data is available.
-            </p>
+            <PortfolioModelTrustBanner eyebrow={MODEL_TRUST_SECTION_EYEBROW} severity="neutral">
+              <p>
+                Insufficient aligned market history for risk calculations. Risk
+                metrics will appear once price series data is available.
+              </p>
+            </PortfolioModelTrustBanner>
           ) : null}
           {unmarkablePositions.length > 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3"
-              role="status"
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-900">
-                No mark source
-              </p>
-              <p className="mt-1 text-sm text-amber-900">
-                {unmarkablePositions.length === 1
-                  ? "1 position is"
-                  : `${unmarkablePositions.length} positions are`}{" "}
-                excluded from VaR and stress calculations because no live
-                mark series is wired up for{" "}
-                {Array.from(
-                  new Set(
-                    unmarkablePositions.map((p) => p.market ?? "unknown"),
-                  ),
-                ).join(", ")}
-                . Supported markets: GB Power, TTF, NBP, UKA, EUA.
-              </p>
+              <PortfolioModelTrustBanner eyebrow="No mark source" severity="caution">
+                <p>
+                  {unmarkablePositions.length === 1
+                    ? "1 position is"
+                    : `${unmarkablePositions.length} positions are`}{" "}
+                  excluded from VaR and stress calculations because no live mark
+                  series is wired up for{" "}
+                  {Array.from(
+                    new Set(
+                      unmarkablePositions.map((p) => p.market ?? "unknown"),
+                    ),
+                  ).join(", ")}
+                  . Supported markets: GB Power, TTF, NBP, UKA, EUA.
+                </p>
+              </PortfolioModelTrustBanner>
             </motion.div>
           ) : null}
           <motion.div

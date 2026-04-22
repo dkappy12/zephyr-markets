@@ -1,12 +1,17 @@
 "use client";
 
 import { TierGate } from "@/components/billing/TierGate";
+import { PortfolioModelTrustBanner } from "@/components/portfolio/PortfolioModelTrustBanner";
 import {
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
 } from "@/lib/portfolio/optimise";
+import {
+  LOW_TAIL_CONFIDENCE_SUMMARY,
+  MODEL_TRUST_SECTION_EYEBROW,
+} from "@/lib/portfolio/model-trust-copy";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -263,16 +268,15 @@ export default function OptimisePage() {
       </div>
 
       {data?.quality === "low" && !loading && userId ? (
-        <p
-          className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3 text-sm text-amber-900"
-          role="status"
-        >
-          Model quality is LOW: interpret outputs with care — scenario depth,
-          coverage, or other data limits.
-          {data.qualityWarnings.length > 0
-            ? ` ${data.qualityWarnings.join(" ")}`
-            : null}
-        </p>
+        <PortfolioModelTrustBanner eyebrow={MODEL_TRUST_SECTION_EYEBROW} severity="caution">
+          <p>
+            <span className="font-medium">Model quality is LOW.</span>{" "}
+            {LOW_TAIL_CONFIDENCE_SUMMARY}
+            {data.qualityWarnings.length > 0
+              ? ` ${data.qualityWarnings.join(" ")}`
+              : null}
+          </p>
+        </PortfolioModelTrustBanner>
       ) : null}
 
       <section className="grid gap-3 md:grid-cols-4">
@@ -557,12 +561,14 @@ export default function OptimisePage() {
             })}
           </section>
           {data && data.historicalTailReliable === false ? (
-            <p className="text-xs text-ink-mid" role="status">
-              VaR and CVaR are hidden: need at least{" "}
-              {minHistoricalScenariosForConfidence(confidence)} days of non-fallback
-              history for a {Math.round(confidence * 100)}% tail (have{" "}
-              {data.diagnostics.historicalScenarioCount}).
-            </p>
+            <PortfolioModelTrustBanner eyebrow={MODEL_TRUST_SECTION_EYEBROW} severity="neutral">
+              <p className="text-xs">
+                VaR and CVaR are hidden: need at least{" "}
+                {minHistoricalScenariosForConfidence(confidence)} days of non-fallback
+                history for a {Math.round(confidence * 100)}% tail (have{" "}
+                {data.diagnostics.historicalScenarioCount}).
+              </p>
+            </PortfolioModelTrustBanner>
           ) : null}
           {data && !data.includeStress ? (
             <p className="text-xs text-ink-mid" role="status">

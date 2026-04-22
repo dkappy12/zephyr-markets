@@ -7,6 +7,8 @@ import * as XLSX from "xlsx";
 
 /** Must match `app/api/portfolio/import/route.ts` ROW_LIMIT. */
 const MAX_IMPORT_ROWS = 200;
+/** Soft warning from this count up to `MAX_IMPORT_ROWS` (inclusive). */
+const ROW_WARNING_THRESHOLD = 180;
 
 type Props = {
   open: boolean;
@@ -27,6 +29,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
     total: 0,
   });
   const [fallbackChunks, setFallbackChunks] = useState(0);
+  const [nearCapRows, setNearCapRows] = useState<number | null>(null);
 
   const runClassify = useCallback(
     async (headers: string[], rows: Record<string, unknown>[]) => {
@@ -34,16 +37,26 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
       setError(null);
       try {
         if (rows.length === 0) {
+          setNearCapRows(null);
           setError("No data rows found in file");
           setLoading(false);
           return;
         }
         if (rows.length > MAX_IMPORT_ROWS) {
+          setNearCapRows(null);
           setError(
             `This file has ${rows.length.toLocaleString("en-GB")} data rows. Maximum ${MAX_IMPORT_ROWS} rows per import — split the file or remove rows, then try again.`,
           );
           setLoading(false);
           return;
+        }
+        if (
+          rows.length >= ROW_WARNING_THRESHOLD &&
+          rows.length <= MAX_IMPORT_ROWS
+        ) {
+          setNearCapRows(rows.length);
+        } else {
+          setNearCapRows(null);
         }
         const chunkSize = 40;
         const classifiedAll: ClassifiedPosition[] = [];
@@ -90,6 +103,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
       } finally {
         setProgress({ done: 0, total: 0 });
         setFallbackChunks(0);
+        setNearCapRows(null);
         setLoading(false);
       }
     },
@@ -99,6 +113,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
   const handleFile = useCallback(
     async (file: File) => {
       setError(null);
+      setNearCapRows(null);
       setLoading(true);
       const name = file.name.toLowerCase();
       try {
@@ -155,7 +170,11 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
       <div className="relative w-full max-w-lg rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] p-6 shadow-lg">
         <button
           type="button"
-          onClick={() => !loading && onClose()}
+          onClick={() => {
+            if (loading) return;
+            setNearCapRows(null);
+            onClose();
+          }}
           className="absolute right-4 top-4 text-[11px] uppercase tracking-[0.1em] text-ink-mid hover:text-ink"
         >
           Close
@@ -197,6 +216,19 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
           />
           {loading ? (
             <div className="flex flex-col items-center gap-3">
+              {nearCapRows != null ? (
+                <div
+                  className="w-full rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/80 px-3 py-2 text-left text-xs text-amber-950"
+                  role="status"
+                >
+                  This file has{" "}
+                  <span className="tabular-nums font-medium">
+                    {nearCapRows.toLocaleString("en-GB")}
+                  </span>{" "}
+                  data rows — close to the {MAX_IMPORT_ROWS}-row limit per import.
+                  Classification may take longer; split the file if you hit the cap.
+                </div>
+              ) : null}
               <div
                 className="h-8 w-8 animate-spin rounded-full border-2 border-[#D4CCBB] border-t-[#1D6B4E]"
                 aria-hidden
