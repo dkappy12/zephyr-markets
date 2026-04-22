@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { initialsFromUser } from "@/lib/team/user-initials";
 import Script from "next/script";
 
+/** Avoid static prerender of dashboard routes without Supabase env (client trees call `createBrowserClient()` during SSR). */
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({
   children,
 }: {
