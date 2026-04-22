@@ -106,14 +106,15 @@ export async function GET() {
     const carbonAgeDays = ageDaysSinceDateOnly(carbonLatest.data?.price_date ?? null);
 
     const warnings: string[] = [];
-    let feedStatus: "ok" | "warn" | "error" = "ok";
+    let hasWarn = false;
+    let hasError = false;
     const markWarn = (w: string) => {
       warnings.push(w);
-      if (feedStatus === "ok") feedStatus = "warn";
+      hasWarn = true;
     };
     const markError = (w: string) => {
       warnings.push(w);
-      feedStatus = "error";
+      hasError = true;
     };
 
     if (powerAgeHours == null) markError("No GB power rows found (N2EX/APX).");
@@ -140,9 +141,15 @@ export async function GET() {
     else if (carbonAgeDays > 4)
       markWarn(`Carbon feed aging: ${carbonAgeDays.toFixed(1)}d old.`);
 
+    const feedStatus: "ok" | "warn" | "error" = hasError
+      ? "error"
+      : hasWarn
+        ? "warn"
+        : "ok";
+
     return NextResponse.json({
       ...base,
-      ok: feedStatus !== "error",
+      ok: !hasError,
       checks: {
         ...base.checks,
         supabase: "ok",
