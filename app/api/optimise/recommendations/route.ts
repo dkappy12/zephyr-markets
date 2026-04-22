@@ -296,7 +296,6 @@ export async function GET(req: Request) {
       nbpProxyUsed: result.diagnostics.nbpProxyUsed,
       stabilityPass: result.diagnostics.stabilityPass,
     });
-    const blocked = quality.quality === "low";
     const reliability = makeReliabilityEnvelope({
       modelVersion: "optimise_v1",
       dataVersion: `hist_${result.diagnostics.historicalScenarioCount}_stress_${result.diagnostics.stressScenarioCount}`,
@@ -319,7 +318,6 @@ export async function GET(req: Request) {
       userId: user.id,
       status: "success",
       metadata: {
-        blocked,
         quality: quality.quality,
         historicalScenarioCount: result.diagnostics.historicalScenarioCount,
         candidatePackageCount: result.diagnostics.candidatePackageCount,
@@ -336,10 +334,8 @@ export async function GET(req: Request) {
       historicalTailReliable: result.diagnostics.historicalTailReliable,
       quality: quality.quality,
       qualityWarnings: quality.warnings,
-      blocked,
-      blockedReason: blocked
-        ? "Recommendations are blocked because model quality is low."
-        : null,
+      blocked: false,
+      blockedReason: null,
       reliability,
       provenance: {
         power: "market_prices (N2EX/APX daily avg)",
@@ -350,20 +346,6 @@ export async function GET(req: Request) {
         sinceDate,
       },
       ...result,
-      recommendations: blocked ? [] : result.recommendations,
-      alternatives: blocked ? [] : result.alternatives,
-      // When the package is blocked, the "after" metrics describe a hedge the
-      // user cannot execute — displaying them alongside an empty
-      // recommendation list produces a misleading "97% reduction" on the cards.
-      // Collapse to before == after so the UI shows an honest 0% reduction.
-      after: blocked ? result.before : result.after,
-      deltas: blocked
-        ? {
-            var95Reduction: 0,
-            cvar95Reduction: 0,
-            worstStressReduction: 0,
-          }
-        : result.deltas,
     });
   } catch (error: unknown) {
     await logAuthAuditEvent({
