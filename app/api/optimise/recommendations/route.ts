@@ -45,6 +45,12 @@ function isMissingFxTableError(message: string | undefined): boolean {
   return m.includes("fx_rates") && (m.includes("does not exist") || m.includes("schema cache"));
 }
 
+/**
+ * Coarse model-health score from several independent checklist flags.
+ * Each met condition appends a warning; 0/1/2+ warnings map to
+ * high / medium / low. Low therefore means two or more issues at once, not
+ * a single gappy NBP or narrow search space in isolation.
+ */
 function optimiserQuality(input: {
   historicalScenarioCount: number;
   candidatePackageCount: number;
