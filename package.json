@@ -6,19 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed",
-    "rate-limit:smoke": "node scripts/auth-rate-limit-smoke.mjs",
-    "quality:gate": "node scripts/model-quality-gate.mjs",
-    "quality:walk-forward": "node scripts/model-walk-forward-report.mjs",
-    "quality:drift": "node scripts/model-drift-check.mjs",
-    "quality:reconcile": "node scripts/model-benchmark-reconcile.mjs",
-    "quality:ci-core": "npm run quality:reconcile",
-    "quality:ci": "node scripts/quality-ci-bundle.mjs",
-    "trust:report": "node scripts/trust-report.mjs",
-    "data:health": "node scripts/data-health-check.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
@@ -38,7 +26,6 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -46,7 +33,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "vitest": "^4.1.4"
+    "typescript": "^5"
   }
 }
