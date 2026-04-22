@@ -18,6 +18,7 @@ import {
   primaryDriverKey,
   remitPriceImpactGbpPerMwh,
   resolveTotalPriceMoveGbpMwh,
+  physicalRemitSignalCardImpact,
   remitAttributionForPosition,
   sumGasAttribution,
   sumRemitAttribution,
@@ -105,26 +106,6 @@ function parseDeratedMwFromDescription(description: string | null): number | nul
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
-}
-
-/**
- * Per-signal £ impact on the book, using the SAME sensitivity curve as the
- * calibrated REMIT driver row (remitPriceImpactGbpPerMwh) and the SAME
- * multiplier. This guarantees the per-signal cards and the driver row are
- * internally consistent instead of two independent estimators.
- */
-function unplannedSignalImpactGbp(
-  mwOffline: number,
-  netPowerMw: number,
-  residualDemandGw: number,
-  remitMultiplier: number,
-): number {
-  const priceImpactGbpPerMwh = remitPriceImpactGbpPerMwh(
-    mwOffline,
-    residualDemandGw,
-  );
-  const bookImpact = priceImpactGbpPerMwh * netPowerMw * remitMultiplier;
-  return Math.round(bookImpact / 10) * 10;
 }
 
 function parseSignalMagnitudeGw(text: string | null): number | null {
@@ -1676,6 +1657,14 @@ export function AttributionPageClient() {
             <h2 className="mt-1 font-serif text-xl text-ink">
               Active signals relevant to your positions
             </h2>
+            {residualDemandGw <= 20 && unplannedSignals.length > 0 ? (
+              <p className="mt-2 max-w-2xl text-xs text-ink-mid">
+                In the current physical snapshot, residual demand is in the ≤20 GW
+                band where the REMIT pass-through model applies 0 £/MWh — so outage
+                cards show no price lift until the regime moves (see REMIT driver in
+                the table above).
+              </p>
+            ) : null}
             {unplannedSignals.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 No active REMIT signals directly affecting your current positions.
@@ -1687,21 +1676,35 @@ export function AttributionPageClient() {
                     mwDeratedForRow(s) ??
                     parseDeratedMwFromDescription(s.description);
                   const netMw = gbNet.isMixed ? 0 : gbNet.signedMw;
-                  const est =
+                  const cardImpact =
                     mwOffline != null && mwOffline > 0
-                      ? unplannedSignalImpactGbp(
+                      ? physicalRemitSignalCardImpact(
                           mwOffline,
                           netMw,
+                          gbNet.isMixed,
                           residualDemandGw,
                           calibration.multipliers.remit,
                         )
-                      : 0;
-                  const estFmt = formatGbpColored(est);
+                      : {
+                          displayGbp: 0,
+                          gbpPerMwh: 0,
+                          rawGbp: 0,
+                          zeroHint: "none" as const,
+                        };
+                  const estFmt = formatGbpColored(cardImpact.displayGbp);
                   const gbPos = positions.find((p) => isGbPowerMarket(p));
                   const anchor =
                     gbPos != null
                       ? `${gbPos.direction === "short" ? "short" : "long"} ${gbPos.instrument ?? "GB power"}`
                       : "book";
+                  const hint =
+                    cardImpact.zeroHint === "mixed_gb_net"
+                      ? "GB power is both long and short — net MW for pass-through is zero."
+                      : cardImpact.zeroHint === "residual_demand_regime"
+                        ? null
+                        : cardImpact.zeroHint === "negligible_size"
+                          ? `~${cardImpact.gbpPerMwh.toFixed(2)} £/MWh to the system, but under £0.50 to your book at this net size.`
+                          : null;
                   return (
                     <article
                       key={s.id}
@@ -1724,7 +1727,21 @@ export function AttributionPageClient() {
                           {estFmt.text}
                         </span>{" "}
                         impact
+                        {cardImpact.zeroHint === "none" &&
+                        mwOffline != null &&
+                        mwOffline > 0 &&
+                        cardImpact.gbpPerMwh > 0 ? (
+                          <span className="not-italic text-ink-light">
+                            {" "}
+                            (~{cardImpact.gbpPerMwh.toFixed(2)} £/MWh to book)
+                          </span>
+                        ) : null}
                       </p>
+                      {hint ? (
+                        <p className="mt-1.5 pl-2 text-[10px] leading-snug text-ink-light not-italic">
+                          {hint}
+                        </p>
+                      ) : null}
                     </article>
                   );
                 })}

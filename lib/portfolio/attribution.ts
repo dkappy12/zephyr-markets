@@ -188,6 +188,65 @@ export function remitPriceImpactGbpPerMwh(
   return (deltaRemitMw / 1000) * slopePerGw;
 }
 
+/**
+ * Per-outage “physical signals” card on Attribution: same £/MWh as
+ * {@link remitPriceImpactGbpPerMwh} and calibration multiplier, but
+ * **£1** rounding (driver row uses coarser steps elsewhere). Exposes
+ * why the number can be zero: mixed GB net, flat residual-demand band, or tiny at size.
+ */
+export type PhysicalRemitSignalCardResult = {
+  displayGbp: number;
+  gbpPerMwh: number;
+  rawGbp: number;
+  zeroHint:
+    | "none"
+    | "mixed_gb_net"
+    | "residual_demand_regime"
+    | "negligible_size";
+};
+
+export function physicalRemitSignalCardImpact(
+  mwOffline: number,
+  netGbSignedMw: number,
+  isMixedGbBook: boolean,
+  residualDemandGw: number,
+  remitCalMultiplier: number,
+): PhysicalRemitSignalCardResult {
+  const gbpPerMwh = remitPriceImpactGbpPerMwh(mwOffline, residualDemandGw);
+  if (isMixedGbBook) {
+    return {
+      displayGbp: 0,
+      gbpPerMwh,
+      rawGbp: 0,
+      zeroHint: "mixed_gb_net",
+    };
+  }
+  const raw = gbpPerMwh * netGbSignedMw * remitCalMultiplier;
+  if (mwOffline > 0 && gbpPerMwh === 0) {
+    return {
+      displayGbp: 0,
+      gbpPerMwh,
+      rawGbp: raw,
+      zeroHint: "residual_demand_regime",
+    };
+  }
+  const displayGbp = Math.round(raw);
+  if (displayGbp === 0 && Math.abs(raw) >= 0.01) {
+    return {
+      displayGbp: 0,
+      gbpPerMwh,
+      rawGbp: raw,
+      zeroHint: "negligible_size",
+    };
+  }
+  return {
+    displayGbp,
+    gbpPerMwh,
+    rawGbp: raw,
+    zeroHint: "none",
+  };
+}
+
 export function remitAttributionForPosition(
   deltaRemitMw: number,
   p: PositionRow,
