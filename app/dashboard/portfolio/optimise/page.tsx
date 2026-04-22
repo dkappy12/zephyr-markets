@@ -350,70 +350,142 @@ export default function OptimisePage() {
 
       {!loading && userId && data && (
         <>
-          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-                  Model quality
-                </p>
-                <p
-                  className={`mt-2 font-serif text-3xl tracking-tight ${
-                    data.quality === "high"
-                      ? "text-[#1D6B4E]"
-                      : data.quality === "medium"
-                        ? "text-amber-700"
-                        : "text-[#8B3A3A]"
-                  }`}
-                >
-                  {data.quality.toUpperCase()}
-                </p>
-                <div className="mt-3 flex w-full max-w-[240px] gap-1">
-                  {(["low", "medium", "high"] as const).map((level) => {
-                    const isActive = data.quality === level;
-                    const activeColor =
-                      level === "high"
-                        ? "bg-[#1D6B4E]"
-                        : level === "medium"
-                          ? "bg-amber-700"
-                          : "bg-[#8B3A3A]";
-                    return (
-                      <div
-                        key={level}
-                        className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
-                          isActive ? activeColor : "bg-ivory-border/40"
-                        }`}
-                        aria-hidden
-                      />
-                    );
-                  })}
+          <section
+            className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
+            aria-label="Model quality and ranking stability"
+          >
+            <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+              <div className="flex min-w-0 flex-1 flex-col justify-between gap-4 sm:flex-row sm:items-start sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                    Model quality
+                  </p>
+                  <p
+                    className={`mt-2 font-serif text-3xl tracking-tight ${
+                      data.quality === "high"
+                        ? "text-[#1D6B4E]"
+                        : data.quality === "medium"
+                          ? "text-amber-700"
+                          : "text-[#8B3A3A]"
+                    }`}
+                  >
+                    {data.quality.toUpperCase()}
+                  </p>
+                  <p className="sr-only">
+                    Data and scenario coverage checks only; independent of ranking
+                    order.
+                  </p>
+                  <div className="mt-3 flex w-full max-w-[240px] gap-1">
+                    {(["low", "medium", "high"] as const).map((level) => {
+                      const isActive = data.quality === level;
+                      const activeColor =
+                        level === "high"
+                          ? "bg-[#1D6B4E]"
+                          : level === "medium"
+                            ? "bg-amber-700"
+                            : "bg-[#8B3A3A]";
+                      return (
+                        <div
+                          key={level}
+                          className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
+                            isActive ? activeColor : "bg-ivory-border/40"
+                          }`}
+                          aria-hidden
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Total scenarios
+                    </p>
+                    <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                      {data.diagnostics.scenarioCount}
+                    </p>
+                  </div>
+                  <div
+                    className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2"
+                    title={optimiseCoverageTitle}
+                  >
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Coverage
+                    </p>
+                    <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                      {data.reliability ? `${Math.round(data.reliability.coverage * 100)}%` : "—"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
-                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                    Total scenarios
+              <div
+                className="hidden w-1 shrink-0 flex-col items-center py-3 md:flex"
+                aria-hidden
+              >
+                <div className="w-px flex-1 min-h-[4rem] bg-ivory-border" />
+              </div>
+              <div
+                className="h-px w-full bg-ivory-border/70 md:hidden"
+                aria-hidden
+              />
+
+              <div className="flex min-w-0 flex-1 flex-col justify-between gap-4 sm:flex-row sm:items-start sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                    Ranking stability
                   </p>
-                  <p className="mt-1 font-serif text-xl text-ink tabular-nums">
-                    {data.diagnostics.scenarioCount}
+                  <p
+                    className={`mt-2 font-serif text-3xl tracking-tight ${
+                      data.diagnostics.stabilityPass
+                        ? "text-[#1D6B4E]"
+                        : "text-amber-700"
+                    }`}
+                  >
+                    {data.diagnostics.stabilityPass ? "PASS" : "WATCH"}
                   </p>
+                  <p className="sr-only">
+                    Pass when the stability index is at or below{" "}
+                    {STABILITY_INDEX_PASS_MAX} (variance of top few package scores
+                    relative to their mean).
+                  </p>
+                  <div className="mt-3 flex w-full max-w-[240px] gap-1">
+                    {(["watch", "pass"] as const).map((side) => {
+                      const isPass = data.diagnostics.stabilityPass;
+                      const isActive = side === "pass" ? isPass : !isPass;
+                      return (
+                        <div
+                          key={side}
+                          className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
+                            isActive
+                              ? side === "pass"
+                                ? "bg-[#1D6B4E]"
+                                : "bg-amber-700"
+                              : "bg-ivory-border/40"
+                          }`}
+                          aria-hidden
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
-                <div
-                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2"
-                  title={optimiseCoverageTitle}
-                >
-                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                    Coverage
-                  </p>
-                  <p className="mt-1 font-serif text-xl text-ink tabular-nums">
-                    {data.reliability ? `${Math.round(data.reliability.coverage * 100)}%` : "—"}
-                  </p>
-                </div>
+                {data.diagnostics.guardrailFilteredCount > 0 ? (
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                      <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                        Guardrail filtered
+                      </p>
+                      <p className="mt-1 font-serif text-xl text-ink tabular-nums">
+                        {data.diagnostics.guardrailFilteredCount}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
             {data.qualityWarnings.length > 0 ? (
-              <div className="mt-4 space-y-1">
+              <div className="mt-4 space-y-1 border-t border-ivory-border/50 pt-4">
                 {data.qualityWarnings.map((w) => (
                   <p key={w} className="text-xs text-ink-light">
                     {w}
@@ -421,57 +493,14 @@ export default function OptimisePage() {
                 ))}
               </div>
             ) : null}
-          </section>
 
-          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-                  Ranking stability
-                </p>
-                <p
-                  className={`mt-2 font-serif text-3xl tracking-tight ${
-                    data.diagnostics.stabilityPass
-                      ? "text-[#1D6B4E]"
-                      : "text-amber-700"
-                  }`}
-                >
-                  {data.diagnostics.stabilityPass ? "PASS" : "WATCH"}
-                </p>
-                <div className="mt-3 flex w-full max-w-[240px] gap-1">
-                  {(["watch", "pass"] as const).map((side) => {
-                    const isPass = data.diagnostics.stabilityPass;
-                    const isActive = side === "pass" ? isPass : !isPass;
-                    return (
-                      <div
-                        key={side}
-                        className={`h-2 flex-1 rounded-full border-[0.5px] border-ivory-border ${
-                          isActive
-                            ? side === "pass"
-                              ? "bg-[#1D6B4E]"
-                              : "bg-amber-700"
-                            : "bg-ivory-border/40"
-                        }`}
-                        aria-hidden
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-              {data.diagnostics.guardrailFilteredCount > 0 ? (
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
-                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                      Guardrail filtered
-                    </p>
-                    <p className="mt-1 font-serif text-xl text-ink tabular-nums">
-                      {data.diagnostics.guardrailFilteredCount}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-4 space-y-2">
+            <div
+              className={
+                data.qualityWarnings.length > 0
+                  ? "mt-3 space-y-2"
+                  : "mt-4 space-y-2 border-t border-ivory-border/50 pt-4"
+              }
+            >
               <p className="text-xs text-ink-mid">
                 Index {data.diagnostics.stabilityIndex.toFixed(3)} /{" "}
                 {STABILITY_INDEX_SCALE_MAX.toFixed(2)} (PASS ≤{" "}
