@@ -1,5 +1,4 @@
-import type { PositionRow } from "@/lib/portfolio/book";
-import { normaliseMarketBucket } from "@/lib/portfolio/book";
+import { normaliseMarketBucket, positionDirectionSign, type PositionRow } from "@/lib/portfolio/book";
 import {
   darkSpreadStressDeltaGbpMwh,
   isDarkSpread,
@@ -30,18 +29,11 @@ export function calculateScenarioStressImpact(
   positions: PositionRow[],
   gbpEurRate: number,
 ): { total: number; breakdown: { instrument: string; impact: number }[] } {
-  const directionSign = (direction: string | null): number => {
-    const d = (direction ?? "").toLowerCase();
-    if (d === "long") return 1;
-    if (d === "short") return -1;
-    return 0;
-  };
-
   let total = 0;
   const breakdown: { instrument: string; impact: number }[] = [];
 
   for (const pos of positions) {
-    const direction = directionSign(pos.direction);
+    const direction = positionDirectionSign(pos.direction);
     if (direction === 0) continue;
     const size = pos.size ?? 0;
     let positionImpact = 0;

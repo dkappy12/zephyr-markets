@@ -1,4 +1,4 @@
-import type { PositionRow } from "@/lib/portfolio/book";
+import { positionDirectionSign, type PositionRow } from "@/lib/portfolio/book";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 
 /** Top-package objective spread / mean; pass when at or below this (lower = stabler). */
@@ -119,12 +119,7 @@ const HISTORICAL_MOVE_CAPS = {
   nbpMovePth: 30,
 } as const;
 
-function directionMult(direction: string | null): number {
-  const d = (direction ?? "").toLowerCase();
-  if (d === "long") return 1;
-  if (d === "short") return -1;
-  return 0;
-}
+const directionMult = positionDirectionSign;
 
 function hasMaterialPositions(positions: PositionRow[]): boolean {
   return positions.some((p) => {

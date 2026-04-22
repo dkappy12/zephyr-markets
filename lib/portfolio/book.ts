@@ -59,6 +59,14 @@ export function formatGbpColored(n: number): { text: string; className: string }
   };
 }
 
+/** Shared direction parser for portfolio math paths. */
+export function positionDirectionSign(direction: string | null): number {
+  const d = (direction ?? "").toLowerCase();
+  if (d === "long") return 1;
+  if (d === "short") return -1;
+  return 0;
+}
+
 export function netDeltaMw(openPositions: PositionRow[]): {
   label: string;
   isMixed: boolean;

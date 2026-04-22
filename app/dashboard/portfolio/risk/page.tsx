@@ -10,6 +10,7 @@ import {
 } from "@/lib/reliability/contract";
 import {
   normaliseMarketBucket,
+  positionDirectionSign,
   type PositionRow,
   positionNotionalGbp,
   tenorToExpiryDate,
@@ -403,13 +404,6 @@ function isRiskMarkablePosition(pos: { market: string | null; instrument_type: s
     isUkaMarket(m) ||
     isEuaMarket(m)
   );
-}
-
-function positionDirectionSign(direction: string | null): number {
-  const d = (direction ?? "").toLowerCase();
-  if (d === "long") return 1;
-  if (d === "short") return -1;
-  return 0;
 }
 
 const calculateDailyPnL = (

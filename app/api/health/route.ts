@@ -1,6 +1,25 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+function parseUtcMs(value: unknown): number | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function ageHoursSince(value: unknown): number | null {
+  const ms = parseUtcMs(value);
+  if (ms == null) return null;
+  return (Date.now() - ms) / (1000 * 60 * 60);
+}
+
+function ageDaysSinceDateOnly(value: unknown): number | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const ms = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(ms)) return null;
+  return (Date.now() - ms) / (1000 * 60 * 60 * 24);
+}
+
 export async function GET() {
   const now = new Date().toISOString();
   const base = {
@@ -10,6 +29,14 @@ export async function GET() {
     checks: {
       env: true,
       supabase: "unknown" as "ok" | "error" | "unknown",
+      portfolioFeeds: "unknown" as "ok" | "warn" | "error" | "unknown",
+    },
+    feedHealth: {
+      powerAgeHours: null as number | null,
+      gasAgeHours: null as number | null,
+      fxAgeDays: null as number | null,
+      carbonAgeDays: null as number | null,
+      warnings: [] as string[],
     },
   };
 
@@ -24,12 +51,42 @@ export async function GET() {
 
   try {
     const admin = createAdminClient(url, serviceRoleKey);
-    // Lightweight read to verify DB + auth are reachable without exposing data.
-    const { error } = await admin
-      .from("auth_audit_log")
-      .select("id")
-      .limit(1);
-    if (error) {
+    // Verify DB/auth reachability without exposing business data.
+    const [authPing, powerLatest, gasLatest, fxLatest, carbonLatest] =
+      await Promise.all([
+        admin.from("auth_audit_log").select("id").limit(1),
+        admin
+          .from("market_prices")
+          .select("price_date")
+          .or("market.eq.N2EX,market.eq.APX")
+          .order("price_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("gas_prices")
+          .select("price_time")
+          .in("hub", ["TTF", "NBP"])
+          .order("price_time", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("fx_rates")
+          .select("rate_date")
+          .eq("base", "EUR")
+          .eq("quote", "GBP")
+          .order("rate_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("carbon_prices")
+          .select("price_date")
+          .in("hub", ["UKA", "EUA"])
+          .order("price_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+    if (authPing.error) {
       return NextResponse.json(
         {
           ...base,
@@ -39,9 +96,65 @@ export async function GET() {
         { status: 500 },
       );
     }
+    const powerAgeHours = ageHoursSince(
+      powerLatest.data?.price_date != null
+        ? `${powerLatest.data.price_date}T23:59:59.000Z`
+        : null,
+    );
+    const gasAgeHours = ageHoursSince(gasLatest.data?.price_time ?? null);
+    const fxAgeDays = ageDaysSinceDateOnly(fxLatest.data?.rate_date ?? null);
+    const carbonAgeDays = ageDaysSinceDateOnly(carbonLatest.data?.price_date ?? null);
+
+    const warnings: string[] = [];
+    let feedStatus: "ok" | "warn" | "error" = "ok";
+    const markWarn = (w: string) => {
+      warnings.push(w);
+      if (feedStatus === "ok") feedStatus = "warn";
+    };
+    const markError = (w: string) => {
+      warnings.push(w);
+      feedStatus = "error";
+    };
+
+    if (powerAgeHours == null) markError("No GB power rows found (N2EX/APX).");
+    else if (powerAgeHours > 48)
+      markError(`GB power feed stale: ${powerAgeHours.toFixed(1)}h old.`);
+    else if (powerAgeHours > 30)
+      markWarn(`GB power feed aging: ${powerAgeHours.toFixed(1)}h old.`);
+
+    if (gasAgeHours == null) markError("No gas rows found (TTF/NBP).");
+    else if (gasAgeHours > 48)
+      markError(`Gas feed stale: ${gasAgeHours.toFixed(1)}h old.`);
+    else if (gasAgeHours > 30)
+      markWarn(`Gas feed aging: ${gasAgeHours.toFixed(1)}h old.`);
+
+    if (fxAgeDays == null) markWarn("No EUR/GBP fx_rates rows found.");
+    else if (fxAgeDays > 5)
+      markError(`FX feed stale: ${fxAgeDays.toFixed(1)}d old.`);
+    else if (fxAgeDays > 3)
+      markWarn(`FX feed aging: ${fxAgeDays.toFixed(1)}d old.`);
+
+    if (carbonAgeDays == null) markWarn("No carbon rows found (UKA/EUA).");
+    else if (carbonAgeDays > 7)
+      markError(`Carbon feed stale: ${carbonAgeDays.toFixed(1)}d old.`);
+    else if (carbonAgeDays > 4)
+      markWarn(`Carbon feed aging: ${carbonAgeDays.toFixed(1)}d old.`);
+
     return NextResponse.json({
       ...base,
-      checks: { ...base.checks, supabase: "ok" },
+      ok: feedStatus !== "error",
+      checks: {
+        ...base.checks,
+        supabase: "ok",
+        portfolioFeeds: feedStatus,
+      },
+      feedHealth: {
+        powerAgeHours,
+        gasAgeHours,
+        fxAgeDays,
+        carbonAgeDays,
+        warnings,
+      },
     });
   } catch {
     return NextResponse.json(
