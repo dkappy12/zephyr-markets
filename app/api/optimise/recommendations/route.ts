@@ -66,7 +66,9 @@ function optimiserQuality(input: {
     warnings.push("Historical scenario depth is below 20 days.");
   }
   if (input.nbpProxyUsed) {
-    warnings.push("NBP history missing for some dates; scenario coverage is reduced.");
+    warnings.push(
+      "NBP levels missing for some TTF business days after merge (Stooq + TTF implied); scenario coverage is reduced.",
+    );
   }
   if (input.candidatePackageCount < 30) {
     warnings.push("Hedge search space is narrow; recommendations may be unstable.");
@@ -252,19 +254,16 @@ export async function GET(req: Request) {
       fxByDay[day] = rate;
     }
 
-    const nbpStooqOnly = aggregateDailyGasPrices(
-      gasRows.filter(
-        (r) => String(r.hub ?? "").toUpperCase() === "NBP",
-      ) as GasPriceSample[],
-      { kind: "NBP" },
-    );
+    // Aligned with `buildNbpPthByDayFromGasRows`: TTF-deprecated can fill
+    // Stooq gaps. Flag only when the *merged* series is missing NBP p/th for a
+    // TTF business day (Stooq-only is too strict when Stooq CSV fails upstream).
     const nbpRawPthByDay = buildNbpPthByDayFromGasRows(gasRows, fxByDay);
     let nbpProxyUsed = false;
     for (const day of Object.keys(ttfByDay)) {
       const d = new Date(day + "T12:00:00Z");
-      const dow = d.getUTCDay();
-      if (dow === 0 || dow === 6) continue;
-      if (nbpStooqOnly[day] == null) nbpProxyUsed = true;
+      if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      const p = nbpRawPthByDay[day];
+      if (p == null || !Number.isFinite(p)) nbpProxyUsed = true;
     }
 
     const nbpByDayPth = nbpLevelsPthByDay(nbpRawPthByDay);

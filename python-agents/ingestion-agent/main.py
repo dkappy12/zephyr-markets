@@ -2279,11 +2279,18 @@ async def backfill_nbp_stooq_historical(
     fetched_at = datetime.now(timezone.utc).isoformat()
     written = 0
     d0 = start
+    stooq_browser_headers = {
+        "Accept": "text/csv,application/csv,text/plain,*/*;q=0.9",
+        "Accept-Language": "en-GB,en;q=0.9",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://stooq.com/q/?s=nf.f",
+    }
     async with httpx.AsyncClient(
-        headers={
-            "Accept": "text/csv,text/plain,*/*",
-            "User-Agent": "ZephyrMarkets-NBP-Backfill/1.0",
-        },
+        headers=stooq_browser_headers,
         follow_redirects=True,
         timeout=60.0,
     ) as http:
@@ -2311,6 +2318,14 @@ async def backfill_nbp_stooq_historical(
                 )
                 d0 = d1 + timedelta(days=1)
                 continue
+            if not (resp.text or "").strip():
+                logger.warning(
+                    "nbp_backfill: empty body from Stooq for %s–%s (status=%s); "
+                    "non-browser clients may be blocked—try TTF deprecated backfill",
+                    d0,
+                    d1,
+                    resp.status_code,
+                )
             parsed = _parse_stooq_nbp_daily_csv(resp.text)
             batch: list[dict[str, Any]] = []
             for gas_day, px in parsed:
