@@ -306,6 +306,11 @@ export function BookPageClient() {
     null | "positions" | "pnl" | "signals"
   >(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** Bumps "Book updated" on add/edit/delete/import so it does not move backward after deletes. */
+  const [bookActivityIso, setBookActivityIso] = useState<string | null>(null);
+  const bumpBookActivity = useCallback(() => {
+    setBookActivityIso(new Date().toISOString());
+  }, []);
 
   useEffect(() => {
     fetch("/api/billing/status")
@@ -391,6 +396,45 @@ export function BookPageClient() {
     }
     setLoading(false);
   }, [supabase, showToast]);
+
+  useEffect(() => {
+    if (
+      !reviewOpen &&
+      !closeModal &&
+      !emailOpen &&
+      !quickOpen &&
+      !importOpen
+    ) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || importBusy) return;
+      e.preventDefault();
+      if (reviewOpen) {
+        setReviewOpen(false);
+        setKeeping([]);
+        setDiscarding([]);
+      } else if (closeModal) {
+        setCloseModal(null);
+      } else if (emailOpen) {
+        setEmailOpen(false);
+      } else if (quickOpen) {
+        setQuickOpen(false);
+        setEditPos(null);
+      } else {
+        setImportOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    reviewOpen,
+    closeModal,
+    emailOpen,
+    quickOpen,
+    importOpen,
+    importBusy,
+  ]);
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
@@ -583,12 +627,23 @@ export function BookPageClient() {
     const markets = new Set(
       positions.map((p) => p.market).filter(Boolean),
     ).size;
-    const latest =
+    const maxCreatedAt =
       positions.length === 0
         ? null
-        : positions.reduce((a, b) =>
-            a.created_at > b.created_at ? a : b,
+        : positions.reduce(
+            (best, p) => (p.created_at > best ? p.created_at : best),
+            positions[0]!.created_at,
           );
+    const bookUpdated =
+      maxCreatedAt == null && bookActivityIso == null
+        ? null
+        : maxCreatedAt == null
+          ? bookActivityIso
+          : bookActivityIso == null
+            ? maxCreatedAt
+            : bookActivityIso > maxCreatedAt
+              ? bookActivityIso
+              : maxCreatedAt;
     const todayPnl = livePrices ? totalTodayPnlGbp(positions, livePrices) : null;
     const todayPnlFmt =
       todayPnl != null && Number.isFinite(todayPnl)
@@ -599,10 +654,10 @@ export function BookPageClient() {
       netByMarket,
       openCount: positions.length,
       markets,
-      bookUpdated: latest?.created_at ?? null,
+      bookUpdated,
       todayPnl: todayPnlFmt,
     };
-  }, [positions, livePrices]);
+  }, [positions, livePrices, bookActivityIso]);
 
   function handleClassified(payload: {
     headers: string[];
@@ -673,6 +728,7 @@ export function BookPageClient() {
       setReviewOpen(false);
       setKeeping([]);
       setDiscarding([]);
+      bumpBookActivity();
       await loadPositions();
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : "Import failed", "err");
@@ -718,6 +774,7 @@ export function BookPageClient() {
     if (!resp.ok) showToast(body.error ?? "Could not clear book", "err");
     else {
       showToast("Book cleared", "ok");
+      bumpBookActivity();
       await loadPositions();
     }
   }
@@ -738,6 +795,7 @@ export function BookPageClient() {
     }
     else {
       showToast("Position deleted", "ok");
+      bumpBookActivity();
       await loadPositions();
     }
   }
@@ -770,6 +828,7 @@ export function BookPageClient() {
     else {
       showToast("Position closed", "ok");
       setCloseModal(null);
+      bumpBookActivity();
       await loadPositions();
     }
   }
@@ -1328,7 +1387,10 @@ export function BookPageClient() {
             setEditPos(null);
           }}
           editPosition={editPos}
-          onSaved={() => void loadPositions()}
+          onSaved={() => {
+            bumpBookActivity();
+            void loadPositions();
+          }}
           onToast={showToast}
         />
       ) : null}

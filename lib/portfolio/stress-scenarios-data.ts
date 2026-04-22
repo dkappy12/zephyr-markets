@@ -92,6 +92,19 @@ export const PORTFOLIO_STRESS_SCENARIOS: StressScenarioData[] = [
     euaMoveEurT: -3,
   },
   {
+    id: "stress-warm-winter-gas-glut",
+    label: "Warm winter / gas glut",
+    name: "Warm winter / gas glut",
+    period: "Winter 2019-20",
+    description:
+      "Mild demand and high LNG regas drove sustained bearish moves in TTF, NBP, and power forwards",
+    gbPowerMove: -35,
+    ttfMoveEurMwh: -18,
+    nbpMovePth: -22,
+    ukaMoveGbpT: -4,
+    euaMoveEurT: -5,
+  },
+  {
     id: "stress-2023-spring-tightness",
     label: "2023 Spring tightness",
     name: "2023 Spring tightness",

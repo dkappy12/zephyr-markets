@@ -54,6 +54,27 @@ const HISTORICAL_GBP_PER_EUR = 0.86;
  */
 const RISK_LOOKBACK_DAYS = 120;
 
+/** Integer percentages in [0,100] that sum to exactly 100 (largest remainder). */
+function normalizePctShares4(
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+): { a: number; b: number; c: number; d: number } {
+  const raw = [a, b, c, d];
+  const floors = raw.map((v) => Math.floor(v));
+  const rem = 100 - floors.reduce((s, v) => s + v, 0);
+  const order = [0, 1, 2, 3]
+    .map((i) => ({ i, r: raw[i]! - floors[i]! }))
+    .sort((x, y) => y.r - x.r);
+  const out: number[] = [...floors];
+  for (let j = 0; j < rem; j++) {
+    const at = order[j]?.i;
+    if (at !== undefined) out[at] = (out[at] ?? 0) + 1;
+  }
+  return { a: out[0] ?? 0, b: out[1] ?? 0, c: out[2] ?? 0, d: out[3] ?? 0 };
+}
+
 /**
  * PostgREST returns at most `max_rows` (default 1000) per request. Unbounded
  * `order by … asc` on `market_prices` / `gas_prices` was returning the oldest
@@ -1035,22 +1056,31 @@ export default function RiskPage() {
   const var95 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.95);
   const var99 = calculateVaR(dailyPnLSeries.map((d) => d.pnl), 0.99);
   /**
-   * Clip Worst-day to days the user actually held these positions. VaR itself
-   * still uses the full simulation window (it needs the sample), but "your
-   * worst day was £X on 12 Dec 2025" reads as realised P&L — which is
-   * misleading if the user only opened the book last week.
+   * Worst day matches the *visible* histogram window (30d/90d/120d/book) so
+   * the headline tile stays aligned with the chart. VaR / CVaR still use the
+   * full risk lookback sample (see the VaR sub-lines).
    */
-  const worstDaySeries = useMemo(
-    () =>
-      bookStartDate
-        ? dailyPnLSeries.filter((d) => d.date >= bookStartDate)
-        : dailyPnLSeries,
-    [dailyPnLSeries, bookStartDate],
-  );
-  const worstDay =
-    worstDaySeries.length > 0
-      ? worstDaySeries.reduce((min, d) => (d.pnl < min.pnl ? d : min), worstDaySeries[0])
+  const chartWorstDay =
+    visibleSeries.length > 0
+      ? visibleSeries.reduce(
+          (min, d) => (d.pnl < min.pnl ? d : min),
+          visibleSeries[0]!,
+        )
       : null;
+  const worstDayFootnote = useMemo(() => {
+    switch (histogramWindow) {
+      case "30d":
+        return "last 30 days · same window as the chart";
+      case "90d":
+        return "last 90 days · same window as the chart";
+      case "120d":
+        return "full 120-day lookback · same window as the chart";
+      case "book":
+        return "book days in view · same window as the chart";
+      default:
+        return "current chart window";
+    }
+  }, [histogramWindow]);
   // Footer stats under the histogram are scoped to the *visible* window so
   // "Average daily P&L" etc. match what the user is actually seeing. VaR /
   // CVaR / worst-stress tiles above the chart still use the full 120-day
@@ -1193,12 +1223,12 @@ export default function RiskPage() {
       else if (days <= 365) medium += 1;
       else long += 1;
     }
-    return {
-      near: (near / total) * 100,
-      medium: (medium / total) * 100,
-      long: (long / total) * 100,
-      none: (none / total) * 100,
-    };
+    const pNear = (near / total) * 100;
+    const pMed = (medium / total) * 100;
+    const pLong = (long / total) * 100;
+    const pNone = (none / total) * 100;
+    const norm = normalizePctShares4(pNear, pMed, pLong, pNone);
+    return { near: norm.a, medium: norm.b, long: norm.c, none: norm.d };
   }, [positions]);
 
   const mwPositions = positions.filter(
@@ -1237,7 +1267,7 @@ export default function RiskPage() {
   const currentVaRMagnitude =
     dailyPnLSeries.length === 0 ? 0 : Math.abs(var95);
   const worstDayLossMag =
-    worstDay && worstDay.pnl < 0 ? Math.abs(worstDay.pnl) : 0;
+    chartWorstDay && chartWorstDay.pnl < 0 ? Math.abs(chartWorstDay.pnl) : 0;
 
   const positionLimitSeverity = limitSeverity(totalExposure, savedMaxPositionMw);
   const varLimitSeverity = limitSeverity(currentVaRMagnitude, savedMaxVarGbp);
@@ -1261,6 +1291,7 @@ export default function RiskPage() {
     100,
     (dailyPnLSeries.length / RISK_LOOKBACK_DAYS) * 100,
   );
+  const coverageDescription = `Of the last ${RISK_LOOKBACK_DAYS} days in the risk lookback, ${dailyPnLSeries.length} have a simulated book-level daily P&L (${coveragePct.toFixed(0)}%). This is separate from any positions dropped when no mark series exists.`;
   const reliabilityLabel = formatReliabilityConfidenceDesk(
     reliabilityConfidenceFromVaRHistoryDays(dailyPnLSeries.length),
   );
@@ -1357,7 +1388,10 @@ export default function RiskPage() {
             animate={{ opacity: 1, y: 0 }}
             className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4"
           >
-            <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light">
+            <p
+              className="mb-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-light"
+              title={coverageDescription}
+            >
               Confidence {reliabilityLabel} · coverage {coveragePct.toFixed(0)}% · historical mark-to-market
             </p>
             <div className="flex flex-col gap-6 sm:flex-row sm:gap-0">
@@ -1390,21 +1424,17 @@ export default function RiskPage() {
               <div className="flex-1 min-w-0">
                 <p className={sectionLabel}>Worst day</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-[#8B3A3A]">
-                  {worstDay ? formatSignedGbp(worstDay.pnl) : "—"}
+                  {chartWorstDay ? formatSignedGbp(chartWorstDay.pnl) : "—"}
                 </p>
                 <p
                   className="mt-1 text-xs text-ink-light"
-                  title={
-                    bookStartDate
-                      ? `Worst daily P&L since you opened this book on ${formatDay(bookStartDate)}. Pre-book simulated days are excluded from this tile.`
-                      : "Worst daily P&L across the simulation window."
-                  }
+                  title="Worst single-day simulated P&L in the same date window as the histogram below (use the time-range toggle to change both)."
                 >
-                  {worstDay
-                    ? `${formatDay(worstDay.date)} · since book opened`
-                    : bookStartDate
-                      ? "No days since book opened yet"
-                      : "Accumulating data"}
+                  {chartWorstDay
+                    ? `${formatDay(chartWorstDay.date)} · ${worstDayFootnote}`
+                    : noHistory
+                      ? "Accumulating data"
+                      : "No days in this view yet"}
                 </p>
               </div>
             </div>

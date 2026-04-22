@@ -108,9 +108,14 @@ export function QuickAddModal({
   );
   const [expiryDate, setExpiryDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [instrumentName, setInstrumentName] = useState("");
   const [saving, setSaving] = useState(false);
 
   const tenorOptions = useMemo(() => buildTenorOptions(), []);
+  const priceUnitLabel = useMemo(() => {
+    const s = INSTRUMENTS[instrumentIdx]!;
+    return getTradePriceBounds(s.instrument_type, s.market).unitLabel;
+  }, [instrumentIdx]);
   const tenorChoices = useMemo(() => {
     if (tenor && !tenorOptions.includes(tenor)) {
       return [tenor, ...tenorOptions];
@@ -141,6 +146,11 @@ export function QuickAddModal({
       setEntryDate(editPosition.entry_date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
       setExpiryDate(editPosition.expiry_date?.slice(0, 10) ?? "");
       setNotes(editPosition.notes ?? "");
+      setInstrumentName(
+        editPosition.instrument?.trim()
+          ? editPosition.instrument
+          : INSTRUMENTS[idx >= 0 ? idx : 0]!.label,
+      );
     } else {
       setInstrumentIdx(0);
       setDirection("long");
@@ -151,6 +161,7 @@ export function QuickAddModal({
       setEntryDate(new Date().toISOString().slice(0, 10));
       setExpiryDate("");
       setNotes("");
+      setInstrumentName(INSTRUMENTS[0]!.label);
     }
   }, [open, editPosition]);
 
@@ -187,7 +198,7 @@ export function QuickAddModal({
       const expiryFromTenor =
         expiryDate.trim().length > 0 ? null : tenorToExpiryDate(tenor);
       const payload = {
-        instrument: sel.label,
+        instrument: instrumentName.trim() || sel.label,
         instrument_type: sel.instrument_type,
         market: sel.market,
         direction,
@@ -257,7 +268,13 @@ export function QuickAddModal({
             </span>
             <select
               value={instrumentIdx}
-              onChange={(e) => setInstrumentIdx(Number(e.target.value))}
+              onChange={(e) => {
+                const i = Number(e.target.value);
+                setInstrumentIdx(i);
+                if (!editPosition) {
+                  setInstrumentName(INSTRUMENTS[i]!.label);
+                }
+              }}
               className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
             >
               {INSTRUMENTS.map((opt, i) => (
@@ -275,6 +292,18 @@ export function QuickAddModal({
               {sel.market.replace(/_/g, " ")}
             </p>
           </div>
+          <label className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+              Instrument name
+            </span>
+            <input
+              type="text"
+              value={instrumentName}
+              onChange={(e) => setInstrumentName(e.target.value)}
+              className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
+              placeholder={sel.label}
+            />
+          </label>
           <div>
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
               Direction
@@ -346,7 +375,7 @@ export function QuickAddModal({
           </label>
           <label className="block">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
-              Trade price ({sel.currency === "GBP" ? "£" : "€"}/unit)
+              Trade price ({priceUnitLabel})
             </span>
             <input
               type="number"

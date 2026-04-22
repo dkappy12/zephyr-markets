@@ -246,6 +246,9 @@ export default function OptimisePage() {
   const confPct = Math.round(confidence * 100);
   const tailRiskAxisLabel =
     objective === "cvar" ? `CVaR ${confPct}% loss` : `VaR ${confPct}% loss`;
+  const qualityLocked = data?.quality === "low";
+  const optimiseCoverageTitle =
+    "Share of the optimiser’s historical+stress scenario grid that is backed by in-sample data (separate from the Risk page lookback).";
 
   return (
     <TierGate
@@ -299,6 +302,19 @@ export default function OptimisePage() {
         </p>
       </div>
 
+      {data?.quality === "low" && !loading && userId ? (
+        <p
+          className="rounded-[4px] border-[0.5px] border-amber-700/30 bg-amber-50/60 px-4 py-3 text-sm text-amber-900"
+          role="status"
+        >
+          Model quality is LOW: objective, confidence, trade count, and the stress
+          toggle are read-only until the run is stronger.
+          {data.qualityWarnings.length > 0
+            ? ` ${data.qualityWarnings.join(" ")}`
+            : null}
+        </p>
+      ) : null}
+
       <section className="grid gap-3 md:grid-cols-4">
         <label className="text-xs text-ink-mid">
           <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
@@ -307,7 +323,8 @@ export default function OptimisePage() {
           <select
             value={objective}
             onChange={(e) => setObjective(e.target.value as "cvar" | "var")}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+            disabled={qualityLocked}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value="cvar">Minimise CVaR (tail at confidence below)</option>
             <option value="var">Minimise VaR (tail at confidence below)</option>
@@ -320,7 +337,8 @@ export default function OptimisePage() {
           <select
             value={confidence}
             onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+            disabled={qualityLocked}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value={0.95}>95%</option>
             <option value={0.99}>99%</option>
@@ -333,7 +351,8 @@ export default function OptimisePage() {
           <select
             value={maxTrades}
             onChange={(e) => setMaxTrades(Number(e.target.value))}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+            disabled={qualityLocked}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value={1}>1</option>
             <option value={2}>2</option>
@@ -349,8 +368,9 @@ export default function OptimisePage() {
             <input
               type="checkbox"
               checked={includeStress}
+              disabled={qualityLocked}
               onChange={(e) => setIncludeStress(e.target.checked)}
-              className="h-5 w-9 appearance-none rounded-full border border-ivory-border bg-ivory transition-colors checked:border-[#1D6B4E]/40 checked:bg-[#1D6B4E]/25"
+              className="h-5 w-9 appearance-none rounded-full border border-ivory-border bg-ivory transition-colors checked:border-[#1D6B4E]/40 checked:bg-[#1D6B4E]/25 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </label>
         </div>
@@ -421,7 +441,10 @@ export default function OptimisePage() {
                     {data.diagnostics.scenarioCount}
                   </p>
                 </div>
-                <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2">
+                <div
+                  className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-3 py-2"
+                  title={optimiseCoverageTitle}
+                >
                   <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
                     Coverage
                   </p>
@@ -827,7 +850,16 @@ export default function OptimisePage() {
               <span className="text-ink-light/50">·</span>
               <span>FX EUR/GBP {data.gbpPerEur.toFixed(4)}</span>
               <span className="text-ink-light/50">·</span>
-              <span>Generated {new Date(data.generatedAt).toLocaleString()}</span>
+              <span>
+                Generated{" "}
+                {new Date(data.generatedAt).toLocaleString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
               {data.diagnostics.fallbackUsed ? (
                 <>
                   <span className="text-ink-light/50">·</span>

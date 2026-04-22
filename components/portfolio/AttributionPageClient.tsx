@@ -1107,7 +1107,7 @@ export function AttributionPageClient() {
     const factors = [
       { name: "Wind", value: windAttCal },
       { name: "Gas", value: gasAttCal },
-      { name: "Carbon", value: carbonAttCal },
+      { name: "Carbon (SRMC)", value: carbonAttCal },
       { name: "REMIT", value: remitAttCal },
       { name: "Shape", value: shapeAttCal },
       { name: "Demand", value: demandAttCal },
@@ -1290,7 +1290,9 @@ export function AttributionPageClient() {
                 {scoreLine.text}
               </p>
             </div>
-            <div>
+            <div
+              title="Compares today’s inferred physical direction (firming vs softening) with your net GB power MW. Gas-only, carbon-only, or mixed-unit books show MIXED."
+            >
               <p className={sectionLabel}>Book alignment</p>
               <p
                 className={`mt-1 text-sm font-semibold leading-snug ${bookAlignmentDisplay.className}`}
@@ -1391,7 +1393,7 @@ export function AttributionPageClient() {
                         dir: `${gasCostSharePct.toFixed(0)}% SRMC vs DA · ${gasMoveGbpMwh.toFixed(2)} £/MWh`,
                       },
                       {
-                        name: "Carbon (SRMC split)",
+                        name: "Carbon in SRMC stack",
                         impact: carbonAttCal,
                         // This driver is the carbon-cost share of the gas
                         // driver, split using the SRMC stack (fuel vs carbon
@@ -1505,7 +1507,7 @@ export function AttributionPageClient() {
               ) : (
                 <ChevronRight className="h-4 w-4" />
               )}
-              Expand position detail ▼
+              {detailOpen ? "Hide position detail" : "Expand position detail"}
             </button>
 
             {detailOpen ? (
@@ -1530,6 +1532,8 @@ export function AttributionPageClient() {
                     residualDemandGw,
                   );
                   const fromFactors = w + g + r + cSplit;
+                  const hasFactorAttribution =
+                    Math.abs(w) + Math.abs(g) + Math.abs(r) + Math.abs(cSplit) > 0.5;
                   const spreadMm =
                     isSpreadInstrument(p) && livePrices
                       ? positionTodayPnlGbp(p, livePrices)
@@ -1544,6 +1548,10 @@ export function AttributionPageClient() {
                       : allowanceMm != null
                         ? allowanceMm
                         : fromFactors;
+                  const subDash =
+                    spreadMm == null &&
+                    allowanceMm == null &&
+                    !hasFactorAttribution;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";
                   return (
@@ -1626,7 +1634,7 @@ export function AttributionPageClient() {
                             ) : null}
                             {cSplit !== 0 ? (
                               <li>
-                                Carbon-cost split (of gas, SRMC):{" "}
+                                Carbon in SRMC (not UKA/EUA mark-to-market):{" "}
                                 <span
                                   className={formatGbpColored(cSplit).className}
                                 >
@@ -1637,7 +1645,8 @@ export function AttributionPageClient() {
                           </>
                         )}
                         <li className="font-medium text-ink">
-                          Subtotal: {formatGbpColored(sub).text}
+                          Subtotal:{" "}
+                          {subDash ? "—" : formatGbpColored(sub).text}
                         </li>
                       </ul>
                     </div>
