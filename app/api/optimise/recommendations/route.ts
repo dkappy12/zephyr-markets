@@ -255,9 +255,8 @@ export async function GET(req: Request) {
       fxByDay[day] = rate;
     }
 
-    // Aligned with `buildNbpPthByDayFromGasRows`: TTF-deprecated can fill
-    // Stooq gaps. Flag only when the *merged* series is missing NBP p/th for a
-    // TTF business day (Stooq-only is too strict when Stooq CSV fails upstream).
+    // Aligned with `buildNbpPthByDayFromGasRows`: TTF (live) + deprecated + Stooq.
+    // Flag only when the *merged* series is missing NBP p/th for a TTF business day.
     const nbpRawPthByDay = buildNbpPthByDayFromGasRows(gasRows, fxByDay);
     let nbpProxyUsed = false;
     for (const day of Object.keys(ttfByDay)) {

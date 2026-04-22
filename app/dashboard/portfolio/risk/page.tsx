@@ -906,10 +906,9 @@ export default function RiskPage() {
 
   /**
    * NBP daily p/th: Stooq `hub === "NBP"` (column is pence/therm despite
-   * `price_eur_mwh`) plus, for any date the live series does not cover,
-   * TTF-in-EUR/MWh from `NBP_DEPRECATED_YAHOO_BACKFILL` converted via
-   * `buildNbpPthByDayFromGasRows` + day FX. Same-day Stooq wins. Level floor
-   * in {@link aggregateDailyGasPrices} applies to both.
+   * `price_eur_mwh`), then deprecated TTF backfill, then live hub `TTF` →
+   * p/th via `buildNbpPthByDayFromGasRows` + day FX. Same-day: Stooq wins.
+   * Level floor in {@link aggregateDailyGasPrices} applies to both.
    */
   const nbpPricesByDay = useMemo(
     () => buildNbpPthByDayFromGasRows(gasPrices, fxByDay),

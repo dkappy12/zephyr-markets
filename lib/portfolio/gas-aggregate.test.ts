@@ -36,6 +36,22 @@ describe("buildNbpPthByDayFromGasRows", () => {
     expect(byDay["2026-01-02"]).toBeCloseTo(110, 6);
   });
 
+  it("fills a gap from hub TTF when Stooq and deprecated are absent", () => {
+    const day = "2026-01-20";
+    const fxByDay: Record<string, number> = { [day]: 0.86 };
+    const byDay = buildNbpPthByDayFromGasRows(
+      [
+        {
+          price_time: `${day}T12:00:00.000Z`,
+          price_eur_mwh: 50,
+          hub: "TTF",
+        },
+      ],
+      fxByDay,
+    );
+    expect(byDay[day]).toBeGreaterThan(30);
+  });
+
   it("fills a gap with deprecated TTF → p/th when Stooq has no print", () => {
     const day = "2026-01-15";
     const fxByDay: Record<string, number> = { [day]: 0.86 };

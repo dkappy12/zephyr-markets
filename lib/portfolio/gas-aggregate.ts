@@ -139,9 +139,34 @@ function aggregateDeprecatedNbpProxyPth(
 }
 
 /**
- * Merged NBP p/th (Stooq) with deprecated Yahoo TTF proxy for gaps. Same-day:
- * Stooq NBP always wins. Used by Risk + Optimise so historical NBP is not
- * empty when the live hub only has a short Stooq history.
+ * Live hub `TTF` (€/MWh, daily mean) → NBP p/th with day FX. Omits days whose
+ * implied p/th is below {@link NBP_LEVEL_FLOOR_PTH}. Merged after Stooq and
+ * deprecated in {@link buildNbpPthByDayFromGasRows} so we are not stuck when
+ * `NBP_DEPRECATED_YAHOO_BACKFILL` lags the primary TTF series.
+ */
+function aggregateTtfHubToNbpPth(
+  rows: GasHubRow[],
+  fxByDay: Record<string, number>,
+): Record<string, number> {
+  const ttfByDayEur = aggregateDailyGasPrices(
+    rows.filter((r) => normaliseHub(r.hub) === "TTF"),
+    { kind: "TTF" },
+  );
+  const out: Record<string, number> = {};
+  for (const [day, ttfEurMwh] of Object.entries(ttfByDayEur)) {
+    const fx = fxByDay[day] ?? GBP_PER_EUR;
+    const pth = ttfToNbpPencePerTherm(ttfEurMwh, fx);
+    if (pth < NBP_LEVEL_FLOOR_PTH) continue;
+    out[day] = pth;
+  }
+  return out;
+}
+
+/**
+ * Merged NBP p/th: live TTF → p/th, deprecated TTF backfill → p/th, Stooq NBP
+ * p/th. Same-day: Stooq wins; else deprecated; else TTF. Used by Risk +
+ * Optimise so gaps disappear when TTF exists in `gas_prices` even if Stooq is
+ * thin and the deprecated hub has not been backfilled for that day.
  */
 export function buildNbpPthByDayFromGasRows(
   rows: GasHubRow[],
@@ -152,6 +177,6 @@ export function buildNbpPthByDayFromGasRows(
     { kind: "NBP" },
   );
   const fromDeprecated = aggregateDeprecatedNbpProxyPth(rows, fxByDay);
-  // Prefer Stooq on any day with both; start from deprecated then overwrite.
-  return { ...fromDeprecated, ...stooq };
+  const fromTtfHub = aggregateTtfHubToNbpPth(rows, fxByDay);
+  return { ...fromTtfHub, ...fromDeprecated, ...stooq };
 }
