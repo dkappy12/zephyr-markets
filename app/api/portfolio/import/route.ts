@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireUser } from "@/lib/auth/require-user";
+import { requireEntitlement } from "@/lib/auth/require-entitlement";
+import { getEffectiveBillingState } from "@/lib/billing/subscription-state";
 import { createClient } from "@/lib/supabase/server";
 import { normalisePositionInput } from "@/lib/portfolio/position-contract";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
@@ -16,6 +18,12 @@ export async function POST(req: Request) {
   const auth = await requireUser(supabase, { requireVerifiedEmail: true });
   if (auth.response) return auth.response;
   const user = auth.user!;
+  const entitlement = await requireEntitlement(supabase, user.id, {
+    feature: "portfolioEnabled",
+    minimumTier: "pro",
+  });
+  if (entitlement.response) return entitlement.response;
+  const billingState = await getEffectiveBillingState(supabase, user.id);
 
   const rate = await checkRateLimit({
     key: user.id,
@@ -99,6 +107,34 @@ export async function POST(req: Request) {
       },
       { status: 400 },
     );
+  }
+
+  if (typeof billingState.entitlements.maxPositions === "number") {
+    const { count, error: countError } = await supabase
+      .from("positions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("is_closed", false);
+    if (countError) {
+      return NextResponse.json(
+        { code: "POSITION_COUNT_FAILED", error: countError.message },
+        { status: 500 },
+      );
+    }
+    const openCount = count ?? 0;
+    const maxPositions = billingState.entitlements.maxPositions;
+    if (openCount + prepared.length > maxPositions) {
+      return NextResponse.json(
+        {
+          code: "POSITION_LIMIT_REACHED",
+          error: `Import would exceed position limit for ${billingState.effectiveTier} plan.`,
+          maxPositions,
+          openCount,
+          attemptedImport: prepared.length,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   if (dryRun) {

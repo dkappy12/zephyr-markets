@@ -337,19 +337,26 @@ export function netGbPowerSignedMw(positions: PositionRow[]): {
 } {
   let delta = 0;
   let mwCount = 0;
+  let hasLong = false;
+  let hasShort = false;
   for (const p of positions) {
     if (!isGbPowerMarket(p)) continue;
     const u = (p.unit ?? "").toLowerCase();
     if (u !== "mw") continue;
     mwCount++;
     const s = Number(p.size) || 0;
-    if (p.direction === "long") delta += s;
-    else if (p.direction === "short") delta -= s;
+    if (p.direction === "long") {
+      delta += s;
+      hasLong = true;
+    } else if (p.direction === "short") {
+      delta -= s;
+      hasShort = true;
+    }
   }
   if (mwCount === 0) {
     return { signedMw: 0, isMixed: true };
   }
-  return { signedMw: delta, isMixed: false };
+  return { signedMw: delta, isMixed: hasLong && hasShort };
 }
 
 export type PhysicalDir = "firming" | "softening";

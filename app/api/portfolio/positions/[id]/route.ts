@@ -71,6 +71,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
+  const csrf = assertSameOrigin(_req);
+  if (csrf) return csrf;
+
   const { id } = await ctx.params;
   if (!id) {
     return NextResponse.json(

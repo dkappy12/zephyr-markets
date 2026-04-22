@@ -120,7 +120,10 @@ const HISTORICAL_MOVE_CAPS = {
 } as const;
 
 function directionMult(direction: string | null): number {
-  return (direction ?? "").toLowerCase() === "short" ? -1 : 1;
+  const d = (direction ?? "").toLowerCase();
+  if (d === "long") return 1;
+  if (d === "short") return -1;
+  return 0;
 }
 
 function hasMaterialPositions(positions: PositionRow[]): boolean {

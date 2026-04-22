@@ -30,11 +30,19 @@ export function calculateScenarioStressImpact(
   positions: PositionRow[],
   gbpEurRate: number,
 ): { total: number; breakdown: { instrument: string; impact: number }[] } {
+  const directionSign = (direction: string | null): number => {
+    const d = (direction ?? "").toLowerCase();
+    if (d === "long") return 1;
+    if (d === "short") return -1;
+    return 0;
+  };
+
   let total = 0;
   const breakdown: { instrument: string; impact: number }[] = [];
 
   for (const pos of positions) {
-    const direction = pos.direction === "long" ? 1 : -1;
+    const direction = directionSign(pos.direction);
+    if (direction === 0) continue;
     const size = pos.size ?? 0;
     let positionImpact = 0;
     const market = (pos.market ?? "").toUpperCase().replace(" ", "_");

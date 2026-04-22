@@ -422,6 +422,13 @@ function isRiskMarkablePosition(pos: { market: string | null; instrument_type: s
   );
 }
 
+function positionDirectionSign(direction: string | null): number {
+  const d = (direction ?? "").toLowerCase();
+  if (d === "long") return 1;
+  if (d === "short") return -1;
+  return 0;
+}
+
 const calculateDailyPnL = (
   positions: PositionRow[],
   powerPricesByDay: Record<string, number>,
@@ -462,7 +469,8 @@ const calculateDailyPnL = (
     };
 
     for (const pos of positions) {
-      const direction = pos.direction === "long" ? 1 : -1;
+      const direction = positionDirectionSign(pos.direction);
+      if (direction === 0) continue;
       const size = pos.size ?? 0;
 
       if (isSpreadInstrument(pos)) {
@@ -1503,7 +1511,7 @@ export default function RiskPage() {
             <p className={sectionLabel}>Position risk</p>
             <h2 className="mt-1 font-serif text-xl text-ink">Risk by position</h2>
             <p className="mt-1 text-sm text-ink-light">
-              Each position&apos;s contribution to portfolio VaR. Worst-day values are simulated against the last{" "}
+              Each position&apos;s contribution to the gross worst-day loss profile. Worst-day values are simulated against the last{" "}
               {RISK_LOOKBACK_DAYS} days of market moves, not realised P&amp;L.
             </p>
             <div className="mt-4 rounded-[6px] border-[0.5px] border-ivory-border bg-card">
@@ -1517,7 +1525,7 @@ export default function RiskPage() {
                     <th className="px-3 py-3">Worst day</th>
                     <th
                       className="px-3 py-3"
-                      title="Share of gross portfolio risk — each position's worst-day loss divided by the sum of every position's worst-day loss (absolute). Rows add to 100%."
+                      title="Share of gross worst-day risk — each position's worst-day loss divided by the sum of every position's worst-day loss (absolute). Rows add to 100%."
                     >
                       Share of gross risk
                     </th>
