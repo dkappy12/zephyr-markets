@@ -13,6 +13,7 @@ import {
   positionNotionalGbp,
   tenorToExpiryDate,
 } from "@/lib/portfolio/book";
+import { calculateScenarioStressImpact } from "@/lib/portfolio/risk-stress-scenario-impact";
 import { aggregateDailyPowerPrices } from "@/lib/portfolio/power-aggregate";
 import {
   aggregateDailyGasPrices,
@@ -20,11 +21,8 @@ import {
   NBP_DEPRECATED_YAHOO_HUB,
 } from "@/lib/portfolio/gas-aggregate";
 import {
-  darkSpreadStressDeltaGbpMwh,
   historicalSpreadGbpMwh,
-  isDarkSpread,
   isSpreadInstrument,
-  sparkSpreadStressDeltaGbpMwh,
 } from "@/lib/portfolio/spread-marks";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
@@ -586,54 +584,6 @@ const calculateVaR = (dailyPnLs: number[], confidence: number): number => {
   return sorted[Math.max(0, index)];
 };
 
-const calculateScenarioImpact = (
-  scenario: Scenario,
-  positions: PositionRow[],
-  gbpEurRate: number,
-) => {
-  let total = 0;
-  const breakdown: { instrument: string; impact: number }[] = [];
-
-  for (const pos of positions) {
-    const direction = pos.direction === "long" ? 1 : -1;
-    const size = pos.size ?? 0;
-    let positionImpact = 0;
-    const market = (pos.market ?? "").toUpperCase().replace(" ", "_");
-
-    if (isSpreadInstrument(pos)) {
-      const dS = isDarkSpread(pos)
-        ? darkSpreadStressDeltaGbpMwh(
-            scenario.moves.GB_power,
-            scenario.moves.TTF,
-            gbpEurRate,
-          )
-        : sparkSpreadStressDeltaGbpMwh(
-            scenario.moves.GB_power,
-            scenario.moves.TTF,
-            gbpEurRate,
-          );
-      positionImpact = dS * size * direction;
-    } else if (isGbPowerMarket(pos.market)) {
-    } else if (market === "TTF") {
-      positionImpact = scenario.moves.TTF * gbpEurRate * size * direction;
-    } else if (market === "NBP") {
-      positionImpact = (scenario.moves.NBP * size * direction) / 100;
-    } else if (market === "UKA") {
-      // UKA positions: GBP/t × tCO2 → GBP directly.
-      positionImpact = scenario.moves.UKA * size * direction;
-    } else if (market === "EUA") {
-      // EUA positions: EUR/t × tCO2 × FX → GBP.
-      positionImpact = scenario.moves.EUA * gbpEurRate * size * direction;
-    }
-
-    total += positionImpact;
-    if (positionImpact !== 0) {
-      breakdown.push({ instrument: pos.instrument ?? "Position", impact: positionImpact });
-    }
-  }
-  return { total, breakdown };
-};
-
 export default function RiskPage() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [loading, setLoading] = useState(true);
@@ -1138,7 +1088,11 @@ export default function RiskPage() {
   const grossRiskBase = Math.max(sumIndividualVaRs, 1);
 
   const scenarioResults = useMemo(
-    () => STRESS_SCENARIOS.map((s) => ({ scenario: s, ...calculateScenarioImpact(s, positions, gbpEurRate) })),
+    () =>
+      STRESS_SCENARIOS.map((s) => ({
+        scenario: s,
+        ...calculateScenarioStressImpact(s.moves, positions, gbpEurRate),
+      })),
     [positions, gbpEurRate],
   );
 
@@ -1248,7 +1202,7 @@ export default function RiskPage() {
 
   const hasPositions = positions.length > 0;
   const noHistory = dailyPnLSeries.length === 0;
-  // Positions with markets we can't mark are silently skipped in VaR/CVaR
+  // Positions with markets we can't mark are silently skipped in VaR
   // and stress — list them so traders know the headline numbers are
   // incomplete.
   const unmarkablePositions = useMemo(
@@ -1345,7 +1299,7 @@ export default function RiskPage() {
                 {unmarkablePositions.length === 1
                   ? "1 position is"
                   : `${unmarkablePositions.length} positions are`}{" "}
-                excluded from VaR, CVaR and stress calculations because no live
+                excluded from VaR and stress calculations because no live
                 mark series is wired up for{" "}
                 {Array.from(
                   new Set(

@@ -207,7 +207,6 @@ export default function OptimisePage() {
     ];
   }, [data, confidence]);
 
-  const confPct = Math.round(confidence * 100);
   const optimiseCoverageTitle =
     "Share of the optimiser’s historical+stress scenario grid that is backed by in-sample data (separate from the Risk page lookback).";
 
