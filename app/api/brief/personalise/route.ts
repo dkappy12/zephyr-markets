@@ -29,6 +29,17 @@ type PersonaliseReq = {
 };
 
 const MAX_FOCUS_POSITIONS = 8;
+const MAX_OVERNIGHT_SUMMARY_CHARS = 1600;
+const MAX_ONE_RISK_CHARS = 450;
+
+function clampContext(s: string, maxChars: number): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  if (t.length <= maxChars) return t;
+  const cut = t.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = lastSpace > maxChars * 0.7 ? cut.slice(0, lastSpace) : cut;
+  return `${base.trim()}…`;
+}
 
 function asNum(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -55,6 +66,15 @@ function fmtScore(n: unknown): string {
   const v = asNum(n);
   if (v == null) return "n/a";
   return v.toFixed(1);
+}
+
+/** Common analyst filler / meta phrases to discourage (guardrail hint). */
+const BANNED_FILLER =
+  /\b(it is worth noting|it is important to|needless to say|moving forward|at the end of the day|leverage synergies|robust framework)\b/i;
+
+/** First/second person slips (positions copy must stay third-person observational). Omit \\bus\\b to avoid false positives on "US" (e.g. US Henry Hub). */
+function containsDisallowedVoice(text: string): boolean {
+  return /\b(I|me|my|mine|we|our|ours|you|your|yours)\b/i.test(text);
 }
 
 function extractAnthropicText(rawText: string): string {
@@ -210,7 +230,20 @@ export async function POST(req: Request) {
       })
       .join("\n");
 
-    const userPrompt = `Physical conditions as of this morning:
+    const overnightRaw = String(body.overnight_summary ?? "").trim();
+    const oneRiskRaw = String(body.one_risk ?? "").trim();
+    const overnightDesk = clampContext(
+      overnightRaw,
+      MAX_OVERNIGHT_SUMMARY_CHARS,
+    );
+    const oneRiskDesk = clampContext(oneRiskRaw, MAX_ONE_RISK_CHARS);
+
+    const deskContextBlock =
+      overnightDesk || oneRiskDesk
+        ? `\nMorning brief desk context (facts for alignment; weave in briefly, do not contradict named drivers):\n${overnightDesk ? `- Overnight desk summary: ${overnightDesk}\n` : ""}${oneRiskDesk ? `- Systemic risk line from desk: ${oneRiskDesk}\n` : ""}`
+        : "";
+
+    const userPrompt = `${deskContextBlock.trim() ? `${deskContextBlock.trim()}\n\n` : ""}Physical conditions as of this morning:
 - Regime: ${regime} | Residual demand: ${residual_demand} GW | Physical premium score: ${normalised_score} (${direction})
 - Market price: £${market_price}/MWh | Physically-implied price: £${implied_price}/MWh | Gap: £${gap}/MWh
 - SRMC anchor: £${srmc}/MWh | REMIT capacity impact: ${remit_mw} MW active outages
@@ -224,14 +257,16 @@ Rules:
 - State whether each position is helped or hurt by current conditions and by how much in £/MWh terms where possible
 - Identify the single biggest risk to the book today
 - End with one specific thing to watch
-- No hedging language. No 'may', 'could', 'might'. State things directly.
+- Prefer direct statements over vague hedges ("may", "could", "might"); if uncertainty matters, tie it to a named condition or time window
+- Do not invent outages, flows, or prices that are not supported by the inputs above
+- No meta-commentary ("this paragraph", "below we", "the following"). No filler phrases
 - Never use the em dash character (—); use commas, semicolons, colons, or separate sentences instead.
 
 Example of the style and quality required:
 "The long 50 MW GB Power Q3 2026 Baseload entered at £89.50 faces £35/MWh of mean reversion risk with the market at £125 against a physically-implied £90; renewable dominance at 18 GW wind is structurally suppressing the price anchor the position needs. Both short gas legs are correctly positioned: the short 25,000 therm NBP Winter 2026 and short 10 MW TTF Q4 2026 benefit from temperature-suppressed demand keeping TTF capped around €50/MWh. The key risk today is a wind ramp-down below 15 GW switching the regime and pulling power back toward SRMC; watch the 14:00-18:00 UTC window where forecast uncertainty is highest."`;
 
     const systemPrompt =
-      "You are a senior energy markets analyst writing a single morning observation paragraph. You write exactly one paragraph of 3-4 sentences. Every sentence contains a specific number: price, volume, or percentage. You never use phrases like 'it is worth noting', 'it is important', or filler. You write in third-person observational voice only: describe the book and the physical picture as an analyst would; never first or second person (no I, we, you, my, your, our). Never use the em dash character (—); use commas, semicolons, or colons instead.";
+      "You are a senior GB/NW European power and gas analyst writing one morning observation paragraph for a trading desk. Output exactly one paragraph of 3 to 4 sentences. Each sentence must include at least one concrete number (price £/MWh, MW, GW, therm, EUR/MWh, or percent). Stay anchored to the supplied desk context and physical inputs; do not contradict the overnight summary on named drivers unless reconciling with the updated physical metrics shown. Third-person observational voice only: describe positions and conditions as an analyst would. Never first or second person (no I, we, you, my, your, our). Avoid meta setups and filler ('it is worth noting', 'this analysis', 'moving forward'). Never use the em dash character (—); use commas, semicolons, or colons.";
 
     async function runAnthropic(
       apiKey: string,
@@ -247,6 +282,7 @@ Example of the style and quality required:
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 600,
+          temperature: 0.35,
           system: systemPrompt,
           messages: [{ role: "user", content: prompt }],
         }),
@@ -263,6 +299,8 @@ Example of the style and quality required:
 
     function validatePersonalisedText(text: string): boolean {
       if (!text || /^invalid\.?$/i.test(text.trim())) return false;
+      if (containsDisallowedVoice(text)) return false;
+      if (BANNED_FILLER.test(text)) return false;
       return requiredLabels.every((label) =>
         positionReferencedInText(text, label),
       );
@@ -274,13 +312,13 @@ Example of the style and quality required:
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
           key,
-          `${userPrompt}\n\nRewrite in third-person observational analyst voice. Reference every named instrument from the book above; no I/you/we/my/your.`,
+          `${userPrompt}\n\nRewrite in third-person observational analyst voice. Reference every named instrument from the book above; no I/you/we/my/your/our. Remove filler phrases. Keep numbers in every sentence.`,
         );
       }
       if (!validatePersonalisedText(text)) {
         text = await runAnthropic(
           key,
-          `${userPrompt}\n\nFinal pass: name each instrument from the list explicitly and link each to today's drivers. Third person only.`,
+          `${userPrompt}\n\nFinal pass: name each instrument from the list explicitly and link each to today's drivers and desk context. Third person only; no banned pronouns.`,
         );
       }
     } catch (error) {
