@@ -54,12 +54,32 @@ export function tierBadgeLabel(
   return null;
 }
 
-export function DashboardChrome({ children }: { children: React.ReactNode }) {
+/** Session snapshot from the server layout so the chrome matches the signed-in user on first paint. */
+export type DashboardInitialAuth = {
+  email: string | null;
+  initials: string;
+  isAppAdmin: boolean;
+};
+
+export function DashboardChrome({
+  children,
+  initialAuth = null,
+}: {
+  children: React.ReactNode;
+  /** When set (dashboard RSC), avoids placeholder avatar until client auth resolves. */
+  initialAuth?: DashboardInitialAuth | null;
+}) {
   const supabase = useMemo(() => createBrowserClient(), []);
   const pathname = usePathname();
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [avatarInitials, setAvatarInitials] = useState("U");
-  const [profileRole, setProfileRole] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(
+    initialAuth?.email ?? null,
+  );
+  const [avatarInitials, setAvatarInitials] = useState(
+    initialAuth?.initials ?? "U",
+  );
+  const [profileRole, setProfileRole] = useState<string | null>(() =>
+    initialAuth?.isAppAdmin ? "admin" : null,
+  );
   const [effectiveTier, setEffectiveTier] = useState<
     "free" | "pro" | "team" | null
   >(null);
@@ -117,16 +137,19 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
       const appRole = normalizeRole(
         (userData.user.app_metadata as { role?: string } | undefined)?.role ?? null,
       );
-      if (appRole === "admin") {
-        setProfileRole("admin");
-      }
       const { data } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", userData.user.id)
         .single();
       if (!active) return;
-      setProfileRole(normalizeRole(data?.role));
+      const profileRoleNorm = normalizeRole(data?.role);
+      // Trust app_metadata admin (same as middleware); do not overwrite with a null profile role.
+      const effective =
+        appRole === "admin" || profileRoleNorm === "admin"
+          ? "admin"
+          : profileRoleNorm;
+      setProfileRole(effective);
     }
     void load().catch(() => {
       if (!active) return;

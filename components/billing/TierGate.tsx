@@ -61,9 +61,25 @@ export function TierGate({
     return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
 
-  // Still loading billing — show nothing to prevent flash
+  // Billing tier not yet known — show a neutral placeholder so the page shell
+  // does not look broken or "logged out" while /api/billing/status resolves.
   if (currentTier === null) {
-    return null;
+    return (
+      <div
+        className="relative min-h-[320px]"
+        aria-busy="true"
+        aria-label="Loading subscription status"
+      >
+        <div className="pointer-events-none select-none opacity-[0.38]">
+          {mockup ?? <GenericMockup />}
+        </div>
+        <div className="pointer-events-none absolute inset-0 flex items-start justify-center pt-10">
+          <p className="rounded-[4px] border-[0.5px] border-ivory-border bg-ivory/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid shadow-sm">
+            Loading plan…
+          </p>
+        </div>
+      </div>
+    );
   }
 
   // Has access — render normally
