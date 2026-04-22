@@ -6,15 +6,16 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { createClient } from "@/lib/supabase/server";
 import { initialsFromUser } from "@/lib/team/user-initials";
 import Script from "next/script";
+import { connection } from "next/server";
 
-/** Avoid static prerender of dashboard routes without Supabase env (client trees call `createBrowserClient()` during SSR). */
-export const dynamic = "force-dynamic";
-
+/** Request-bound rendering without blanket `dynamic = "force-dynamic"` (see `connection()`). */
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  await connection();
+
   let initialAuth: DashboardInitialAuth | null = null;
   if (
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
