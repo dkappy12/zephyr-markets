@@ -86,4 +86,11 @@ Desktop.ini
 # Cursor
 .cursor/
 
-.vercel
+# Playwright MCP / local page dumps
+.playwright-mcp/
+
+# Ad-hoc audit & verification screenshots (repo root)
+/[0-9][0-9]-*.png
+/audit-*.png
+/verify-*.png
+/audit-notes.md
