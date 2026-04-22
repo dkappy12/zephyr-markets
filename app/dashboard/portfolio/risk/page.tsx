@@ -10,6 +10,7 @@ import {
 } from "@/lib/reliability/contract";
 import {
   normaliseMarketBucket,
+  type PositionRow,
   positionNotionalGbp,
   tenorToExpiryDate,
 } from "@/lib/portfolio/book";
@@ -81,24 +82,6 @@ function normalizePctShares4(
  * app/api/optimise/recommendations/route.ts.
  */
 const RISK_PRICE_FETCH_LIMIT = 50_000;
-
-type PositionRow = {
-  id: string;
-  user_id: string;
-  instrument: string | null;
-  direction: string | null;
-  market: string | null;
-  size: number | null;
-  unit: string | null;
-  expiry_date: string | null;
-  tenor: string | null;
-  instrument_type: string | null;
-  is_closed: boolean | null;
-  entry_date: string | null;
-  created_at: string;
-  trade_price: number | null;
-  currency: string | null;
-};
 
 type PowerPriceRow = {
   price_gbp_mwh: number | null;
