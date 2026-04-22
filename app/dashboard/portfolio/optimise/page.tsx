@@ -175,28 +175,6 @@ export default function OptimisePage() {
     void loadOptimise();
   }, [loadOptimise]);
 
-  useEffect(() => {
-    let deb: ReturnType<typeof setTimeout> | null = null;
-    const schedule = () => {
-      if (deb) clearTimeout(deb);
-      deb = setTimeout(() => {
-        deb = null;
-        void loadOptimise();
-      }, 350);
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") schedule();
-    };
-    const onWinFocus = () => schedule();
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onWinFocus);
-    return () => {
-      if (deb) clearTimeout(deb);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onWinFocus);
-    };
-  }, [loadOptimise]);
-
   const cards = useMemo(() => {
     if (!data) return [];
     const pct = Math.round(confidence * 100);
