@@ -68,6 +68,9 @@ import {
 const sectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
+/** Aligns headline “explained %” with calibration trust (see `showPct` logic below). */
+const MIN_R2_FOR_EXPLAINED_HEADLINE = 0.1;
+
 const BRAND_GREEN = "#1D6B4E";
 const TERRACOTTA = "#8B3A3A";
 function utcToday(): string {
@@ -782,15 +785,114 @@ export function AttributionPageClient() {
       ? explainedAbs / (explainedAbs + residualAbs)
       : 0;
   const explainedPct = Math.round(explainedRatio * 100);
+
   /** “97% explained” is misleading when the calibration fit is unusable (R²≈0). */
-  const showExplainedVariancePct =
-    !calibration.fallbackUsed && calibration.r2 >= 0.1;
-  const attributionConfidence = attributionConfidenceFromMetrics({
-    explainedRatio,
-    residualAbs,
-    totalPnlAbs: Math.abs(totalPnl),
+  const { attributionConfidence, explainedVarianceUx } = useMemo(() => {
+    const confidence = attributionConfidenceFromMetrics({
+      explainedRatio,
+      residualAbs,
+      totalPnlAbs: Math.abs(totalPnl),
+      calibration,
+    });
+
+    const showPct =
+      !calibration.fallbackUsed &&
+      calibration.r2 >= MIN_R2_FOR_EXPLAINED_HEADLINE;
+
+    if (showPct) {
+      return {
+        attributionConfidence: confidence,
+        explainedVarianceUx: {
+          showPct: true as const,
+          explainedStatPrimary: `${explainedPct}%`,
+          explainedStatSecondary: `${confidence} confidence`,
+          chartFootnote: (
+            <>
+              Model explains {explainedPct}% of today&apos;s P&amp;L (
+              {formatSignedGbp(explainedPnl)} explained,{" "}
+              {formatSignedGbp(residual)} residual) · confidence: {confidence}.
+            </>
+          ),
+          uncertaintyCallout: null as { title: string; bullets: string[] } | null,
+        },
+      };
+    }
+
+    const bullets: string[] = [];
+    if (calibration.sampleSize < MIN_SAMPLE_SIZE) {
+      bullets.push(
+        `Stored P&L history has ${calibration.sampleSize} day(s). Headline explained % publishes once we reach ≥${MIN_SAMPLE_SIZE} days with attribution splits.`,
+      );
+    }
+    if (calibration.fallbackUsed) {
+      if (calibration.sampleSize >= MIN_SAMPLE_SIZE) {
+        bullets.push(
+          `Calibration regression did not pass internal checks (in-sample R²=${calibration.r2.toFixed(2)}); conservative λ=${calibration.lambda} multipliers scale each driver.`,
+        );
+      } else {
+        bullets.push(
+          `Until history grows, driver impacts use conservative λ=${calibration.lambda} defaults instead of fitted multipliers.`,
+        );
+      }
+    } else if (calibration.r2 < MIN_R2_FOR_EXPLAINED_HEADLINE) {
+      bullets.push(
+        `In-sample R² (${calibration.r2.toFixed(2)}) is below ${MIN_R2_FOR_EXPLAINED_HEADLINE}; headline explained % stays hidden even when multipliers are partially fitted.`,
+      );
+    }
+
+    const secondaryParts: string[] = [];
+    secondaryParts.push(
+      calibration.sampleSize < MIN_SAMPLE_SIZE
+        ? `${calibration.sampleSize}/${MIN_SAMPLE_SIZE} days`
+        : `n=${calibration.sampleSize}`,
+    );
+    secondaryParts.push(
+      calibration.fallbackUsed
+        ? calibration.sampleSize >= MIN_SAMPLE_SIZE
+          ? `weak fit · λ=${calibration.lambda}`
+          : `defaults · λ=${calibration.lambda}`
+        : `R² ${calibration.r2.toFixed(2)}`,
+    );
+
+    const chartFootnote = (
+      <>
+        Driver waterfall bars use best-effort impacts. Headline explained % stays off until
+        calibration reaches R² ≥ {MIN_R2_FOR_EXPLAINED_HEADLINE} without fallback (currently n=
+        {calibration.sampleSize}, R²={calibration.r2.toFixed(2)}, fallback=
+        {calibration.fallbackUsed ? "yes" : "no"}).
+      </>
+    );
+
+    return {
+      attributionConfidence: confidence,
+      explainedVarianceUx: {
+        showPct: false as const,
+        explainedStatPrimary: "—",
+        explainedStatSecondary: secondaryParts.join(" · "),
+        chartFootnote,
+        uncertaintyCallout:
+          bullets.length > 0
+            ? {
+                title: "Why headline explained % is hidden",
+                bullets,
+              }
+            : {
+                title: "Why headline explained % is hidden",
+                bullets: [
+                  "Calibration quality is below the threshold we use before publishing headline explained %.",
+                ],
+              },
+      },
+    };
+  }, [
     calibration,
-  });
+    explainedPct,
+    explainedPnl,
+    explainedRatio,
+    residual,
+    residualAbs,
+    totalPnl,
+  ]);
 
   const primary = primaryDriverKey(
     windAttCal,
@@ -1305,18 +1407,54 @@ export function AttributionPageClient() {
                 {regime.label}
               </p>
             </div>
-            <div>
+            <div
+              title={
+                !explainedVarianceUx.showPct && explainedVarianceUx.uncertaintyCallout
+                  ? explainedVarianceUx.uncertaintyCallout.bullets.join("\n\n")
+                  : undefined
+              }
+            >
               <p className={sectionLabel}>Explained</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                {showExplainedVariancePct ? `${explainedPct}%` : "—"}
+                {explainedVarianceUx.explainedStatPrimary}
               </p>
-              <p className="mt-1 text-[11px] text-ink-mid">
-                {showExplainedVariancePct
-                  ? `${attributionConfidence} confidence`
-                  : "Share hidden — need R² ≥ 0.1 and ≥30 history rows (or calibration fallback is active)."}
+              <p className="mt-1 text-[11px] leading-snug text-ink-mid">
+                {explainedVarianceUx.showPct ? (
+                  explainedVarianceUx.explainedStatSecondary
+                ) : (
+                  <>
+                    <span className="block">{explainedVarianceUx.explainedStatSecondary}</span>
+                    <span className="mt-0.5 block text-[10px] text-ink-light">
+                      Details in the panel below (hover this column on desktop).
+                    </span>
+                  </>
+                )}
               </p>
             </div>
           </motion.div>
+
+          {!explainedVarianceUx.showPct && explainedVarianceUx.uncertaintyCallout ? (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[4px] border-[0.5px] border-ivory-border bg-card px-4 py-4"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                {explainedVarianceUx.uncertaintyCallout.title}
+              </p>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-snug text-ink">
+                {explainedVarianceUx.uncertaintyCallout.bullets.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[11px] leading-relaxed text-ink-mid">
+                The waterfall chart and driver table remain useful as a decomposition; residual is the gap
+                after applying the calibrated (or conservative) multipliers.
+              </p>
+            </motion.div>
+          ) : null}
 
           {/* Hero attribution */}
           <section>
@@ -1467,20 +1605,8 @@ export function AttributionPageClient() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-xs text-ink-light">
-              {showExplainedVariancePct ? (
-                <>
-                  Model explains {explainedPct}% of today&apos;s P&amp;L ({formatSignedGbp(explainedPnl)} explained,{" "}
-                  {formatSignedGbp(residual)} residual) · confidence: {attributionConfidence}.
-                </>
-              ) : (
-                <>
-                  Explained % is not shown while calibration has R² = {calibration.r2.toFixed(2)} on n=
-                  {calibration.sampleSize}
-                  (minimum fit quality for this headline is R² ≥ 0.1 with ≥{MIN_SAMPLE_SIZE} days). Driver
-                  waterfall still uses best-effort multipliers.
-                </>
-              )}
+            <p className="mt-3 text-xs leading-relaxed text-ink-light">
+              {explainedVarianceUx.chartFootnote}
             </p>
             {diagnostics.length > 0 ? (
               <div className="mt-2 space-y-1">
