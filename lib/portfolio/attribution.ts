@@ -8,6 +8,10 @@ import {
   ttfToNbpPencePerTherm,
   type LivePrices,
 } from "@/lib/portfolio/book";
+import {
+  isSpreadInstrument,
+  spreadIntradayPnlGbp,
+} from "@/lib/portfolio/spread-marks";
 
 /**
  * Fallback EUR→GBP for gas attribution when no live rate is available.
@@ -28,13 +32,20 @@ export function dirMult(direction: string | null): number {
 }
 
 export function isGbPowerMarket(p: PositionRow): boolean {
+  if (isSpreadInstrument(p)) return false;
   const m = (p.market ?? "").toLowerCase().replace(/[\s_]/g, "");
   return m === "gbpower" || m === "n2ex" || m === "apx";
 }
 
 export function isGasMarket(p: PositionRow): boolean {
+  if (isSpreadInstrument(p)) return false;
   const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
   return m === "ttf" || m === "nbp" || m === "other_gas";
+}
+
+export function isCarbonAllowancePosition(p: PositionRow): boolean {
+  const m = (p.market ?? "").toLowerCase().replace(/[\s_]/g, "");
+  return m === "uka" || m === "eua";
 }
 
 /**
@@ -51,7 +62,28 @@ export function positionTodayPnlGbp(
   lp: LivePrices | null,
 ): number | null {
   if (!lp) return null;
+  if (isSpreadInstrument(p)) {
+    return spreadIntradayPnlGbp(p, lp);
+  }
   const mlow = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
+  if (mlow === "uka") {
+    const mark = lp.ukaGbpPerT;
+    const open = lp.ukaGbpPerTPrev;
+    if (mark == null || open == null) return null;
+    return linearPnl(p.direction, open, mark, p.size);
+  }
+  if (mlow === "eua") {
+    const mark = lp.euaEurPerT;
+    const open = lp.euaEurPerTPrev;
+    if (mark == null || open == null) return null;
+    return eurMwhPnlToGbp(
+      p.direction,
+      open,
+      mark,
+      p.size,
+      lp.gbpPerEur ?? GBP_PER_EUR,
+    );
+  }
   if (mlow === "nbp") {
     const mark = lp.nbpPencePerTherm;
     const open = lp.nbpOpenPencePerTherm;
@@ -454,6 +486,7 @@ export function premiumWindGbpPosition(
   p: PositionRow,
   windMoveGbpMwh: number,
 ): number {
+  if (isSpreadInstrument(p)) return 0;
   if (!isGbPowerMarket(p)) return 0;
   if ((p.unit ?? "").toLowerCase() !== "mw") return 0;
   const dm = dirMult(p.direction);
@@ -481,6 +514,7 @@ export function premiumGasGbpPosition(
   p: PositionRow,
   gasMoveGbpMwh: number,
 ): number {
+  if (isSpreadInstrument(p)) return 0;
   const m = (p.market ?? "").toLowerCase().replace(/\s/g, "_");
   const dm = dirMult(p.direction);
   const sz = Number(p.size);

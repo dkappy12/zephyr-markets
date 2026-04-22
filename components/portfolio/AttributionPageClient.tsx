@@ -9,9 +9,11 @@ import { PREMIUM_VS_TAPE } from "@/lib/portfolio/desk-copy";
 import {
   bookAlignmentCopy,
   gasAttributionForPosition,
+  isCarbonAllowancePosition,
   isGbPowerMarket,
   netGbPowerSignedMw,
   parsePhysicalDirection,
+  positionTodayPnlGbp,
   premiumShapeGbpPosition,
   primaryDriverKey,
   remitPriceImpactGbpPerMwh,
@@ -39,6 +41,7 @@ import {
 } from "@/lib/portfolio/book";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { makeReliabilityEnvelope } from "@/lib/reliability/contract";
+import { isSpreadInstrument } from "@/lib/portfolio/spread-marks";
 import { mwDeratedForRow } from "@/lib/signal-feed";
 import type { SignalRow } from "@/lib/signals";
 import { format, subDays } from "date-fns";
@@ -304,8 +307,22 @@ export function AttributionPageClient() {
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
-    const [mpLatest, mpOpen, gasLatest, gasOpen, fxLatest, ukaLatest, euaLatest] =
-      await Promise.all([
+    const yday = (() => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    const [
+      mpLatest,
+      mpOpen,
+      gasLatest,
+      gasOpen,
+      fxLatest,
+      ukaLatest,
+      euaLatest,
+      ukaPrevRow,
+      euaPrevRow,
+    ] = await Promise.all([
       supabase
         .from("market_prices")
         .select("price_gbp_mwh, price_date, settlement_period, market")
@@ -358,6 +375,18 @@ export function AttributionPageClient() {
         .eq("hub", "EUA")
         .order("price_date", { ascending: false })
         .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_date")
+        .eq("hub", "UKA")
+        .eq("price_date", yday)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_eur_per_t, price_date")
+        .eq("hub", "EUA")
+        .eq("price_date", yday)
         .maybeSingle(),
     ]);
 
@@ -420,6 +449,12 @@ export function AttributionPageClient() {
     const euaGbp = euaLatest.data
       ? Number((euaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
       : NaN;
+    const ukaPrevGbp = ukaPrevRow.data
+      ? Number((ukaPrevRow.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+    const euaPrevEur = euaPrevRow.data
+      ? Number((euaPrevRow.data as { price_eur_per_t?: unknown }).price_eur_per_t)
+      : NaN;
 
     setLivePrices({
       gbPowerGbpMwh: Number.isFinite(gbp) ? gbp : null,
@@ -440,6 +475,8 @@ export function AttributionPageClient() {
       ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
       euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
       euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
+      ukaGbpPerTPrev: Number.isFinite(ukaPrevGbp) ? ukaPrevGbp : null,
+      euaEurPerTPrev: Number.isFinite(euaPrevEur) ? euaPrevEur : null,
     });
   }, [supabase]);
 
@@ -1485,14 +1522,28 @@ export function AttributionPageClient() {
                     p,
                     livePrices?.gbpPerEur ?? GBP_PER_EUR,
                   );
-                  const c = gTotal * carbonShare;
+                  const cSplit = gTotal * carbonShare;
                   const g = gTotal * (1 - carbonShare);
                   const r = remitAttributionForPosition(
                     deltaRemitMw,
                     p,
                     residualDemandGw,
                   );
-                  const sub = w + g + r + c;
+                  const fromFactors = w + g + r + cSplit;
+                  const spreadMm =
+                    isSpreadInstrument(p) && livePrices
+                      ? positionTodayPnlGbp(p, livePrices)
+                      : null;
+                  const allowanceMm =
+                    isCarbonAllowancePosition(p) && livePrices
+                      ? positionTodayPnlGbp(p, livePrices)
+                      : null;
+                  const sub =
+                    spreadMm != null
+                      ? spreadMm
+                      : allowanceMm != null
+                        ? allowanceMm
+                        : fromFactors;
                   const dir =
                     p.direction === "short" ? "Short" : "Long";
                   return (
@@ -1505,38 +1556,86 @@ export function AttributionPageClient() {
                         {p.size ?? "—"} {p.unit ?? ""})
                       </p>
                       <ul className="mt-2 space-y-1 text-[13px] text-ink-mid">
-                        {w !== 0 ? (
+                        {isSpreadInstrument(p) ? (
                           <li>
-                            Wind factor:{" "}
-                            <span className={formatGbpColored(w).className}>
-                              {formatGbpColored(w).text}
+                            Spark / dark (mark-to-market from N2ex &amp; TTF):{" "}
+                            <span
+                              className={
+                                (spreadMm != null
+                                  ? formatGbpColored(spreadMm)
+                                  : formatGbpColored(0)
+                                ).className
+                              }
+                            >
+                              {spreadMm != null
+                                ? formatGbpColored(spreadMm).text
+                                : "—"}
                             </span>
+                            {spreadMm == null ? (
+                              <span className="ml-1 text-ink-light">
+                                (need on-day open marks)
+                              </span>
+                            ) : null}
                           </li>
-                        ) : null}
-                        {g !== 0 ? (
+                        ) : isCarbonAllowancePosition(p) ? (
                           <li>
-                            Gas factor:{" "}
-                            <span className={formatGbpColored(g).className}>
-                              {formatGbpColored(g).text}
+                            Carbon (allowance mark-to-market):{" "}
+                            <span
+                              className={
+                                (allowanceMm != null
+                                  ? formatGbpColored(allowanceMm)
+                                  : formatGbpColored(0)
+                                ).className
+                              }
+                            >
+                              {allowanceMm != null
+                                ? formatGbpColored(allowanceMm).text
+                                : "—"}
                             </span>
+                            {allowanceMm == null ? (
+                              <span className="ml-1 text-ink-light">
+                                (no prior-day UKA/EUA in DB for daily move)
+                              </span>
+                            ) : null}
                           </li>
-                        ) : null}
-                        {r !== 0 ? (
-                          <li>
-                            REMIT factor:{" "}
-                            <span className={formatGbpColored(r).className}>
-                              {formatGbpColored(r).text}
-                            </span>
-                          </li>
-                        ) : null}
-                        {c !== 0 ? (
-                          <li>
-                            Carbon-cost split:{" "}
-                            <span className={formatGbpColored(c).className}>
-                              {formatGbpColored(c).text}
-                            </span>
-                          </li>
-                        ) : null}
+                        ) : (
+                          <>
+                            {w !== 0 ? (
+                              <li>
+                                Wind factor:{" "}
+                                <span className={formatGbpColored(w).className}>
+                                  {formatGbpColored(w).text}
+                                </span>
+                              </li>
+                            ) : null}
+                            {g !== 0 ? (
+                              <li>
+                                Gas factor:{" "}
+                                <span className={formatGbpColored(g).className}>
+                                  {formatGbpColored(g).text}
+                                </span>
+                              </li>
+                            ) : null}
+                            {r !== 0 ? (
+                              <li>
+                                REMIT factor:{" "}
+                                <span className={formatGbpColored(r).className}>
+                                  {formatGbpColored(r).text}
+                                </span>
+                              </li>
+                            ) : null}
+                            {cSplit !== 0 ? (
+                              <li>
+                                Carbon-cost split (of gas, SRMC):{" "}
+                                <span
+                                  className={formatGbpColored(cSplit).className}
+                                >
+                                  {formatGbpColored(cSplit).text}
+                                </span>
+                              </li>
+                            ) : null}
+                          </>
+                        )}
                         <li className="font-medium text-ink">
                           Subtotal: {formatGbpColored(sub).text}
                         </li>

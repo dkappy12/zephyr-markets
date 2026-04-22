@@ -30,6 +30,7 @@ import {
   type NetDeltaBucket,
 } from "@/lib/portfolio/book";
 import { totalTodayPnlGbp } from "@/lib/portfolio/attribution";
+import { isSpreadInstrument, spreadMarkGbpMwh } from "@/lib/portfolio/spread-marks";
 import { Check, Pencil, Trash2, Wind } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -82,6 +83,12 @@ function utcToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function utcYesterdayYmd(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Live marks for P&amp;L (GB power in £/MWh; NBP in p/th). TTF uses EUR in eurMwhPnlToGbp. */
 function pricePoints(
   p: PositionRow,
@@ -89,6 +96,9 @@ function pricePoints(
   which: "current" | "open",
 ): number | null {
   if (!lp) return null;
+  if (isSpreadInstrument(p)) {
+    return spreadMarkGbpMwh(p, lp, which === "current" ? "current" : "open");
+  }
   const market = normaliseMarket(p.market);
   if (market === "GB_POWER") {
     return which === "current" ? lp.gbPowerGbpMwh : lp.gbPowerOpenGbpMwh;
@@ -135,6 +145,9 @@ function getCurrentMarkNumeric(
   lp: LivePrices | null,
 ): number | null {
   if (!lp) return null;
+  if (isSpreadInstrument(p)) {
+    return spreadMarkGbpMwh(p, lp, "current");
+  }
   const market = normaliseMarket(p.market);
   if (market === "GB_POWER") return lp.gbPowerGbpMwh ?? null;
   if (market === "OTHER_POWER") return null;
@@ -154,6 +167,12 @@ function getCurrentMarkNumeric(
 /** Current column: live marks only (never reuse entry). */
 function formatCurrentPrice(p: PositionRow, lp: LivePrices | null): string {
   if (!lp) return "—";
+  if (isSpreadInstrument(p)) {
+    const v = spreadMarkGbpMwh(p, lp, "current");
+    if (v == null) return "—";
+    const tag = p.instrument_type?.toLowerCase() === "dark_spread" ? "Dark" : "Spark";
+    return `£${v.toFixed(2)}/MWh · ${tag}`;
+  }
   const market = normaliseMarket(p.market);
   if (market === "GB_POWER") {
     const v = lp.gbPowerGbpMwh;
@@ -202,6 +221,15 @@ function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null
   if (market === "OTHER_POWER") {
     return "No mark source configured for this market — supported power markets: GB Power (N2EX/APX).";
   }
+  if (isSpreadInstrument(p)) {
+    if (lp.gbPowerGbpMwh == null || lp.ttfEurMwh == null) {
+      return "Clean/dark spread needs GB power and TTF marks.";
+    }
+    if (lp.gbPowerOpenGbpMwh == null || lp.ttfOpenEurMwh == null) {
+      return "Missing on-day N2EX or TTF open for intraday P&L on spreads.";
+    }
+    return null;
+  }
   if (market === "GB_POWER") {
     return lp.gbPowerGbpMwh == null ? "Missing GB power market mark." : null;
   }
@@ -226,6 +254,13 @@ function currentMarkReason(p: PositionRow, lp: LivePrices | null): string | null
 
 function hasMarkSource(p: PositionRow, lp: LivePrices | null): boolean {
   if (!lp) return false;
+  if (isSpreadInstrument(p)) {
+    return (
+      lp.gbPowerGbpMwh != null &&
+      lp.ttfEurMwh != null &&
+      spreadMarkGbpMwh(p, lp, "current") != null
+    );
+  }
   const market = normaliseMarket(p.market);
   if (market === "GB_POWER") return lp.gbPowerGbpMwh != null;
   if (market === "OTHER_POWER") return false;
@@ -359,6 +394,7 @@ export function BookPageClient() {
 
   const loadPrices = useCallback(async () => {
     const today = utcToday();
+    const yday = utcYesterdayYmd();
     const [
       mpLatest,
       mpOpen,
@@ -367,6 +403,8 @@ export function BookPageClient() {
       fxLatest,
       ukaLatest,
       euaLatest,
+      ukaPrevRow,
+      euaPrevRow,
     ] = await Promise.all([
       supabase
         .from("market_prices")
@@ -420,6 +458,18 @@ export function BookPageClient() {
         .eq("hub", "EUA")
         .order("price_date", { ascending: false })
         .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_gbp_per_t, price_date")
+        .eq("hub", "UKA")
+        .eq("price_date", yday)
+        .maybeSingle(),
+      supabase
+        .from("carbon_prices")
+        .select("price_eur_per_t, price_date")
+        .eq("hub", "EUA")
+        .eq("price_date", yday)
         .maybeSingle(),
     ]);
 
@@ -486,6 +536,12 @@ export function BookPageClient() {
     const euaGbp = euaLatest.data
       ? Number((euaLatest.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
       : NaN;
+    const ukaPrevGbp = ukaPrevRow.data
+      ? Number((ukaPrevRow.data as { price_gbp_per_t?: unknown }).price_gbp_per_t)
+      : NaN;
+    const euaPrevEur = euaPrevRow.data
+      ? Number((euaPrevRow.data as { price_eur_per_t?: unknown }).price_eur_per_t)
+      : NaN;
 
     setLivePrices({
       gbPowerGbpMwh: Number.isFinite(gbp) ? gbp : null,
@@ -506,6 +562,8 @@ export function BookPageClient() {
       ukaGbpPerT: Number.isFinite(ukaGbp) ? ukaGbp : null,
       euaEurPerT: Number.isFinite(euaEur) ? euaEur : null,
       euaGbpPerT: Number.isFinite(euaGbp) ? euaGbp : null,
+      ukaGbpPerTPrev: Number.isFinite(ukaPrevGbp) ? ukaPrevGbp : null,
+      euaEurPerTPrev: Number.isFinite(euaPrevEur) ? euaPrevEur : null,
     });
   }, [supabase]);
 
@@ -966,7 +1024,20 @@ export function BookPageClient() {
                       p.size,
                       lp.gbpPerEur,
                     );
-                    today = null;
+                    if (
+                      lp.euaEurPerT != null &&
+                      lp.euaEurPerTPrev != null
+                    ) {
+                      today = eurMwhPnlToGbp(
+                        p.direction,
+                        lp.euaEurPerTPrev,
+                        lp.euaEurPerT,
+                        p.size,
+                        lp.gbpPerEur,
+                      );
+                    } else {
+                      today = null;
+                    }
                   } else if (market === "UKA" && lp) {
                     // UKA marks are already GBP/t with GBP entries — linearPnl gives £ directly.
                     total = linearPnl(
@@ -975,7 +1046,16 @@ export function BookPageClient() {
                       lp.ukaGbpPerT ?? null,
                       p.size,
                     );
-                    today = null;
+                    if (lp.ukaGbpPerT != null && lp.ukaGbpPerTPrev != null) {
+                      today = linearPnl(
+                        p.direction,
+                        lp.ukaGbpPerTPrev,
+                        lp.ukaGbpPerT,
+                        p.size,
+                      );
+                    } else {
+                      today = null;
+                    }
                   } else if (market === "OTHER_GAS" && lp) {
                     const unit = (p.unit ?? "").toLowerCase();
                     const currency = (p.currency ?? "").toUpperCase();

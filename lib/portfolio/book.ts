@@ -189,6 +189,10 @@ export type LivePrices = {
   ukaGbpPerT: number | null;
   euaEurPerT: number | null;
   euaGbpPerT: number | null;
+  /** Prior calendar day UKA close (GBP/t) for daily "today" P&amp;L, when loaded. */
+  ukaGbpPerTPrev: number | null;
+  /** Prior calendar day EUA close (EUR/t) for daily "today" P&amp;L, when loaded. */
+  euaEurPerTPrev: number | null;
 };
 
 /** TTF (and EUR/MWh) P&amp;L in £: diff in EUR/MWh × size, then × `gbpPerEur`. */
@@ -275,9 +279,13 @@ export function normaliseMarketBucket(
  * EUA).
  */
 export function formatPositionEntryPrice(
-  p: Pick<PositionRow, "trade_price" | "market" | "unit" | "currency">,
+  p: Pick<PositionRow, "trade_price" | "market" | "unit" | "currency" | "instrument_type">,
 ): string {
   if (p.trade_price == null || !Number.isFinite(p.trade_price)) return "—";
+  const it = (p.instrument_type ?? "").toLowerCase();
+  if (it === "spark_spread" || it === "dark_spread") {
+    return `£${p.trade_price.toFixed(2)}/MWh (spread)`;
+  }
   const market = normaliseMarketBucket(p.market);
   const unit = (p.unit ?? "").toLowerCase();
   const ccy = (p.currency ?? "").toUpperCase();
@@ -419,13 +427,17 @@ export function tenorToExpiryDate(
  * Returns null when the inputs don't allow a defensible conversion.
  */
 export function positionNotionalGbp(
-  p: Pick<PositionRow, "size" | "trade_price" | "market" | "unit" | "currency">,
+  p: Pick<PositionRow, "size" | "trade_price" | "market" | "unit" | "currency" | "instrument_type">,
   gbpPerEur: number = GBP_PER_EUR,
 ): number | null {
   const size = p.size == null ? null : Math.abs(Number(p.size));
   if (size == null || !Number.isFinite(size) || size === 0) return null;
   const price = p.trade_price;
   if (price == null || !Number.isFinite(price)) return null;
+  const it = (p.instrument_type ?? "").toLowerCase();
+  if (it === "spark_spread" || it === "dark_spread") {
+    return size * price;
+  }
   const market = (p.market ?? "").toLowerCase().replace(/[\s-]+/g, "_");
   const unit = (p.unit ?? "").toLowerCase();
   const ccy = (p.currency ?? "").toUpperCase();

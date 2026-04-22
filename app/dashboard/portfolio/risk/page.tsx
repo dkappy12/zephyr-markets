@@ -19,6 +19,13 @@ import {
   buildNbpPthByDayFromGasRows,
   NBP_DEPRECATED_YAHOO_HUB,
 } from "@/lib/portfolio/gas-aggregate";
+import {
+  darkSpreadStressDeltaGbpMwh,
+  historicalSpreadGbpMwh,
+  isDarkSpread,
+  isSpreadInstrument,
+  sparkSpreadStressDeltaGbpMwh,
+} from "@/lib/portfolio/spread-marks";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
@@ -126,7 +133,7 @@ type FxRateRow = {
   rate: number | null;
 };
 
-type MarketKey = "GB_POWER" | "TTF" | "NBP" | "UKA" | "EUA";
+type MarketKey = "GB_POWER" | "TTF" | "NBP" | "UKA" | "EUA" | "SPREAD";
 
 type DailyPnLBreakdown = {
   /** Per-market P&L contribution to the day, in GBP. */
@@ -193,13 +200,21 @@ function formatDay(d: string): string {
   }
 }
 
-const MARKET_ORDER: MarketKey[] = ["GB_POWER", "TTF", "NBP", "UKA", "EUA"];
+const MARKET_ORDER: MarketKey[] = [
+  "GB_POWER",
+  "TTF",
+  "NBP",
+  "UKA",
+  "EUA",
+  "SPREAD",
+];
 const MARKET_LABEL: Record<MarketKey, string> = {
   GB_POWER: "GB Power",
   TTF: "TTF",
   NBP: "NBP",
   UKA: "UKA",
   EUA: "EUA",
+  SPREAD: "Spark / dark spread",
 };
 
 /** Human-friendly native-unit formatter for the per-market raw move row. */
@@ -217,6 +232,8 @@ function formatMove(market: MarketKey, move: number): string {
       return `${sign}£${abs.toFixed(2)}/t`;
     case "EUA":
       return `${sign}€${abs.toFixed(2)}/t`;
+    case "SPREAD":
+      return `${sign}£${abs.toFixed(2)}/MWh spread`;
   }
 }
 
@@ -373,14 +390,16 @@ function isEuaMarket(market: string | null | undefined): boolean {
  * instruments) is silently excluded from VaR, CVaR and stress impacts,
  * so the Risk page surfaces a banner to the user.
  */
-function isRiskMarkableMarket(market: string | null | undefined): boolean {
-  const normalised = (market ?? "").toUpperCase().replace(/\s/g, "_");
+function isRiskMarkablePosition(pos: { market: string | null; instrument_type: string | null }): boolean {
+  if (isSpreadInstrument(pos)) return true;
+  const m = pos.market;
+  const normalised = (m ?? "").toUpperCase().replace(/\s/g, "_");
   return (
-    isGbPowerMarket(market) ||
+    isGbPowerMarket(m) ||
     normalised === "TTF" ||
     normalised === "NBP" ||
-    isUkaMarket(market) ||
-    isEuaMarket(market)
+    isUkaMarket(m) ||
+    isEuaMarket(m)
   );
 }
 
@@ -427,7 +446,42 @@ const calculateDailyPnL = (
       const direction = pos.direction === "long" ? 1 : -1;
       const size = pos.size ?? 0;
 
-      if (isGbPowerMarket(pos.market)) {
+      if (isSpreadInstrument(pos)) {
+        const prevTtf = ttfPricesByDay[prevDate];
+        const currTtf = ttfPricesByDay[currDate];
+        const prevP = powerPricesByDay[prevDate];
+        const currP = powerPricesByDay[currDate];
+        const prevFx = fxByDay[prevDate] ?? HISTORICAL_GBP_PER_EUR;
+        const currFx = fxByDay[currDate] ?? HISTORICAL_GBP_PER_EUR;
+        if (
+          prevTtf == null ||
+          currTtf == null ||
+          prevP == null ||
+          currP == null
+        ) {
+          continue;
+        }
+        const prevS = historicalSpreadGbpMwh(
+          pos,
+          prevP,
+          prevTtf,
+          prevFx,
+        );
+        const currS = historicalSpreadGbpMwh(
+          pos,
+          currP,
+          currTtf,
+          currFx,
+        );
+        if (prevS == null || currS == null) continue;
+        const dS = currS - prevS;
+        if (Math.abs(dS) > POWER_MOVE_SANITY_CAP_GBP_MWH) continue;
+        const contribution = dS * size * direction;
+        dayPnL += contribution;
+        addContribution("SPREAD", contribution);
+        moves.SPREAD = dS;
+        hasContributingSeries = true;
+      } else if (isGbPowerMarket(pos.market)) {
         const prevPrice = powerPricesByDay[prevDate];
         const currPrice = powerPricesByDay[currDate];
         if (prevPrice == null || currPrice == null) continue;
@@ -525,8 +579,20 @@ const calculateScenarioImpact = (
     let positionImpact = 0;
     const market = (pos.market ?? "").toUpperCase().replace(" ", "_");
 
-    if (isGbPowerMarket(pos.market)) {
-      positionImpact = scenario.moves.GB_power * size * direction;
+    if (isSpreadInstrument(pos)) {
+      const dS = isDarkSpread(pos)
+        ? darkSpreadStressDeltaGbpMwh(
+            scenario.moves.GB_power,
+            scenario.moves.TTF,
+            gbpEurRate,
+          )
+        : sparkSpreadStressDeltaGbpMwh(
+            scenario.moves.GB_power,
+            scenario.moves.TTF,
+            gbpEurRate,
+          );
+      positionImpact = dS * size * direction;
+    } else if (isGbPowerMarket(pos.market)) {
     } else if (market === "TTF") {
       positionImpact = scenario.moves.TTF * gbpEurRate * size * direction;
     } else if (market === "NBP") {
@@ -1183,7 +1249,7 @@ export default function RiskPage() {
   // and stress — list them so traders know the headline numbers are
   // incomplete.
   const unmarkablePositions = useMemo(
-    () => positions.filter((p) => !isRiskMarkableMarket(p.market)),
+    () => positions.filter((p) => !isRiskMarkablePosition(p)),
     [positions],
   );
   // Coverage = how much of the 120-day risk lookback we actually have
