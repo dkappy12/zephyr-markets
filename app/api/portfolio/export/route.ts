@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +32,9 @@ function parseExportType(
 
 export async function GET(request: Request) {
   try {
+    const csrf = assertSameOrigin(request);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase, { requireVerifiedEmail: true });
     if (auth.response) return auth.response;
