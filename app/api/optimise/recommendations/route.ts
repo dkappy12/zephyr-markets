@@ -47,9 +47,10 @@ function isMissingFxTableError(message: string | undefined): boolean {
 
 /**
  * Coarse model-health score from several independent checklist flags.
- * Each met condition appends a warning; 0/1/2+ warnings map to
- * high / medium / low. Low therefore means two or more issues at once, not
- * a single gappy NBP or narrow search space in isolation.
+ * Each met condition appends a warning; 0 / 1–2 / 3+ warnings map to
+ * high / medium / low. Requiring 3+ flags for LOW avoids treating
+ * “NBP gap + stability noise” (common on large books) as a crisis when
+ * recommendations are still usable.
  */
 function optimiserQuality(input: {
   historicalScenarioCount: number;
@@ -76,8 +77,8 @@ function optimiserQuality(input: {
   if (!input.stabilityPass) {
     warnings.push("Top packages are unstable; recommendation ranking may be noisy.");
   }
-  if (warnings.length >= 2) return { quality: "low", warnings };
-  if (warnings.length === 1) return { quality: "medium", warnings };
+  if (warnings.length >= 3) return { quality: "low", warnings };
+  if (warnings.length >= 1) return { quality: "medium", warnings };
   return { quality: "high", warnings };
 }
 
