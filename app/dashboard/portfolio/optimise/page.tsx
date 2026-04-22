@@ -2,11 +2,6 @@
 
 import { TierGate } from "@/components/billing/TierGate";
 import {
-  rechartsTooltipContentStyle,
-  rechartsTooltipItemStyle,
-  rechartsTooltipLabelStyle,
-} from "@/lib/charts/recharts-tooltip-styles";
-import {
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   STABILITY_INDEX_PASS_MAX,
@@ -14,19 +9,7 @@ import {
 } from "@/lib/portfolio/optimise";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
-import {
-  CartesianGrid,
-  Label,
-  LabelList,
-  ReferenceLine,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ApiResponse = {
   generatedAt: string;
@@ -131,6 +114,7 @@ export default function OptimisePage() {
   const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
   const [openAlternatives, setOpenAlternatives] = useState<Record<number, boolean>>({});
   const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(null);
+  const optimiseRequestId = useRef(0);
 
   useEffect(() => {
     fetch("/api/billing/status")
@@ -142,55 +126,76 @@ export default function OptimisePage() {
       .catch(() => setCurrentTier("free"));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setLoading(true);
-      setError(null);
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const uid = authData.user?.id ?? null;
-        if (!cancelled) setUserId(uid);
-        if (!uid) {
-          if (!cancelled) {
-            setData(null);
-            setLoading(false);
-          }
-          return;
-        }
-        const params = new URLSearchParams({
-          objective,
-          confidence: String(confidence),
-          maxTrades: String(maxTrades),
-          includeStress: String(includeStress),
-        });
-        const res = await fetch(`/api/optimise/recommendations?${params.toString()}`);
-        const body = (await res.json()) as ApiResponse | { error?: string };
-        if (res.status === 401) {
-          if (!cancelled) {
-            setError("Sign in to view optimise recommendations.");
-            setData(null);
-          }
-          return;
-        }
-        if (!res.ok) {
-          throw new Error("error" in body ? String(body.error) : "Optimiser request failed");
-        }
-        if (!cancelled) setData(body as ApiResponse);
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load recommendations");
-          setData(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadOptimise = useCallback(async () => {
+    const id = ++optimiseRequestId.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData.user?.id ?? null;
+      if (id !== optimiseRequestId.current) return;
+      setUserId(uid);
+      if (!uid) {
+        if (id !== optimiseRequestId.current) return;
+        setData(null);
+        setLoading(false);
+        return;
+      }
+      const params = new URLSearchParams({
+        objective,
+        confidence: String(confidence),
+        maxTrades: String(maxTrades),
+        includeStress: String(includeStress),
+      });
+      const res = await fetch(`/api/optimise/recommendations?${params.toString()}`);
+      const body = (await res.json()) as ApiResponse | { error?: string };
+      if (id !== optimiseRequestId.current) return;
+      if (res.status === 401) {
+        setError("Sign in to view optimise recommendations.");
+        setData(null);
+        return;
+      }
+      if (!res.ok) {
+        throw new Error("error" in body ? String(body.error) : "Optimiser request failed");
+      }
+      setData(body as ApiResponse);
+    } catch (e: unknown) {
+      if (id === optimiseRequestId.current) {
+        setError(e instanceof Error ? e.message : "Failed to load recommendations");
+        setData(null);
+      }
+    } finally {
+      if (id === optimiseRequestId.current) {
+        setLoading(false);
       }
     }
-    void run();
-    return () => {
-      cancelled = true;
-    };
   }, [supabase, objective, confidence, maxTrades, includeStress]);
+
+  useEffect(() => {
+    void loadOptimise();
+  }, [loadOptimise]);
+
+  useEffect(() => {
+    let deb: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (deb) clearTimeout(deb);
+      deb = setTimeout(() => {
+        deb = null;
+        void loadOptimise();
+      }, 350);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") schedule();
+    };
+    const onWinFocus = () => schedule();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onWinFocus);
+    return () => {
+      if (deb) clearTimeout(deb);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onWinFocus);
+    };
+  }, [loadOptimise]);
 
   const cards = useMemo(() => {
     if (!data) return [];
@@ -224,30 +229,7 @@ export default function OptimisePage() {
     ];
   }, [data, confidence]);
 
-  const frontierData = useMemo(() => {
-    if (!data) return null;
-    const riskX = (m: { varLoss: number; cvarLoss: number }) =>
-      objective === "cvar" ? m.cvarLoss : m.varLoss;
-    return {
-      current: [{ label: "Current", x: riskX(data.before), y: 0 }],
-      recommended: [
-        {
-          label: "Recommended",
-          x: riskX(data.after),
-          y: data.recommendations.length,
-        },
-      ],
-      alternatives: data.alternatives.map((alt) => ({
-        label: `Alt #${alt.rank}`,
-        x: riskX(alt.after),
-        y: alt.trades.length,
-      })),
-    };
-  }, [data, objective]);
-
   const confPct = Math.round(confidence * 100);
-  const tailRiskAxisLabel =
-    objective === "cvar" ? `CVaR ${confPct}% loss` : `VaR ${confPct}% loss`;
   const optimiseCoverageTitle =
     "Share of the optimiser’s historical+stress scenario grid that is backed by in-sample data (separate from the Risk page lookback).";
 
@@ -472,100 +454,6 @@ export default function OptimisePage() {
                 </div>
               ) : null}
             </div>
-          </section>
-
-          <section className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-4">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Tail risk vs trade count
-            </p>
-            <p className="mt-1 text-[10px] leading-snug text-ink-light">
-              Scatter of {objective === "cvar" ? "CVaR" : "VaR"} loss versus number of hedges — not a
-              mean–variance efficient frontier.
-            </p>
-            {!frontierData || frontierData.alternatives.length === 0 ? (
-              <p className="mt-3 text-sm text-ink-mid">
-                No alternatives available yet for this view.
-              </p>
-            ) : (
-              <div className="mt-3 h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 10, right: 12, bottom: 8, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(44,42,38,0.08)" />
-                    <XAxis
-                      type="number"
-                      dataKey="x"
-                      tick={{ fontSize: 10, fill: "#6b6560" }}
-                      tickFormatter={(v) => `£${Math.round(Number(v)).toLocaleString("en-GB")}`}
-                      axisLine={false}
-                      tickLine={false}
-                    >
-                      <Label
-                        value={`${tailRiskAxisLabel} (£)`}
-                        position="insideBottom"
-                        offset={-2}
-                        style={{ fill: "#6b6560", fontSize: 10 }}
-                      />
-                    </XAxis>
-                    <YAxis
-                      type="number"
-                      dataKey="y"
-                      allowDecimals={false}
-                      tick={{ fontSize: 10, fill: "#6b6560" }}
-                      axisLine={false}
-                      tickLine={false}
-                    >
-                      <Label
-                        value="Trades"
-                        angle={-90}
-                        position="insideLeft"
-                        style={{ fill: "#6b6560", fontSize: 10 }}
-                      />
-                    </YAxis>
-                    <Tooltip
-                      contentStyle={rechartsTooltipContentStyle}
-                      labelStyle={rechartsTooltipLabelStyle}
-                      itemStyle={rechartsTooltipItemStyle}
-                      formatter={(v, n) =>
-                        n === "x"
-                          ? [
-                              `£${Math.round(Number(v)).toLocaleString("en-GB")}`,
-                              tailRiskAxisLabel,
-                            ]
-                          : n === "y" && Number(v) === 0
-                            ? ["Current (unhedged)", "Position"]
-                            : [Math.round(Number(v)), "Trades"]
-                      }
-                    />
-                    <ReferenceLine
-                      x={frontierData.recommended[0]?.x}
-                      stroke="rgba(29,107,78,0.35)"
-                      strokeDasharray="4 4"
-                    />
-                    <Scatter data={frontierData.alternatives} fill="#6b6560" />
-                    <Scatter
-                      data={frontierData.current}
-                      fill="#8B3A3A"
-                      shape={(props) => <circle {...props} r={8} />}
-                    >
-                      <LabelList
-                        position="bottom"
-                        offset={12}
-                        fontSize={10}
-                        fill="#6b6560"
-                        valueAccessor={() => "Current book"}
-                      />
-                    </Scatter>
-                    <Scatter
-                      data={frontierData.recommended}
-                      fill="#1D6B4E"
-                      shape={(props) => <circle {...props} r={6} />}
-                    >
-                      <LabelList dataKey="label" position="top" fontSize={11} fill="#2c2a26" />
-                    </Scatter>
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            )}
           </section>
 
           <section className="grid gap-3 md:grid-cols-3">
