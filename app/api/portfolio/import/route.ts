@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { normalisePositionInput } from "@/lib/portfolio/position-contract";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { logEvent } from "@/lib/ops/logger";
+import { PORTFOLIO_API_LOG_EVENTS } from "@/lib/ops/portfolio-api-events";
 
 type ImportItem = Record<string, unknown>;
 
@@ -125,7 +126,7 @@ export async function POST(req: Request) {
       });
       logEvent({
         scope: "portfolio_api",
-        event: "import_position_count_failed",
+        event: PORTFOLIO_API_LOG_EVENTS.importPositionCountFailed,
         level: "error",
         data: { message: countError.message },
       });
@@ -176,7 +177,7 @@ export async function POST(req: Request) {
     });
     logEvent({
       scope: "portfolio_api",
-      event: "import_insert_failed",
+      event: PORTFOLIO_API_LOG_EVENTS.importInsertFailed,
       level: "error",
       data: { message: error.message },
     });

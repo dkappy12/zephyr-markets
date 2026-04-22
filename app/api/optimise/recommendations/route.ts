@@ -17,6 +17,7 @@ import {
 } from "@/lib/portfolio/gas-aggregate";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { logEvent } from "@/lib/ops/logger";
+import { PORTFOLIO_API_LOG_EVENTS } from "@/lib/ops/portfolio-api-events";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { requireUser } from "@/lib/auth/require-user";
@@ -369,7 +370,7 @@ export async function GET(req: Request) {
     });
     logEvent({
       scope: "portfolio_api",
-      event: "optimise_recommendations_exception",
+      event: PORTFOLIO_API_LOG_EVENTS.optimiseRecommendationsException,
       level: "error",
       data: { reason },
     });

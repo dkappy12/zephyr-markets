@@ -3,6 +3,7 @@ import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { assertSameOrigin } from "@/lib/auth/request-security";
 import { requireUser } from "@/lib/auth/require-user";
 import { logEvent } from "@/lib/ops/logger";
+import { PORTFOLIO_API_LOG_EVENTS } from "@/lib/ops/portfolio-api-events";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: Request) {
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
     });
     logEvent({
       scope: "portfolio_api",
-      event: "attribution_snapshot_upsert_failed",
+      event: PORTFOLIO_API_LOG_EVENTS.attributionSnapshotUpsertFailed,
       level: "error",
       data: { message: error.message },
     });

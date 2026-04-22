@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validatePersonalisedParagraph } from "@/lib/brief/personalise-guardrails";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { requireEntitlement } from "@/lib/auth/require-entitlement";
 import { checkRateLimit } from "@/lib/auth/rate-limit";
@@ -68,15 +69,6 @@ function fmtScore(n: unknown): string {
   return v.toFixed(1);
 }
 
-/** Common analyst filler / meta phrases to discourage (guardrail hint). */
-const BANNED_FILLER =
-  /\b(it is worth noting|it is important to|needless to say|moving forward|at the end of the day|leverage synergies|robust framework)\b/i;
-
-/** First/second person slips (positions copy must stay third-person observational). Omit \\bus\\b to avoid false positives on "US" (e.g. US Henry Hub). */
-function containsDisallowedVoice(text: string): boolean {
-  return /\b(I|me|my|mine|we|our|ours|you|your|yours)\b/i.test(text);
-}
-
 function extractAnthropicText(rawText: string): string {
   const parsed = JSON.parse(rawText) as {
     content?: Array<{ type?: string; text?: string }>;
@@ -86,20 +78,6 @@ function extractAnthropicText(rawText: string): string {
     .map((c) => c.text ?? "")
     .join("\n")
     .trim();
-}
-
-/** Match if full label appears, or enough distinctive tokens (models paraphrase names). */
-function positionReferencedInText(text: string, label: string): boolean {
-  const lower = text.toLowerCase();
-  const l = label.trim().toLowerCase();
-  if (!l) return false;
-  if (lower.includes(l)) return true;
-  const words = l.split(/\s+/).filter((w) => w.length > 2);
-  if (words.length <= 1) {
-    return words.length === 1 && lower.includes(words[0]!);
-  }
-  const hits = words.filter((w) => lower.includes(w));
-  return hits.length >= Math.min(words.length, Math.ceil(words.length * 0.6));
 }
 
 export async function POST(req: Request) {
@@ -298,12 +276,7 @@ Example of the style and quality required:
     }
 
     function validatePersonalisedText(text: string): boolean {
-      if (!text || /^invalid\.?$/i.test(text.trim())) return false;
-      if (containsDisallowedVoice(text)) return false;
-      if (BANNED_FILLER.test(text)) return false;
-      return requiredLabels.every((label) =>
-        positionReferencedInText(text, label),
-      );
+      return validatePersonalisedParagraph(text, requiredLabels);
     }
 
     let text = "";

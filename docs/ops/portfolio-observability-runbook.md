@@ -1,5 +1,7 @@
 # Portfolio observability — runbook & alerting hints
 
+**CI / local:** `npm test` runs Vitest on `lib/**/*.test.ts` (health response shape, personalise guardrails, `PORTFOLIO_API_LOG_EVENTS`).
+
 Operational reference for **`/api/health`** portfolio probes and structured **`portfolio_api`** logs (stdout JSON via `lib/ops/logger.ts`). Pair with **`auth_audit_log`** in Supabase for events that also call `logAuthAuditEvent`.
 
 ---
