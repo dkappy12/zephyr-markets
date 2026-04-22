@@ -5,6 +5,9 @@ import Papa from "papaparse";
 import { useCallback, useState } from "react";
 import * as XLSX from "xlsx";
 
+/** Must match `app/api/portfolio/import/route.ts` ROW_LIMIT. */
+const MAX_IMPORT_ROWS = 200;
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -35,14 +38,20 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
           setLoading(false);
           return;
         }
-        const slice = rows.slice(0, 200);
+        if (rows.length > MAX_IMPORT_ROWS) {
+          setError(
+            `This file has ${rows.length.toLocaleString("en-GB")} data rows. Maximum ${MAX_IMPORT_ROWS} rows per import — split the file or remove rows, then try again.`,
+          );
+          setLoading(false);
+          return;
+        }
         const chunkSize = 40;
         const classifiedAll: ClassifiedPosition[] = [];
-        setProgress({ done: 0, total: slice.length });
+        setProgress({ done: 0, total: rows.length });
         setFallbackChunks(0);
 
-        for (let i = 0; i < slice.length; i += chunkSize) {
-          const chunk = slice.slice(i, i + chunkSize);
+        for (let i = 0; i < rows.length; i += chunkSize) {
+          const chunk = rows.slice(i, i + chunkSize);
           const res = await fetch("/api/classify-positions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -70,11 +79,11 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
             setFallbackChunks((prev) => prev + 1);
           }
           setProgress({
-            done: Math.min(i + chunk.length, slice.length),
-            total: slice.length,
+            done: Math.min(i + chunk.length, rows.length),
+            total: rows.length,
           });
         }
-        onClassified({ headers, rows: slice, classified: classifiedAll });
+        onClassified({ headers, rows, classified: classifiedAll });
         onClose();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Something went wrong");
@@ -221,7 +230,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
                 Drop a file here or click to browse
               </p>
               <p className="mt-2 text-[11px] text-ink-light">
-                .csv and .xlsx · up to 200 rows per import
+                .csv and .xlsx · up to {MAX_IMPORT_ROWS} rows per import
               </p>
             </>
           )}
