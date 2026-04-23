@@ -1012,6 +1012,207 @@ export function bookHasPowerAndGasForSpark(positions: PositionRow[]): boolean {
   return false;
 }
 
+/** Latest historical day-over-day scenario (API); optional FX for TTF attribution. */
+export type LatestDayMoves = {
+  date: string;
+  gbPowerMove: number;
+  ttfMoveEurMwh: number;
+  nbpMovePth: number;
+  scenarioGbpPerEur?: number | null;
+};
+
+export type PnlExplainFactor = "gas" | "power" | "fx";
+
+export type PnlExplainPositionRow = {
+  instrument: string;
+  market: string;
+  direction: string;
+  size: number;
+  unit: string | null;
+  pnlTotal: number;
+  pnlGasFactor: number;
+  pnlPowerFactor: number;
+  pnlFxFactor: number;
+  primaryFactor: PnlExplainFactor;
+  factorSummary: string;
+};
+
+export type PnlExplainResult = {
+  date: string;
+  positions: PnlExplainPositionRow[];
+  portfolioPnlTotal: number;
+  portfolioGasFactor: number;
+  portfolioPowerFactor: number;
+  portfolioFxFactor: number;
+};
+
+function scenarioFromLatestDayMoves(latest: LatestDayMoves): Scenario {
+  const fx =
+    latest.scenarioGbpPerEur != null && Number.isFinite(latest.scenarioGbpPerEur)
+      ? latest.scenarioGbpPerEur
+      : undefined;
+  return {
+    id: `explain-${latest.date}`,
+    label: latest.date,
+    source: "historical",
+    gbPowerMove: latest.gbPowerMove,
+    ttfMoveEurMwh: latest.ttfMoveEurMwh,
+    nbpMovePth: latest.nbpMovePth,
+    gbpPerEur: fx,
+  };
+}
+
+function explainPrimaryFactor(
+  gas: number,
+  power: number,
+  fx: number,
+): PnlExplainFactor {
+  const ag = Math.abs(gas);
+  const ap = Math.abs(power);
+  const af = Math.abs(fx);
+  if (ag >= ap && ag >= af) return "gas";
+  if (ap >= ag && ap >= af) return "power";
+  return "fx";
+}
+
+function formatExplainFactorSummary(
+  primary: PnlExplainFactor,
+  mk: "GB_POWER" | "TTF" | "NBP" | "OTHER",
+  moves: LatestDayMoves,
+): string {
+  if (primary === "fx") return "FX GBP/EUR";
+  if (primary === "power") {
+    const v = moves.gbPowerMove;
+    const sym = v >= 0 ? "+" : "−";
+    return `Power ${sym}${Math.abs(v).toFixed(1)} £/MWh`;
+  }
+  if (mk === "NBP") {
+    const v = moves.nbpMovePth;
+    const sym = v >= 0 ? "+" : "−";
+    return `Gas ${sym}${Math.abs(v).toFixed(1)} p/th`;
+  }
+  const v = moves.ttfMoveEurMwh;
+  const sym = v >= 0 ? "+" : "−";
+  return `Gas ${sym}${Math.abs(v).toFixed(2)} €/MWh`;
+}
+
+function attributionTriple(
+  position: PositionRow,
+  scen: Scenario,
+  baselineGbpPerEur: number,
+): { total: number; gas: number; power: number; fx: number } {
+  const mk = marketKey(position.market);
+  const scenNoFx: Scenario = { ...scen, gbpPerEur: undefined };
+
+  if (mk === "OTHER") {
+    return { total: 0, gas: 0, power: 0, fx: 0 };
+  }
+
+  const total = pnlForPosition(position, scen, baselineGbpPerEur);
+
+  if (mk === "GB_POWER") {
+    const powerOnly: Scenario = {
+      ...scen,
+      ttfMoveEurMwh: 0,
+      nbpMovePth: 0,
+    };
+    const power = pnlForPosition(position, powerOnly, baselineGbpPerEur);
+    return { total, gas: 0, power, fx: 0 };
+  }
+
+  if (mk === "TTF") {
+    const totalBaselineFx = pnlForPosition(position, scenNoFx, baselineGbpPerEur);
+    const fx = total - totalBaselineFx;
+    const gasOnly: Scenario = {
+      ...scenNoFx,
+      gbPowerMove: 0,
+      ttfMoveEurMwh: scen.ttfMoveEurMwh,
+      nbpMovePth: scen.nbpMovePth,
+    };
+    const gas = pnlForPosition(position, gasOnly, baselineGbpPerEur);
+    return { total, gas, power: 0, fx };
+  }
+
+  if (mk === "NBP") {
+    const gasOnly: Scenario = {
+      ...scen,
+      gbPowerMove: 0,
+      ttfMoveEurMwh: 0,
+      nbpMovePth: scen.nbpMovePth,
+    };
+    const gas = pnlForPosition(position, gasOnly, baselineGbpPerEur);
+    return { total, gas, power: 0, fx: 0 };
+  }
+
+  return { total: 0, gas: 0, power: 0, fx: 0 };
+}
+
+function marketDisplayName(mk: "GB_POWER" | "TTF" | "NBP" | "OTHER"): string {
+  if (mk === "GB_POWER") return "GB Power";
+  if (mk === "TTF") return "TTF";
+  if (mk === "NBP") return "NBP";
+  return "—";
+}
+
+/**
+ * Day-ahead P&amp;L explain on the most recent historical scenario: total leg
+ * P&amp;L vs factor splits (power-only / gas-only moves at baseline FX / FX
+ * wedge on TTF).
+ */
+export function computePnlExplain(
+  positions: PositionRow[],
+  latestDayMoves: LatestDayMoves,
+  gbpPerEur: number,
+): PnlExplainResult {
+  const scen = scenarioFromLatestDayMoves(latestDayMoves);
+  const rows: PnlExplainPositionRow[] = [];
+
+  let portfolioGasFactor = 0;
+  let portfolioPowerFactor = 0;
+  let portfolioFxFactor = 0;
+  let portfolioPnlTotal = 0;
+
+  for (const p of positions) {
+    const sz = Number(p.size ?? 0);
+    if (!Number.isFinite(sz) || sz === 0) continue;
+
+    const mk = marketKey(p.market);
+    const { total, gas, power, fx } = attributionTriple(p, scen, gbpPerEur);
+    const primary = explainPrimaryFactor(gas, power, fx);
+    const factorSummary = formatExplainFactorSummary(primary, mk, latestDayMoves);
+
+    portfolioPnlTotal += total;
+    portfolioGasFactor += gas;
+    portfolioPowerFactor += power;
+    portfolioFxFactor += fx;
+
+    rows.push({
+      instrument: (p.instrument ?? "").trim() || "—",
+      market: marketDisplayName(mk),
+      direction: (p.direction ?? "").trim() || "—",
+      size: sz,
+      unit: p.unit ?? null,
+      pnlTotal: total,
+      pnlGasFactor: gas,
+      pnlPowerFactor: power,
+      pnlFxFactor: fx,
+      primaryFactor: primary,
+      factorSummary,
+    });
+  }
+
+  rows.sort((a, b) => Math.abs(b.pnlTotal) - Math.abs(a.pnlTotal));
+
+  return {
+    date: latestDayMoves.date,
+    positions: rows,
+    portfolioPnlTotal,
+    portfolioGasFactor,
+    portfolioPowerFactor,
+    portfolioFxFactor,
+  };
+}
+
 export function stressScenarios(): Scenario[] {
   return STRESS_SCENARIOS;
 }

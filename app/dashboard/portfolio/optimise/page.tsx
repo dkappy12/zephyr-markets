@@ -8,6 +8,8 @@ import {
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   optionBookNoticeRowsOptimise,
+  type LatestDayMoves,
+  type PnlExplainResult,
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
   tenorBucketedExposure,
@@ -102,6 +104,8 @@ type ApiResponse = {
     guardrailFilteredCount: number;
   };
   sparkSpread?: SparkSpreadExposureResult;
+  latestDayMoves?: LatestDayMoves | null;
+  pnlExplain?: PnlExplainResult | null;
 };
 
 function formatGbp(n: number): string {
@@ -1018,6 +1022,156 @@ export default function OptimisePage() {
               </div>
             )}
           </section>
+
+          {data.pnlExplain && data.latestDayMoves ? (
+            <section
+              className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
+              aria-label="Yesterday P and L explain"
+            >
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                Yesterday&apos;s P&amp;L Explain
+              </p>
+              <p className="mt-1 text-xs text-ink-mid">
+                Scenario date{" "}
+                <span className="font-medium text-ink">
+                  {formatScenarioDateCell(data.latestDayMoves.date)}
+                </span>
+                {" — "}
+                day-over-day moves vs baseline FX {data.gbpPerEur.toFixed(4)} GBP/EUR
+              </p>
+
+              <div className="mt-4 space-y-2">
+                <div className="flex h-3 w-full overflow-hidden rounded-full border-[0.5px] border-ivory-border bg-ivory-dark/40">
+                  {(() => {
+                    const pg = Math.abs(data.pnlExplain.portfolioGasFactor);
+                    const pp = Math.abs(data.pnlExplain.portfolioPowerFactor);
+                    const pf = Math.abs(data.pnlExplain.portfolioFxFactor);
+                    const denom = pg + pp + pf;
+                    const scale = denom > 0 ? 100 / denom : 0;
+                    const wp = denom > 0 ? pp * scale : 0;
+                    const wg = denom > 0 ? pg * scale : 0;
+                    const wf = denom > 0 ? pf * scale : 0;
+                    const cPower =
+                      data.pnlExplain.portfolioPowerFactor >= 0
+                        ? "bg-[#1D6B4E]"
+                        : "bg-[#8B3A3A]";
+                    const cGas =
+                      data.pnlExplain.portfolioGasFactor >= 0
+                        ? "bg-[#1D6B4E]"
+                        : "bg-[#8B3A3A]";
+                    const cFx = "bg-slate-500";
+                    return (
+                      <>
+                        {wp > 0 ? (
+                          <div
+                            className={`${cPower} min-w-[2px]`}
+                            style={{ width: `${wp}%` }}
+                            title={`Power factor ${formatGbp(data.pnlExplain.portfolioPowerFactor)}`}
+                          />
+                        ) : null}
+                        {wg > 0 ? (
+                          <div
+                            className={`${cGas} min-w-[2px]`}
+                            style={{ width: `${wg}%` }}
+                            title={`Gas factor ${formatGbp(data.pnlExplain.portfolioGasFactor)}`}
+                          />
+                        ) : null}
+                        {wf > 0 ? (
+                          <div
+                            className={`${cFx} min-w-[2px]`}
+                            style={{ width: `${wf}%` }}
+                            title={`FX factor ${formatGbp(data.pnlExplain.portfolioFxFactor)}`}
+                          />
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-mid">
+                  <span>
+                    Power{" "}
+                    <span
+                      className={
+                        data.pnlExplain.portfolioPowerFactor >= 0
+                          ? "font-semibold text-[#1D6B4E]"
+                          : "font-semibold text-[#8B3A3A]"
+                      }
+                    >
+                      {formatGbp(data.pnlExplain.portfolioPowerFactor)}
+                    </span>
+                  </span>
+                  <span>
+                    Gas{" "}
+                    <span
+                      className={
+                        data.pnlExplain.portfolioGasFactor >= 0
+                          ? "font-semibold text-[#1D6B4E]"
+                          : "font-semibold text-[#8B3A3A]"
+                      }
+                    >
+                      {formatGbp(data.pnlExplain.portfolioGasFactor)}
+                    </span>
+                  </span>
+                  <span>
+                    FX{" "}
+                    <span className="font-semibold text-slate-600">
+                      {formatGbp(data.pnlExplain.portfolioFxFactor)}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              <p
+                className={`mt-5 font-serif text-3xl tabular-nums ${
+                  data.pnlExplain.portfolioPnlTotal >= 0
+                    ? "text-[#1D6B4E]"
+                    : "text-[#8B3A3A]"
+                }`}
+              >
+                {formatGbp(data.pnlExplain.portfolioPnlTotal)}
+              </p>
+              <p className="mt-1 text-xs text-ink-mid">Portfolio total for that scenario day</p>
+
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full min-w-[560px] text-[12px]">
+                  <thead>
+                    <tr className="border-b border-ivory-border text-left">
+                      <th className="pb-2 pr-3 font-semibold text-ink">Instrument</th>
+                      <th className="pb-2 pr-3 font-semibold text-ink">Market</th>
+                      <th className="pb-2 pr-3 font-semibold text-ink">Size</th>
+                      <th className="pb-2 pr-3 font-semibold text-ink">Factor</th>
+                      <th className="pb-2 text-right font-semibold text-ink">P&amp;L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.pnlExplain.positions.map((row, ri) => (
+                      <tr
+                        key={`${row.instrument}-${row.market}-${ri}`}
+                        className="border-b border-ivory-border/50"
+                      >
+                        <td className="py-2 pr-3 text-ink">{row.instrument}</td>
+                        <td className="py-2 pr-3 text-ink-mid">{row.market}</td>
+                        <td className="py-2 pr-3 font-mono tabular-nums text-ink">
+                          {row.size.toLocaleString("en-GB")}
+                          {row.unit ? (
+                            <span className="text-ink-mid"> {row.unit}</span>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-3 text-ink-mid">{row.factorSummary}</td>
+                        <td
+                          className={`py-2 text-right font-mono tabular-nums ${
+                            row.pnlTotal >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
+                          }`}
+                        >
+                          {formatGbp(row.pnlTotal)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
 
           <section className="border-t-[0.5px] border-ivory-border pt-4 text-[11px] text-ink-light">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

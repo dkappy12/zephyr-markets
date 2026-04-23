@@ -1,5 +1,6 @@
 import {
   buildHistoricalScenarios,
+  computePnlExplain,
   computeSparkSpreadExposure,
   nbpLevelsPthByDay,
   optimisePortfolio,
@@ -289,15 +290,29 @@ export async function GET(req: Request) {
 
     const nbpByDayPth = nbpLevelsPthByDay(nbpRawPthByDay);
 
-    const scenarios = [
-      ...buildHistoricalScenarios({
-        powerByDay,
-        ttfByDayEur: ttfByDay,
-        nbpByDayPth,
-        fxByDay,
-      }),
-      ...stressScenarios(),
-    ];
+    const historicalScenarios = buildHistoricalScenarios({
+      powerByDay,
+      ttfByDayEur: ttfByDay,
+      nbpByDayPth,
+      fxByDay,
+    });
+    const scenarios = [...historicalScenarios, ...stressScenarios()];
+
+    const sortedHist = [...historicalScenarios].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+    const latestHist = sortedHist[sortedHist.length - 1];
+    const latestDayMoves = latestHist
+      ? {
+          date: latestHist.label,
+          gbPowerMove: latestHist.gbPowerMove,
+          ttfMoveEurMwh: latestHist.ttfMoveEurMwh,
+          nbpMovePth: latestHist.nbpMovePth,
+          ...(latestHist.gbpPerEur != null && Number.isFinite(latestHist.gbpPerEur)
+            ? { scenarioGbpPerEur: latestHist.gbpPerEur }
+            : {}),
+        }
+      : null;
 
     const positions = positionsRes.data ?? [];
     const result = optimisePortfolio({
@@ -315,6 +330,10 @@ export async function GET(req: Request) {
       scenarios,
       gbpPerEur,
     });
+    const pnlExplain =
+      latestDayMoves != null
+        ? computePnlExplain(positions, latestDayMoves, gbpPerEur)
+        : null;
     const quality = optimiserQuality({
       historicalScenarioCount: result.diagnostics.historicalScenarioCount,
       candidatePackageCount: result.diagnostics.candidatePackageCount,
@@ -371,6 +390,8 @@ export async function GET(req: Request) {
         sinceDate,
       },
       sparkSpread,
+      latestDayMoves,
+      pnlExplain,
       ...result,
     });
   } catch (error: unknown) {
