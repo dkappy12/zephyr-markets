@@ -38,6 +38,8 @@ const INSTRUMENTS = [
   },
   { label: "Spark Spread", instrument_type: "spark_spread", market: "GB_power", currency: "GBP" },
   { label: "Dark Spread", instrument_type: "dark_spread", market: "GB_power", currency: "GBP" },
+  { label: "Option — Call", instrument_type: "option_call", market: "GB_power", currency: "GBP" },
+  { label: "Option — Put", instrument_type: "option_put", market: "GB_power", currency: "GBP" },
   {
     label: "Nordic Power",
     instrument_type: "power_forward",
@@ -98,6 +100,9 @@ function defaultNewInstrumentName(sel: Inst, tenor: string): string {
   }
   if (sel.instrument_type === "spark_spread" || sel.instrument_type === "dark_spread") {
     return `${sel.instrument_type === "spark_spread" ? "Spark" : "Dark spread"} ${t}`;
+  }
+  if (sel.instrument_type === "option_call" || sel.instrument_type === "option_put") {
+    return `${sel.instrument_type === "option_call" ? "Call" : "Put"} ${t}`;
   }
   return `${sel.label} ${t}`;
 }
@@ -190,6 +195,8 @@ export function QuickAddModal({
   if (!open) return null;
 
   const sel = INSTRUMENTS[instrumentIdx]!;
+  const isOptionInstrument =
+    sel.instrument_type === "option_call" || sel.instrument_type === "option_put";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -201,6 +208,10 @@ export function QuickAddModal({
     }
     if (!Number.isFinite(tp)) {
       onToast("Enter a valid trade price", "err");
+      return;
+    }
+    if (isOptionInstrument && !expiryDate.trim()) {
+      onToast("Expiry date is required for options", "err");
       return;
     }
     const priceBounds = getTradePriceBounds(sel.instrument_type, sel.market);
@@ -408,44 +419,61 @@ export function QuickAddModal({
               ))}
             </select>
           </label>
+          {!isOptionInstrument ? (
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                Trade price ({priceUnitLabel})
+              </span>
+              <input
+                type="number"
+                step="any"
+                required
+                value={tradePrice}
+                onChange={(e) => setTradePrice(e.target.value)}
+                className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
+              />
+            </label>
+          ) : (
+            <>
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  Strike / Entry Price ({priceUnitLabel})
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  value={tradePrice}
+                  onChange={(e) => setTradePrice(e.target.value)}
+                  className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  Expiry Date
+                </span>
+                <input
+                  type="date"
+                  required
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
+                />
+              </label>
+            </>
+          )}
           <label className="block">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
-              Trade price ({priceUnitLabel})
+              Entry date
             </span>
             <input
-              type="number"
-              step="any"
+              type="date"
               required
-              value={tradePrice}
-              onChange={(e) => setTradePrice(e.target.value)}
+              value={entryDate}
+              onChange={(e) => setEntryDate(e.target.value)}
               className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
             />
           </label>
-          <div className="flex gap-2">
-            <label className="block flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
-                Entry date
-              </span>
-              <input
-                type="date"
-                required
-                value={entryDate}
-                onChange={(e) => setEntryDate(e.target.value)}
-                className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
-              />
-            </label>
-            <label className="block flex-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
-                Expiry date
-              </span>
-              <input
-                type="date"
-                value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm text-ink"
-              />
-            </label>
-          </div>
           <label className="block">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
               Notes (optional)
