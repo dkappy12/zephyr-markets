@@ -1,5 +1,6 @@
 import {
   buildHistoricalScenarios,
+  computeSparkSpreadExposure,
   nbpLevelsPthByDay,
   optimisePortfolio,
   stressScenarios,
@@ -298,8 +299,9 @@ export async function GET(req: Request) {
       ...stressScenarios(),
     ];
 
+    const positions = positionsRes.data ?? [];
     const result = optimisePortfolio({
-      positions: positionsRes.data ?? [],
+      positions,
       scenarios,
       gbpPerEur,
       objective,
@@ -307,6 +309,11 @@ export async function GET(req: Request) {
       maxTrades,
       includeStress,
       nbpProxyUsed,
+    });
+    const sparkSpread = computeSparkSpreadExposure({
+      positions,
+      scenarios,
+      gbpPerEur,
     });
     const quality = optimiserQuality({
       historicalScenarioCount: result.diagnostics.historicalScenarioCount,
@@ -363,6 +370,7 @@ export async function GET(req: Request) {
         windowDays: 120,
         sinceDate,
       },
+      sparkSpread,
       ...result,
     });
   } catch (error: unknown) {

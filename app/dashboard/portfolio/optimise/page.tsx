@@ -4,11 +4,13 @@ import { TierGate } from "@/components/billing/TierGate";
 import { PortfolioModelTrustBanner } from "@/components/portfolio/PortfolioModelTrustBanner";
 import { type PositionRow } from "@/lib/portfolio/book";
 import {
+  bookHasPowerAndGasForSpark,
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
   tenorBucketedExposure,
+  type SparkSpreadExposureResult,
 } from "@/lib/portfolio/optimise";
 import {
   LOW_TAIL_CONFIDENCE_SUMMARY,
@@ -98,6 +100,7 @@ type ApiResponse = {
     noActionReason: string | null;
     guardrailFilteredCount: number;
   };
+  sparkSpread?: SparkSpreadExposureResult;
 };
 
 function formatGbp(n: number): string {
@@ -106,6 +109,20 @@ function formatGbp(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
+}
+
+function formatScenarioDateCell(label: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(label)) {
+    const d = new Date(`${label}T12:00:00Z`);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    }
+  }
+  return label;
 }
 
 function SignedCurveExposureValue({ value }: { value: number }) {
@@ -118,6 +135,18 @@ function SignedCurveExposureValue({ value }: { value: number }) {
       {Math.abs(value).toFixed(1)}
     </span>
   );
+}
+
+function impliedSparkPositionLabel(
+  netPowerMw: number,
+  netGasMw: number,
+  heatRate: number,
+): string {
+  const net = netPowerMw - heatRate * netGasMw;
+  const eps = 1e-6;
+  if (net > eps) return "Long spark";
+  if (net < -eps) return "Short spark";
+  return "Near neutral";
 }
 
 export default function OptimisePage() {
@@ -346,6 +375,82 @@ export default function OptimisePage() {
           })}
         </div>
       </section>
+
+      {data?.sparkSpread && bookHasPowerAndGasForSpark(positions) ? (
+        <section
+          className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
+          aria-label="Spark spread exposure"
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Spark spread exposure
+          </p>
+          <p className="mt-3 text-sm text-ink">
+            <span className="text-ink-mid">GB Power:</span>{" "}
+            <SignedCurveExposureValue value={data.sparkSpread.netPowerMw} />{" "}
+            <span className="text-ink-mid">MW</span>
+            <span className="mx-2 text-ink-light">/</span>
+            <span className="text-ink-mid">Gas (TTF):</span>{" "}
+            <SignedCurveExposureValue value={data.sparkSpread.netGasMw} />{" "}
+            <span className="text-ink-mid">MW</span>
+            <span className="mx-2 text-ink-light">/</span>
+            <span className="text-ink-mid">Implied spark position:</span>{" "}
+            <span className="font-medium text-ink">
+              {impliedSparkPositionLabel(
+                data.sparkSpread.netPowerMw,
+                data.sparkSpread.netGasMw,
+                data.sparkSpread.heatRateAssumed,
+              )}
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-ink-mid">
+            Historical spread move uses a {data.sparkSpread.heatRateAssumed} MWh
+            gas / MWh power heat rate on TTF (converted with scenario FX).
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[320px] text-[11px] text-ink-mid">
+              <thead>
+                <tr>
+                  <th className="py-1.5 pr-3 text-left font-semibold text-ink">
+                    Scenario date
+                  </th>
+                  <th className="py-1.5 px-3 text-right font-semibold text-ink">
+                    Spread move (£/MWh)
+                  </th>
+                  <th className="py-1.5 pl-3 text-right font-semibold text-ink">
+                    {`Book P&L`}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sparkSpread.worstSparkScenarios.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className="py-4 text-center text-sm text-ink-mid"
+                    >
+                      No historical spark scenarios in the current window.
+                    </td>
+                  </tr>
+                ) : (
+                  data.sparkSpread.worstSparkScenarios.map((row) => (
+                    <tr key={row.label} className="border-t border-ivory-border/60">
+                      <td className="py-1.5 pr-3 text-ink">
+                        {formatScenarioDateCell(row.label)}
+                      </td>
+                      <td className="py-1.5 px-3 text-right">
+                        <SignedCurveExposureValue value={row.spreadMove} />
+                      </td>
+                      <td className="py-1.5 pl-3 text-right text-ink tabular-nums">
+                        {formatGbp(row.bookPnl)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {data?.quality === "low" && !loading && userId ? (
         <PortfolioModelTrustBanner eyebrow={MODEL_TRUST_SECTION_EYEBROW} severity="caution">

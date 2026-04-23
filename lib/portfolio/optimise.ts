@@ -740,6 +740,103 @@ export function optimisePortfolio(input: {
   };
 }
 
+/**
+ * Standard CCGT-style heat rate: **MWh of (TTF-linked) gas burn per MWh of
+ * power output**. Used to express the gas leg of a day-ahead spark move in
+ * £/MWh alongside the GB power leg.
+ */
+const SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER = 1.4;
+
+export type SparkSpreadScenarioPoint = {
+  label: string;
+  spreadMove: number;
+  bookPnl: number;
+};
+
+export type SparkSpreadExposureResult = {
+  netPowerMw: number;
+  netGasMw: number;
+  heatRateAssumed: number;
+  worstSparkScenarios: SparkSpreadScenarioPoint[];
+  bestSparkScenarios: SparkSpreadScenarioPoint[];
+  sparkVaR95: number;
+};
+
+function portfolioPowerAndGasLegPnl(
+  positions: PositionRow[],
+  scenario: Scenario,
+  gbpPerEur: number,
+): number {
+  let sum = 0;
+  for (const p of positions) {
+    const k = marketKey(p.market);
+    if (k === "GB_POWER" || k === "TTF" || k === "NBP") {
+      sum += pnlForPosition(p, scenario, gbpPerEur);
+    }
+  }
+  return sum;
+}
+
+/**
+ * Spark spread diagnostics: historical spread moves vs power+gas leg P&L.
+ * Same core inputs as {@link optimisePortfolio} (positions, scenarios,
+ * gbpPerEur); uses only **historical** scenarios for spread moves and VaR.
+ */
+export function computeSparkSpreadExposure(input: {
+  positions: PositionRow[];
+  scenarios: Scenario[];
+  gbpPerEur: number;
+}): SparkSpreadExposureResult {
+  const { positions, scenarios, gbpPerEur } = input;
+  const netPowerMw = positionNetExposure(positions, "GB_POWER");
+  const netGasMw = positionNetExposure(positions, "TTF");
+
+  const historical = scenarios.filter((s) => s.source === "historical");
+
+  const rows: SparkSpreadScenarioPoint[] = historical.map((s) => {
+    const fx = Number.isFinite(s.gbpPerEur) ? (s.gbpPerEur as number) : gbpPerEur;
+    // Spark move (£/MWh): power move minus gas cost wedge at assumed heat rate.
+    const spreadMove =
+      s.gbPowerMove - s.ttfMoveEurMwh * fx * SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER;
+    const bookPnl = portfolioPowerAndGasLegPnl(positions, s, gbpPerEur);
+    return { label: s.label, spreadMove, bookPnl };
+  });
+
+  const byPnlAsc = [...rows].sort((a, b) => a.bookPnl - b.bookPnl);
+  const worstSparkScenarios = byPnlAsc.slice(0, 5);
+  const byPnlDesc = [...rows].sort((a, b) => b.bookPnl - a.bookPnl);
+  const bestSparkScenarios = byPnlDesc.slice(0, 5);
+
+  const losses = rows.map((r) => -r.bookPnl);
+  const sortedLosses = [...losses].sort((a, b) => a - b);
+  const sparkVaR95 =
+    sortedLosses.length > 0 ? quantileLoss(sortedLosses, 0.95) : 0;
+
+  return {
+    netPowerMw,
+    netGasMw,
+    heatRateAssumed: SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER,
+    worstSparkScenarios,
+    bestSparkScenarios,
+    sparkVaR95,
+  };
+}
+
+/** True when the book has material GB power and TTF or NBP gas exposure (spark panel gate). */
+export function bookHasPowerAndGasForSpark(positions: PositionRow[]): boolean {
+  let hasPower = false;
+  let hasGas = false;
+  for (const p of positions) {
+    const s = Number(p.size ?? 0);
+    if (!Number.isFinite(s) || s === 0) continue;
+    const k = marketKey(p.market);
+    if (k === "GB_POWER") hasPower = true;
+    else if (k === "TTF" || k === "NBP") hasGas = true;
+    if (hasPower && hasGas) return true;
+  }
+  return false;
+}
+
 export function stressScenarios(): Scenario[] {
   return STRESS_SCENARIOS;
 }
