@@ -2,6 +2,9 @@
   "name": "zephyr-markets",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "uuid": "^14.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -15,6 +18,7 @@
     "@types/papaparse": "^5.5.2",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
@@ -23,8 +27,7 @@
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "resend": "^6.12.0",
-    "stripe": "^22.0.1",
-    "xlsx": "^0.18.5"
+    "stripe": "^22.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

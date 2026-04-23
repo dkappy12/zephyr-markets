@@ -62,3 +62,9 @@ If **`SLACK_WEBHOOK_URL`** is set, **`sendOpsAlert`** (`lib/ops/alerts.ts`) can 
 ## CSRF / same-origin policy (portfolio & optimise)
 
 Stateful **POST** routes use **`assertSameOrigin`**. Sensitive **GET** endpoints that return user-specific data under the session cookie also require **`Origin`** or **`Referer`** matching the app origin, including **`GET /api/portfolio/export`**, **`GET /api/optimise/recommendations`**, **`GET /api/billing/status`**, **`GET /api/alerts`**, **`GET /api/user-preferences`**, **`GET /api/team/members`**. Scripted calls without those headers receive **403** — use same-origin **`fetch`** from the dashboard (relative URLs). **`/api/v1/*`** uses API keys, not this cookie CSRF model.
+
+---
+
+## Dependencies
+
+Run **`npm audit`** in CI (see `.github/workflows/ci.yml`). **`package.json`** includes an **`overrides`** entry so **`uuid`** resolves to **`^14.0.0`** for **`resend` → `svix`** (upstream fix for moderate advisories). Excel imports use **`exceljs`** (`.xlsx`); legacy **`.xls`** is rejected in favour of CSV or `.xlsx`.

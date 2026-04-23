@@ -3,7 +3,6 @@
 import type { ClassifiedPosition } from "@/lib/portfolio/book";
 import Papa from "papaparse";
 import { useCallback, useState } from "react";
-import * as XLSX from "xlsx";
 
 /** Must match `app/api/portfolio/import/route.ts` ROW_LIMIT. */
 const MAX_IMPORT_ROWS = 200;
@@ -136,16 +135,27 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
           });
           return;
         }
-        if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        if (name.endsWith(".xlsx")) {
           const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          const sheet = wb.Sheets[wb.SheetNames[0]!];
-          const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-            defval: "",
-          });
+          const { readFirstSheetAsObjects } = await import(
+            "@/lib/portfolio/read-xlsx-first-sheet"
+          );
+          const { headers: xlsxHeaders, rows } = await readFirstSheetAsObjects(buf);
+          const filtered = rows.filter((r) =>
+            Object.keys(r).some((k) => String(r[k] ?? "").trim() !== ""),
+          );
           const headers =
-            rows.length > 0 ? Object.keys(rows[0]!) : [];
-          await runClassify(headers, rows);
+            xlsxHeaders.length > 0
+              ? xlsxHeaders
+              : Object.keys(filtered[0] ?? {}).filter(Boolean);
+          await runClassify(headers, filtered);
+          return;
+        }
+        if (name.endsWith(".xls")) {
+          setLoading(false);
+          setError(
+            "Legacy Excel .xls is not supported in the browser — save as .xlsx or export CSV.",
+          );
           return;
         }
         setLoading(false);
@@ -206,7 +216,7 @@ export function CsvImportFlow({ open, onClose, onClassified }: Props) {
         >
           <input
             type="file"
-            accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="hidden"
             disabled={loading}
             onChange={(e) => {
