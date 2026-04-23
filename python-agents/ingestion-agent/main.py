@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import csv
 import io
 import json
@@ -408,6 +409,11 @@ ANTHROPIC_API_KEY = _normalize_anthropic_api_key(_ANTHROPIC_RAW)
 if ANTHROPIC_API_KEY:
     os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+GMAIL_SYNC_MAX_MESSAGES = 20
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 WEATHER_LAT = 54.0
@@ -574,6 +580,21 @@ def _current_settlement_period(now_utc: datetime) -> int:
 def _brief_entries_rest_url() -> str:
     base = SUPABASE_URL.rstrip("/")
     return f"{base}/rest/v1/brief_entries"
+
+
+def _gmail_connections_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/gmail_connections"
+
+
+def _email_trade_imports_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/email_trade_imports"
+
+
+def _positions_url() -> str:
+    base = SUPABASE_URL.rstrip("/")
+    return f"{base}/rest/v1/positions"
 
 
 def _supabase_auth_headers() -> dict[str, str]:
@@ -6280,6 +6301,482 @@ def supabase_startup_check() -> None:
         logger.error("Supabase startup check failed: %s", e, exc_info=True)
 
 
+async def _refresh_gmail_token(
+    client: httpx.AsyncClient, refresh_token: str | None
+) -> str | None:
+    if not refresh_token:
+        return None
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return None
+    try:
+        resp = await client.post(
+            GMAIL_TOKEN_URL,
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    except Exception as e:
+        logger.warning("gmail_sync: token refresh request failed: %s", e)
+        return None
+    if resp.status_code != 200:
+        logger.warning("gmail_sync: token refresh failed: %s", resp.text[:300])
+        return None
+    try:
+        data = resp.json()
+    except Exception:
+        return None
+    token = data.get("access_token")
+    return token if isinstance(token, str) and token else None
+
+
+def _decode_base64url(value: str) -> str:
+    try:
+        normalized = value.replace("-", "+").replace("_", "/")
+        padding = len(normalized) % 4
+        if padding:
+            normalized += "=" * (4 - padding)
+        return base64.b64decode(normalized).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _extract_email_text(payload: dict) -> str:
+    def _walk(part: dict) -> str:
+        if not isinstance(part, dict):
+            return ""
+        mime = str(part.get("mimeType") or "")
+        body = part.get("body") if isinstance(part.get("body"), dict) else {}
+        if mime == "text/plain":
+            data = body.get("data")
+            if isinstance(data, str) and data:
+                decoded = _decode_base64url(data)
+                if decoded:
+                    return decoded
+        parts = part.get("parts")
+        if isinstance(parts, list):
+            for child in parts:
+                text = _walk(child if isinstance(child, dict) else {})
+                if text:
+                    return text
+        return ""
+
+    plain = _walk(payload if isinstance(payload, dict) else {})
+    if plain:
+        return plain
+    body = payload.get("body") if isinstance(payload.get("body"), dict) else {}
+    data = body.get("data")
+    if isinstance(data, str) and data:
+        return _decode_base64url(data)
+    return ""
+
+
+def _find_header(headers: list, name: str) -> str | None:
+    target = name.lower()
+    for row in headers:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("name") or "").lower()
+        if key != target:
+            continue
+        value = row.get("value")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _extract_json_array_text(raw: str) -> str | None:
+    trimmed = raw.strip()
+    if trimmed.startswith("["):
+        return trimmed
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", trimmed, re.IGNORECASE)
+    if fence:
+        inner = fence.group(1).strip()
+        if inner.startswith("["):
+            return inner
+    start = trimmed.find("[")
+    end = trimmed.rfind("]")
+    if start >= 0 and end > start:
+        return trimmed[start : end + 1]
+    return None
+
+
+async def _classify_email_with_claude(
+    client: httpx.AsyncClient, subject: str, raw_text: str
+) -> list | None:
+    system_prompt = (
+        "You are a trading position classifier for an energy markets intelligence "
+        "platform. Your job is to analyse broker trade confirmation emails and "
+        "extract energy trading positions.\n\n"
+        "Return ONLY a JSON array with no preamble, no markdown, no backticks. "
+        "Each element must be an object with these exact keys:\n"
+        "keep (boolean), discard_reason (string or null), market (one of "
+        "GB_power|NBP|TTF|EUA|UKA|nordic_power|german_power|french_power|"
+        "other_gas|other_power|other_carbon|null), direction (long|short|null), "
+        "size (number or null), unit (MW|MWh|therm|MMBtu|tCO2|lot|null), "
+        "tenor (string or null), trade_price (number or null), "
+        "currency (GBP|EUR|USD|null), instrument (string), "
+        "warnings (list of strings — empty list if no issues)"
+    )
+    user_message = (
+        "Parse this broker trade confirmation email and extract "
+        f"all energy trading positions. Subject: {subject}. Body: {raw_text}"
+    )
+    try:
+        resp = await client.post(
+            ANTHROPIC_MESSAGES_URL,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 6400,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_message}],
+            },
+        )
+    except Exception as e:
+        logger.warning("gmail_sync: anthropic request failed: %s", e)
+        return None
+    if resp.status_code != 200:
+        logger.warning("gmail_sync: anthropic classify failed: %s", resp.text[:300])
+        return None
+    try:
+        envelope = resp.json()
+        content = envelope.get("content")
+        text = ""
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    candidate = block.get("text")
+                    if isinstance(candidate, str):
+                        text = candidate
+                        break
+        json_text = _extract_json_array_text(text)
+        if not json_text:
+            return None
+        parsed = json.loads(json_text)
+        return parsed if isinstance(parsed, list) else None
+    except Exception:
+        return None
+
+
+def _is_clean_position(pos: dict) -> bool:
+    instrument = pos.get("instrument")
+    warnings = pos.get("warnings")
+    return bool(
+        pos.get("keep") is True
+        and isinstance(instrument, str)
+        and instrument.strip()
+        and pos.get("market") is not None
+        and pos.get("direction") is not None
+        and pos.get("size") is not None
+        and pos.get("unit") is not None
+        and pos.get("trade_price") is not None
+        and isinstance(warnings, list)
+        and len(warnings) == 0
+    )
+
+
+async def run_gmail_sync() -> None:
+    """Hourly: sync trade confirmation emails for all connected Gmail accounts."""
+    if not ANTHROPIC_API_KEY:
+        logger.debug("gmail_sync: ANTHROPIC_API_KEY not set; skipping")
+        return
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        logger.debug("gmail_sync: Google OAuth env vars not set; skipping")
+        return
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        connections_url = _gmail_connections_url()
+        resp = await client.get(
+            connections_url,
+            params={"broker_sender_filter": "not.is.null", "select": "*"},
+            headers=_supabase_auth_headers(),
+        )
+        if resp.status_code != 200:
+            logger.warning("gmail_sync: failed to fetch connections: %s", resp.text)
+            return
+
+        connections = resp.json()
+        if not isinstance(connections, list) or not connections:
+            logger.debug("gmail_sync: no Gmail connections with sender filter")
+            return
+
+        logger.info("gmail_sync: processing %d Gmail connections", len(connections))
+
+        for conn in connections:
+            if not isinstance(conn, dict):
+                continue
+            user_id = conn.get("user_id")
+            access_token = conn.get("access_token")
+            refresh_token = conn.get("refresh_token")
+            token_expiry = conn.get("token_expiry")
+            sender_filter = str(conn.get("broker_sender_filter") or "").strip()
+
+            if not user_id or not access_token or not sender_filter:
+                continue
+
+            try:
+                expiry_raw = str(token_expiry or "")
+                expiry_dt = datetime.fromisoformat(expiry_raw.replace("Z", "+00:00"))
+                needs_refresh = (
+                    expiry_dt - datetime.now(timezone.utc)
+                ).total_seconds() < 300
+            except Exception:
+                needs_refresh = True
+
+            if needs_refresh:
+                new_token = await _refresh_gmail_token(client, refresh_token)
+                if not new_token:
+                    logger.warning("gmail_sync: token refresh failed for user %s", user_id)
+                    continue
+                access_token = new_token
+                await client.patch(
+                    f"{connections_url}?user_id=eq.{user_id}",
+                    json={
+                        "access_token": new_token,
+                        "token_expiry": (
+                            datetime.now(timezone.utc) + timedelta(seconds=3600)
+                        ).isoformat(),
+                    },
+                    headers=_supabase_auth_headers(),
+                )
+
+            try:
+                list_resp = await client.get(
+                    GMAIL_MESSAGES_URL,
+                    params={
+                        "q": f"from:{sender_filter} newer_than:1d",
+                        "maxResults": GMAIL_SYNC_MAX_MESSAGES,
+                    },
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if list_resp.status_code != 200:
+                    logger.warning(
+                        "gmail_sync: Gmail list failed for user %s: %s",
+                        user_id,
+                        list_resp.status_code,
+                    )
+                    continue
+                payload = list_resp.json()
+                rows = payload.get("messages", []) if isinstance(payload, dict) else []
+                message_ids = [
+                    m.get("id")
+                    for m in rows
+                    if isinstance(m, dict) and isinstance(m.get("id"), str)
+                ]
+            except Exception as e:
+                logger.warning("gmail_sync: Gmail list error for user %s: %s", user_id, e)
+                continue
+
+            if not message_ids:
+                logger.debug("gmail_sync: no new messages for user %s", user_id)
+                continue
+
+            imports_url = _email_trade_imports_url()
+            existing_resp = await client.get(
+                imports_url,
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "gmail_message_id": f"in.({','.join(message_ids)})",
+                    "select": "gmail_message_id",
+                },
+                headers=_supabase_auth_headers(),
+            )
+            existing_ids: set[str] = set()
+            if existing_resp.status_code == 200:
+                data = existing_resp.json()
+                if isinstance(data, list):
+                    existing_ids = {
+                        str(r["gmail_message_id"])
+                        for r in data
+                        if isinstance(r, dict) and r.get("gmail_message_id")
+                    }
+
+            new_ids = [mid for mid in message_ids if mid not in existing_ids]
+            if not new_ids:
+                logger.debug("gmail_sync: all messages already seen for user %s", user_id)
+                continue
+
+            logger.info("gmail_sync: %d new messages for user %s", len(new_ids), user_id)
+
+            for msg_id in new_ids:
+                try:
+                    msg_resp = await client.get(
+                        f"{GMAIL_MESSAGES_URL}/{msg_id}",
+                        params={"format": "full"},
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if msg_resp.status_code != 200:
+                        continue
+
+                    msg = msg_resp.json()
+                    payload = msg.get("payload", {}) if isinstance(msg, dict) else {}
+                    headers = payload.get("headers", []) if isinstance(payload, dict) else []
+                    subject = _find_header(headers if isinstance(headers, list) else [], "subject") or ""
+                    sender = _find_header(headers if isinstance(headers, list) else [], "from") or ""
+                    raw_text = _extract_email_text(payload if isinstance(payload, dict) else {})
+                    internal_date_ms = int(msg.get("internalDate", 0)) if isinstance(msg, dict) else 0
+                    received_at = (
+                        datetime.fromtimestamp(
+                            internal_date_ms / 1000, tz=timezone.utc
+                        ).isoformat()
+                        if internal_date_ms
+                        else datetime.now(timezone.utc).isoformat()
+                    )
+
+                    insert_resp = await client.post(
+                        imports_url,
+                        json={
+                            "user_id": user_id,
+                            "gmail_message_id": msg_id,
+                            "subject": subject,
+                            "sender": sender,
+                            "received_at": received_at,
+                            "raw_text": raw_text,
+                            "status": "pending",
+                        },
+                        headers={
+                            **_supabase_auth_headers(),
+                            "Prefer": "return=representation",
+                        },
+                    )
+                    if insert_resp.status_code not in (200, 201):
+                        logger.debug(
+                            "gmail_sync: insert skipped for msg %s (likely duplicate)",
+                            msg_id,
+                        )
+                        continue
+
+                    import_row = insert_resp.json()
+                    import_id = (
+                        import_row[0].get("id")
+                        if isinstance(import_row, list) and import_row
+                        else import_row.get("id")
+                        if isinstance(import_row, dict)
+                        else None
+                    )
+                    if not import_id:
+                        logger.warning("gmail_sync: could not resolve import id for msg %s", msg_id)
+                        continue
+
+                    positions = await _classify_email_with_claude(client, subject, raw_text)
+                    if positions is None:
+                        logger.warning("gmail_sync: classification failed for msg %s", msg_id)
+                        await client.patch(
+                            f"{imports_url}?id=eq.{import_id}&user_id=eq.{user_id}",
+                            json={"status": "needs_review"},
+                            headers=_supabase_auth_headers(),
+                        )
+                        continue
+
+                    keep_positions = [
+                        p for p in positions if isinstance(p, dict) and p.get("keep")
+                    ]
+
+                    if not keep_positions:
+                        await client.patch(
+                            f"{imports_url}?id=eq.{import_id}&user_id=eq.{user_id}",
+                            json={"status": "skipped", "classified_positions": positions},
+                            headers=_supabase_auth_headers(),
+                        )
+                        logger.debug("gmail_sync: no energy positions in msg %s", msg_id)
+                        continue
+
+                    clean = [p for p in keep_positions if _is_clean_position(p)]
+                    ambiguous = [p for p in keep_positions if not _is_clean_position(p)]
+
+                    if ambiguous:
+                        await client.patch(
+                            f"{imports_url}?id=eq.{import_id}&user_id=eq.{user_id}",
+                            json={
+                                "status": "needs_review",
+                                "classified_positions": positions,
+                            },
+                            headers=_supabase_auth_headers(),
+                        )
+                        logger.info(
+                            "gmail_sync: queued msg %s for review (%d ambiguous)",
+                            msg_id,
+                            len(ambiguous),
+                        )
+                    else:
+                        positions_to_insert: list[dict[str, Any]] = []
+                        for p in clean:
+                            entry_date = p.get("entry_date")
+                            positions_to_insert.append(
+                                {
+                                    "user_id": user_id,
+                                    "instrument": p.get("instrument"),
+                                    "market": p.get("market"),
+                                    "direction": p.get("direction"),
+                                    "size": p.get("size"),
+                                    "unit": p.get("unit"),
+                                    "trade_price": p.get("trade_price"),
+                                    "currency": p.get("currency") or "GBP",
+                                    "tenor": p.get("tenor"),
+                                    "expiry_date": p.get("expiry_date"),
+                                    "entry_date": (
+                                        entry_date
+                                        if isinstance(entry_date, str) and entry_date.strip()
+                                        else datetime.now(timezone.utc).date().isoformat()
+                                    ),
+                                    "is_closed": False,
+                                }
+                            )
+
+                        pos_resp = await client.post(
+                            _positions_url(),
+                            json=positions_to_insert,
+                            headers=_supabase_auth_headers(),
+                        )
+                        if pos_resp.status_code in (200, 201):
+                            await client.patch(
+                                f"{imports_url}?id=eq.{import_id}&user_id=eq.{user_id}",
+                                json={
+                                    "status": "auto_imported",
+                                    "classified_positions": positions,
+                                    "imported_count": len(clean),
+                                },
+                                headers=_supabase_auth_headers(),
+                            )
+                            logger.info(
+                                "gmail_sync: auto-imported %d positions from msg %s",
+                                len(clean),
+                                msg_id,
+                            )
+                        else:
+                            await client.patch(
+                                f"{imports_url}?id=eq.{import_id}&user_id=eq.{user_id}",
+                                json={
+                                    "status": "needs_review",
+                                    "classified_positions": positions,
+                                },
+                                headers=_supabase_auth_headers(),
+                            )
+                            logger.warning(
+                                "gmail_sync: position insert failed for msg %s", msg_id
+                            )
+
+                except Exception as e:
+                    logger.warning("gmail_sync: error processing msg %s: %s", msg_id, e)
+                    continue
+
+
+def scheduled_gmail_sync() -> None:
+    """Hourly Gmail trade confirmation sync."""
+    try:
+        asyncio.run(run_gmail_sync())
+    except Exception as e:
+        logger.error("gmail_sync: job aborted: %s", e, exc_info=True)
+
+
 async def _startup_load_kalman_async() -> None:
     async with httpx.AsyncClient(timeout=30.0) as client:
         await _load_kalman_coefficients_on_startup(client)
@@ -6303,7 +6800,7 @@ def main() -> None:
         "Ingestion agent starting | REMIT every %ss (%s) | weather first after %ss then "
         "every %s min (%s) | GIE AGSI storage every %sh (%s) | N2EX MID every %s min (%s) "
         "| TTF NGP every %s min | NBP NGP every %s min | PV_Live solar every %s min | physical premium every %s min "
-        "| morning brief daily 06:00 (host TZ; use UTC) | price move alerts daily 07:30 UTC "
+        "| Gmail sync every 1h | morning brief daily 06:00 (host TZ; use UTC) | price move alerts daily 07:30 UTC "
         "| accuracy fill daily 02:00 UTC | Kalman calibration daily 02:05 UTC",
         POLL_INTERVAL_SECONDS,
         REMIT_DATASET_URL,
@@ -6329,6 +6826,7 @@ def main() -> None:
     scheduled_solar()
     scheduled_carbon()
     scheduled_physical_premium()
+    scheduled_gmail_sync()
     scheduled_morning_brief()
     schedule.every(POLL_INTERVAL_SECONDS).seconds.do(scheduled_poll)
     schedule.every(STORAGE_POLL_HOURS).hours.do(scheduled_storage)
@@ -6338,6 +6836,7 @@ def main() -> None:
     schedule.every(SOLAR_POLL_MINUTES).minutes.do(scheduled_solar)
     schedule.every(1).hours.do(scheduled_carbon)
     schedule.every(PHYSICAL_PREMIUM_POLL_MINUTES).minutes.do(scheduled_physical_premium)
+    schedule.every(1).hours.do(scheduled_gmail_sync)
     # 06:00 / 07:30 — use TZ=UTC on the host (e.g. Railway) so these align with UTC.
     schedule.every().day.at("06:00").do(scheduled_morning_brief)
     schedule.every().day.at("07:30").do(scheduled_price_move_alerts)
