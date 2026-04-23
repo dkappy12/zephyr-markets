@@ -337,6 +337,7 @@ export function BookPageClient() {
   const [gmailStoredSenderFilter, setGmailStoredSenderFilter] = useState<
     string | null
   >(null);
+  const [gmailFilterSaveBusy, setGmailFilterSaveBusy] = useState(false);
   const [gmailSyncBusy, setGmailSyncBusy] = useState(false);
   const [gmailSyncResult, setGmailSyncResult] = useState<string | null>(null);
   const [gmailPendingImports, setGmailPendingImports] = useState<GmailPendingImport[]>(
@@ -994,6 +995,38 @@ export function BookPageClient() {
     }
   }
 
+  async function saveGmailSenderFilter() {
+    const value = brokerSenderFilter.trim();
+    if (!value) {
+      showToast("Enter your broker sender email address first", "err");
+      return;
+    }
+    setGmailFilterSaveBusy(true);
+    try {
+      const response = await fetch("/api/gmail/update-filter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ broker_sender_filter: value }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !body.ok) {
+        throw new Error(body.error ?? "Failed to save broker sender filter");
+      }
+      setGmailStoredSenderFilter(value);
+      showToast("Broker sender filter saved", "ok");
+    } catch (e: unknown) {
+      showToast(
+        e instanceof Error ? e.message : "Failed to save broker sender filter",
+        "err",
+      );
+    } finally {
+      setGmailFilterSaveBusy(false);
+    }
+  }
+
   async function classifyPendingImport(importId: string) {
     setGmailParseBusyImportId(importId);
     try {
@@ -1039,9 +1072,11 @@ export function BookPageClient() {
       if (!response.ok) throw new Error(body.error ?? "Failed to disconnect Gmail");
       setGmailConnected(false);
       setGmailAddress(null);
+      setBrokerSenderFilter("");
       setGmailPendingImports([]);
       setGmailSkippedImportIds(new Set());
       setGmailSyncResult(null);
+      setGmailStoredSenderFilter(null);
       showToast("Gmail disconnected", "ok");
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : "Failed to disconnect Gmail", "err");
@@ -1825,18 +1860,30 @@ export function BookPageClient() {
                     Connected: {gmailAddress ?? "Gmail account"}
                   </span>
                 </div>
-                {!gmailStoredSenderFilter?.trim() ? (
-                  <p className="mt-2 text-xs text-amber-900">
-                    No sender filter set. Sync will fetch all recent emails. Add a
-                    filter in settings to only pull from your broker.
-                  </p>
-                ) : null}
+                <label className="mt-4 block text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  Broker email address
+                  <input
+                    type="text"
+                    value={brokerSenderFilter}
+                    onChange={(e) => setBrokerSenderFilter(e.target.value)}
+                    placeholder="e.g. confirmations@marex.com"
+                    className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void saveGmailSenderFilter()}
+                  disabled={gmailFilterSaveBusy}
+                  className="mt-3 rounded-[4px] border border-[#D4CCBB] bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink hover:bg-ivory-dark/50 disabled:opacity-60"
+                >
+                  {gmailFilterSaveBusy ? "Saving…" : "Save filter"}
+                </button>
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => void syncGmailImports()}
-                    disabled={gmailSyncBusy}
-                    className="rounded-[4px] border-[0.5px] border-ink bg-ink px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] disabled:opacity-60"
+                    disabled={gmailSyncBusy || !gmailStoredSenderFilter?.trim()}
+                    className="rounded-[4px] border-[0.5px] border-ink bg-ink px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] disabled:border-[#D4CCBB] disabled:bg-[#CFC9BD] disabled:text-[#6F6758] disabled:opacity-100"
                   >
                     {gmailSyncBusy ? "Syncing…" : "Sync trade confirmations"}
                   </button>
@@ -1848,6 +1895,11 @@ export function BookPageClient() {
                     Disconnect
                   </button>
                 </div>
+                {!gmailStoredSenderFilter?.trim() ? (
+                  <p className="mt-2 text-xs text-ink-mid">
+                    Add your broker&apos;s sender address above before syncing.
+                  </p>
+                ) : null}
 
                 {gmailSyncResult ? (
                   <p className="mt-3 text-sm text-ink-mid">{gmailSyncResult}</p>
