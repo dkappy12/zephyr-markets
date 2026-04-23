@@ -7,6 +7,7 @@ import {
   bookHasPowerAndGasForSpark,
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
+  optionBookNoticeRowsOptimise,
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
   tenorBucketedExposure,
@@ -248,6 +249,11 @@ export default function OptimisePage() {
 
   const curveBuckets = useMemo(
     () => tenorBucketedExposure(positions),
+    [positions],
+  );
+
+  const optionBookNoticeRows = useMemo(
+    () => optionBookNoticeRowsOptimise(positions),
     [positions],
   );
 
@@ -766,6 +772,42 @@ export default function OptimisePage() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
               Recommended Package
             </p>
+            {optionBookNoticeRows.length > 0 ? (
+              <div
+                className="mt-2 flex flex-wrap items-center gap-2"
+                role="status"
+                aria-label="Options in book"
+              >
+                <span className="inline-flex shrink-0 items-center rounded-full border-[0.5px] border-amber-700/25 bg-amber-700/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-900">
+                  Options in book
+                </span>
+                {optionBookNoticeRows.map((row, i) => (
+                  <span
+                    key={`${row.instrumentLabel}-${i}`}
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border-[0.5px] border-ivory-border bg-paper px-2.5 py-1 text-[11px] text-ink"
+                    title={
+                      "Black-76 delta and delta-scaled notional used in scenario P&L"
+                    }
+                  >
+                    <span className="truncate font-medium">{row.instrumentLabel}</span>
+                    <span className="shrink-0 text-ink-light">·</span>
+                    <span className="shrink-0 font-mono tabular-nums text-ink-mid">
+                      δ {row.delta.toFixed(3)}
+                    </span>
+                    <span className="shrink-0 text-ink-light">·</span>
+                    <span className="shrink-0 font-mono tabular-nums">
+                      eff.{" "}
+                      {row.effectiveNotional >= 0 ? "+" : "−"}
+                      {Math.abs(row.effectiveNotional).toLocaleString("en-GB", {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 1,
+                      })}{" "}
+                      {row.unitShort}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {data.recommendations.length === 0 ? (
               <p className="mt-3 text-sm text-ink-mid">
                 {data.blocked

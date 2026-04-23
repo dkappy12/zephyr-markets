@@ -5,6 +5,60 @@ import {
 } from "@/lib/portfolio/book";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
 
+/**
+ * Abramowitz & Stegun §26.2.17 — polynomial approximation to Φ(x), the
+ * standard normal cumulative distribution function.
+ */
+function standardNormalCdf(x: number): number {
+  const a1 = 0.31938153;
+  const a2 = -0.356563782;
+  const a3 = 1.781477937;
+  const a4 = -1.821255978;
+  const a5 = 1.330274429;
+  const p = 0.2316419;
+
+  const ax = Math.abs(x);
+  const t = 1 / (1 + p * ax);
+  const poly =
+    t * (a1 + t * (a2 + t * (a3 + t * (a4 + a5 * t))));
+  const pdf = Math.exp(-0.5 * ax * ax) / Math.sqrt(2 * Math.PI);
+  const tail = pdf * poly;
+  const cdfPos = 1 - tail;
+  return x >= 0 ? cdfPos : 1 - cdfPos;
+}
+
+/**
+ * Black-76 delta on the forward for a European option on F.
+ * d₁ = (ln(F/K) + ½σ²T) / (σ√T); call delta = N(d₁), put delta = N(d₁) − 1.
+ */
+export function black76Delta(
+  F: number,
+  K: number,
+  T: number,
+  sigma: number,
+  optionType: "call" | "put",
+): number {
+  if (
+    !Number.isFinite(F) ||
+    !Number.isFinite(K) ||
+    F <= 0 ||
+    K <= 0 ||
+    !Number.isFinite(sigma) ||
+    sigma <= 0
+  ) {
+    return optionType === "call" ? 0 : -1;
+  }
+  const epsT = 1e-12;
+  const Te = !Number.isFinite(T) || T <= 0 ? epsT : T;
+  const sqrtT = Math.sqrt(Te);
+  const denom = sigma * sqrtT;
+  if (denom <= 0) return optionType === "call" ? 0 : -1;
+  const d1 =
+    (Math.log(F / K) + 0.5 * sigma * sigma * Te) / denom;
+  const nd1 = standardNormalCdf(d1);
+  return optionType === "call" ? nd1 : nd1 - 1;
+}
+
 export type TenorBucket = {
   label: string;
   gbPowerMw: number;
@@ -257,15 +311,136 @@ function roundToStep(value: number, step: number): number {
   return Math.round(value / step) * step;
 }
 
-function pnlForPosition(position: PositionRow, scenario: Scenario, gbpPerEur: number): number {
+/** Replace with live forwards from the same market-data fetch as scenario moves. */
+const OPTION_PLACEHOLDER_FORWARD_GBP_POWER = 95.0;
+const OPTION_PLACEHOLDER_FORWARD_TTF_EUR_MWH = 35.0;
+const OPTION_PLACEHOLDER_FORWARD_NBP_PTH = 85.0;
+
+/**
+ * Placeholder implied volatilities (decimal annualised) pending a live vol surface.
+ * GB Power options use 0.35; TTF and NBP options use 0.40.
+ */
+const OPTION_IV_GB_POWER = 0.35;
+const OPTION_IV_TTF_NBP = 0.4;
+
+export type OptionBookNoticeRow = {
+  instrumentLabel: string;
+  delta: number;
+  effectiveNotional: number;
+  unitShort: string;
+};
+
+function instrumentTypeLooksLikeOption(instrumentType: string | null): boolean {
+  const s = (instrumentType ?? "").toLowerCase();
+  return s.includes("option") || s.includes("call") || s.includes("put");
+}
+
+function optionSideFromPosition(position: PositionRow): "call" | "put" {
+  const blob = `${position.instrument ?? ""} ${position.instrument_type ?? ""}`.toLowerCase();
+  if (blob.includes("put")) return "put";
+  if (blob.includes("call")) return "call";
+  return "call";
+}
+
+function placeholderForwardForOptimiseOption(m: "GB_POWER" | "TTF" | "NBP"): number {
+  if (m === "GB_POWER") return OPTION_PLACEHOLDER_FORWARD_GBP_POWER;
+  if (m === "TTF") return OPTION_PLACEHOLDER_FORWARD_TTF_EUR_MWH;
+  return OPTION_PLACEHOLDER_FORWARD_NBP_PTH;
+}
+
+function placeholderIvForOptimiseOption(m: "GB_POWER" | "TTF" | "NBP"): number {
+  return m === "GB_POWER" ? OPTION_IV_GB_POWER : OPTION_IV_TTF_NBP;
+}
+
+function strikeFromTradePriceOrAtm(position: PositionRow, forward: number): number {
+  const k = Number(position.trade_price ?? NaN);
+  if (Number.isFinite(k) && k > 0) return k;
+  return forward;
+}
+
+function yearsToExpiryYearsForOption(
+  position: PositionRow,
+  referenceDate: Date = new Date(),
+): number {
+  let ymd: string | null = null;
+  const ed = position.expiry_date?.trim();
+  if (ed && /^\d{4}-\d{2}-\d{2}/.test(ed)) {
+    ymd = ed.slice(0, 10);
+  } else {
+    ymd = tenorToExpiryDate(position.tenor, referenceDate);
+  }
+  if (!ymd) return 0.25;
+  const y = Number(ymd.slice(0, 4));
+  const mo = Number(ymd.slice(5, 7));
+  const d = Number(ymd.slice(8, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return 0.25;
+  const expMs = Date.UTC(y, mo - 1, d);
+  const nowMs = Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth(),
+    referenceDate.getUTCDate(),
+  );
+  const years = (expMs - nowMs) / (86400000 * 365.25);
+  return Math.max(1e-8, years);
+}
+
+/**
+ * Signed linear exposure used in scenario P&L: for plain positions `size × dm`;
+ * for options `delta × size × dm` (delta from {@link black76Delta}).
+ */
+function linearExposureForScenarioPnl(position: PositionRow): number {
   const m = marketKey(position.market);
   const size = Number(position.size ?? 0);
-  if (!Number.isFinite(size) || size === 0) return 0;
+  if (!Number.isFinite(size) || size === 0 || m === "OTHER") return 0;
   const dm = directionMult(position.direction);
-  if (m === "GB_POWER") return scenario.gbPowerMove * size * dm;
+  if (!instrumentTypeLooksLikeOption(position.instrument_type)) {
+    return size * dm;
+  }
+  const F = placeholderForwardForOptimiseOption(m);
+  const K = strikeFromTradePriceOrAtm(position, F);
+  const T = yearsToExpiryYearsForOption(position);
+  const sigma = placeholderIvForOptimiseOption(m);
+  const side = optionSideFromPosition(position);
+  const delta = black76Delta(F, K, T, sigma, side);
+  return delta * size * dm;
+}
+
+/** Rows for UI: open option positions and their delta‑scaled notionals used by the optimiser. */
+export function optionBookNoticeRowsOptimise(
+  positions: PositionRow[],
+): OptionBookNoticeRow[] {
+  const rows: OptionBookNoticeRow[] = [];
+  for (const p of positions) {
+    if (!instrumentTypeLooksLikeOption(p.instrument_type)) continue;
+    const m = marketKey(p.market);
+    if (m === "OTHER") continue;
+    const size = Number(p.size ?? 0);
+    if (!Number.isFinite(size) || size === 0) continue;
+    const F = placeholderForwardForOptimiseOption(m);
+    const K = strikeFromTradePriceOrAtm(p, F);
+    const T = yearsToExpiryYearsForOption(p);
+    const sigma = placeholderIvForOptimiseOption(m);
+    const side = optionSideFromPosition(p);
+    const delta = black76Delta(F, K, T, sigma, side);
+    const dm = directionMult(p.direction);
+    const effectiveNotional = delta * size * dm;
+    const unitShort = m === "NBP" ? "therms" : "MW";
+    const instrumentLabel =
+      [p.instrument?.trim(), p.market?.trim()].filter(Boolean).join(" · ") ||
+      "Option";
+    rows.push({ instrumentLabel, delta, effectiveNotional, unitShort });
+  }
+  return rows;
+}
+
+function pnlForPosition(position: PositionRow, scenario: Scenario, gbpPerEur: number): number {
+  const m = marketKey(position.market);
+  const eff = linearExposureForScenarioPnl(position);
+  if (!Number.isFinite(eff) || eff === 0) return 0;
+  if (m === "GB_POWER") return scenario.gbPowerMove * eff;
   const fx = Number.isFinite(scenario.gbpPerEur) ? (scenario.gbpPerEur as number) : gbpPerEur;
-  if (m === "TTF") return scenario.ttfMoveEurMwh * fx * size * dm;
-  if (m === "NBP") return (scenario.nbpMovePth * size * dm) / 100;
+  if (m === "TTF") return scenario.ttfMoveEurMwh * fx * eff;
+  if (m === "NBP") return (scenario.nbpMovePth * eff) / 100;
   return 0;
 }
 
