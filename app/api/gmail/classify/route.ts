@@ -124,7 +124,7 @@ export async function POST(req: Request) {
       .select("id, subject, raw_text")
       .eq("id", importId)
       .eq("user_id", user.id)
-      .eq("status", "pending")
+      .in("status", ["pending", "needs_review"])
       .maybeSingle<TradeImportRow>();
 
     if (fetchError) {

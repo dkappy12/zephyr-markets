@@ -46,6 +46,14 @@ type GmailPendingImport = {
   received_at: string | null;
 };
 
+type PendingReview = {
+  id: string;
+  subject: string | null;
+  sender: string | null;
+  received_at: string | null;
+  classified_positions: ClassifiedPosition[] | null;
+};
+
 function netDeltaBucketLabel(bucket: NetDeltaBucket): string {
   switch (bucket) {
     case "GB_POWER":
@@ -322,6 +330,9 @@ export function BookPageClient() {
   const [reviewSubtitle, setReviewSubtitle] = useState<string>(
     "Zephyr has classified your CSV. Confirm what to import.",
   );
+  const [reviewImportIdToMarkReviewed, setReviewImportIdToMarkReviewed] = useState<
+    string | null
+  >(null);
   const [keeping, setKeeping] = useState<ReviewItem[]>([]);
   const [discarding, setDiscarding] = useState<ReviewItem[]>([]);
   const [importBusy, setImportBusy] = useState(false);
@@ -343,6 +354,7 @@ export function BookPageClient() {
   const [gmailPendingImports, setGmailPendingImports] = useState<GmailPendingImport[]>(
     [],
   );
+  const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [gmailSkippedImportIds, setGmailSkippedImportIds] = useState<Set<string>>(
     new Set(),
   );
@@ -426,13 +438,31 @@ export function BookPageClient() {
     }
   }, []);
 
+  const loadPendingReviews = useCallback(async () => {
+    try {
+      const response = await fetch("/api/gmail/pending-reviews", { method: "GET" });
+      const body = (await response.json().catch(() => ({}))) as {
+        imports?: PendingReview[];
+      };
+      if (!response.ok) return;
+      setPendingReviews(Array.isArray(body.imports) ? body.imports : []);
+    } catch {
+      // Keep page resilient if this optional view fails.
+    }
+  }, []);
+
   useEffect(() => {
     if (!emailOpen) return;
     setGmailSyncResult(null);
     setGmailPendingImports([]);
     setGmailSkippedImportIds(new Set());
     void loadGmailStatus();
-  }, [emailOpen, loadGmailStatus]);
+    void loadPendingReviews();
+  }, [emailOpen, loadGmailStatus, loadPendingReviews]);
+
+  useEffect(() => {
+    void loadPendingReviews();
+  }, [loadPendingReviews]);
 
   const downloadExport = useCallback(
     async (type: "positions" | "pnl" | "signals") => {
@@ -785,7 +815,7 @@ export function BookPageClient() {
     rows: Record<string, unknown>[];
     classified: ClassifiedPosition[];
     },
-    options?: { subtitle?: string },
+    options?: { subtitle?: string; markReviewedImportId?: string | null },
   ) {
     const k: ReviewItem[] = [];
     const d: ReviewItem[] = [];
@@ -802,7 +832,20 @@ export function BookPageClient() {
     setReviewSubtitle(
       options?.subtitle ?? "Zephyr has classified your CSV. Confirm what to import.",
     );
+    setReviewImportIdToMarkReviewed(options?.markReviewedImportId ?? null);
     setReviewOpen(true);
+  }
+
+  async function markReviewAsReviewed(importId: string) {
+    const response = await fetch("/api/gmail/mark-reviewed", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ import_id: importId }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(body.error ?? "Failed to mark review as completed");
+    }
   }
 
   async function runCsvImport() {
@@ -851,6 +894,22 @@ export function BookPageClient() {
         throw new Error(body.error ?? body.details ?? "Import failed");
       }
       showToast(`${keeping.length} positions imported successfully`, "ok");
+      if (reviewImportIdToMarkReviewed) {
+        try {
+          await markReviewAsReviewed(reviewImportIdToMarkReviewed);
+          setPendingReviews((prev) =>
+            prev.filter((item) => item.id !== reviewImportIdToMarkReviewed),
+          );
+        } catch (e: unknown) {
+          showToast(
+            e instanceof Error
+              ? e.message
+              : "Imported positions but failed to mark review as completed",
+            "err",
+          );
+        }
+        setReviewImportIdToMarkReviewed(null);
+      }
       setReviewOpen(false);
       setKeeping([]);
       setDiscarding([]);
@@ -1027,7 +1086,10 @@ export function BookPageClient() {
     }
   }
 
-  async function classifyPendingImport(importId: string) {
+  async function classifyPendingImport(
+    importId: string,
+    options?: { markReviewedOnImport?: boolean },
+  ) {
     setGmailParseBusyImportId(importId);
     try {
       const response = await fetch("/api/gmail/classify", {
@@ -1046,7 +1108,10 @@ export function BookPageClient() {
         headers: [],
         rows: [],
         classified: body.classified,
-      }, { subtitle: "Zephyr has classified your email. Confirm what to import." });
+      }, {
+        subtitle: "Zephyr has classified your email. Confirm what to import.",
+        markReviewedImportId: options?.markReviewedOnImport ? importId : null,
+      });
       setEmailOpen(false);
       setGmailPendingImports((prev) => prev.filter((item) => item.id !== importId));
       setGmailSkippedImportIds((prev) => {
@@ -1074,6 +1139,7 @@ export function BookPageClient() {
       setGmailAddress(null);
       setBrokerSenderFilter("");
       setGmailPendingImports([]);
+      setPendingReviews([]);
       setGmailSkippedImportIds(new Set());
       setGmailSyncResult(null);
       setGmailStoredSenderFilter(null);
@@ -1290,6 +1356,24 @@ export function BookPageClient() {
               </button>
             </div>
           </motion.div>
+
+          {pendingReviews.length > 0 ? (
+            <div className="mt-4 rounded-[4px] border-l-4 border-amber-700 bg-amber-50/60 px-4 py-3">
+              <p className={sectionLabel}>Trade confirmations need review</p>
+              <p className="mt-1 text-sm text-ink-mid">
+                {pendingReviews.length} email{pendingReviews.length > 1 ? "s" : ""}{" "}
+                from your broker {pendingReviews.length > 1 ? "contain" : "contains"}{" "}
+                positions that need your review before importing.
+              </p>
+              <button
+                type="button"
+                onClick={() => setEmailOpen(true)}
+                className="mt-3 rounded-[4px] border border-[#1D6B4E] bg-transparent px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#1D6B4E] hover:bg-[#1D6B4E]/10"
+              >
+                Review now
+              </button>
+            </div>
+          ) : null}
 
           <p className="mb-2 text-[11px] text-ink-mid sm:hidden">
             Scroll horizontally to see all columns.
@@ -1725,6 +1809,7 @@ export function BookPageClient() {
           setReviewOpen(false);
           setKeeping([]);
           setDiscarding([]);
+          setReviewImportIdToMarkReviewed(null);
         }}
       />
 
@@ -1899,6 +1984,76 @@ export function BookPageClient() {
                   <p className="mt-2 text-xs text-ink-mid">
                     Add your broker&apos;s sender address above before syncing.
                   </p>
+                ) : null}
+
+                {pendingReviews.length > 0 ? (
+                  <div className="mt-5 rounded-[6px] border border-[#D4CCBB] bg-card">
+                    <p className="border-b border-ivory-border px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                      Needs review
+                    </p>
+                    <div className="max-h-[240px] space-y-3 overflow-y-auto p-4">
+                      {pendingReviews.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-[6px] border border-[#D4CCBB] bg-ivory/40 p-3"
+                        >
+                          <p className="text-xs text-ink-mid">
+                            {item.sender ?? "Unknown sender"}
+                          </p>
+                          <p className="mt-1 text-sm font-medium text-ink">
+                            {item.subject ?? "(No subject)"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-ink-light">
+                            {item.received_at
+                              ? new Date(item.received_at).toLocaleString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "Date unavailable"}
+                          </p>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void classifyPendingImport(item.id, {
+                                  markReviewedOnImport: true,
+                                })
+                              }
+                              disabled={gmailParseBusyImportId === item.id}
+                              className="rounded-[4px] border border-[#1D6B4E] bg-[#1D6B4E] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] disabled:opacity-60"
+                            >
+                              {gmailParseBusyImportId === item.id
+                                ? "Parsing…"
+                                : "Parse"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await markReviewAsReviewed(item.id);
+                                  setPendingReviews((prev) =>
+                                    prev.filter((row) => row.id !== item.id),
+                                  );
+                                } catch (e: unknown) {
+                                  showToast(
+                                    e instanceof Error
+                                      ? e.message
+                                      : "Failed to mark review as completed",
+                                    "err",
+                                  );
+                                }
+                              }}
+                              className="rounded-[4px] border border-[#D4CCBB] bg-transparent px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid hover:bg-ivory-dark/50"
+                            >
+                              Skip
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ) : null}
 
                 {gmailSyncResult ? (
