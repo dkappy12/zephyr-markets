@@ -35,8 +35,11 @@ function mergeMarketVisibility(raw: unknown): MarketVisibility {
   return base;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const supabase = await createClient();
     const auth = await requireUser(supabase);
     if (auth.response) return auth.response;
