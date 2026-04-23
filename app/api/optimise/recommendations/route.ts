@@ -15,6 +15,7 @@ import {
   NBP_DEPRECATED_YAHOO_HUB,
   type GasPriceSample,
 } from "@/lib/portfolio/gas-aggregate";
+import { assertSameOrigin } from "@/lib/auth/request-security";
 import { logAuthAuditEvent } from "@/lib/auth/audit";
 import { logEvent } from "@/lib/ops/logger";
 import { PORTFOLIO_API_LOG_EVENTS } from "@/lib/ops/portfolio-api-events";
@@ -95,6 +96,9 @@ async function fetchGbpPerEur(): Promise<number> {
 
 export async function GET(req: Request) {
   try {
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+
     const url = new URL(req.url);
     const objectiveRaw = (
       url.searchParams.get("objective") ?? "cvar"

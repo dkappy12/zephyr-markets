@@ -59,6 +59,6 @@ If **`SLACK_WEBHOOK_URL`** is set, **`sendOpsAlert`** (`lib/ops/alerts.ts`) can 
 
 ---
 
-## CSRF policy (portfolio)
+## CSRF / same-origin policy (portfolio & optimise)
 
-Stateful portfolio routes use **`assertSameOrigin`** (`lib/auth/request-security.ts`). Browser clients must send **`Origin`** or **`Referer`** matching the app origin. Scripted calls without those headers receive **403** — use same-origin **`fetch`** from the dashboard.
+Stateful **POST** routes use **`assertSameOrigin`**. Sensitive **GET** endpoints that return user-specific data under the session cookie also require **`Origin`** or **`Referer`** matching the app origin: **`GET /api/portfolio/export`**, **`GET /api/optimise/recommendations`**. Scripted calls without those headers receive **403** — use same-origin **`fetch`** from the dashboard (relative URLs).
