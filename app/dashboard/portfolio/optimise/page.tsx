@@ -23,6 +23,7 @@ import {
 } from "@/lib/portfolio/model-trust-copy";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { motion } from "framer-motion";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ApiResponse = {
@@ -171,6 +172,8 @@ export default function OptimisePage() {
   const [openAlternatives, setOpenAlternatives] = useState<Record<number, boolean>>({});
   const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(null);
   const [positions, setPositions] = useState<PositionRow[]>([]);
+  const [exposureOpen, setExposureOpen] = useState(false);
+  const [showAllExplain, setShowAllExplain] = useState(false);
   const optimiseRequestId = useRef(0);
 
   useEffect(() => {
@@ -269,6 +272,18 @@ export default function OptimisePage() {
     return computeSpreadExposure(positions, data.scenarios, data.gbpPerEur);
   }, [positions, data?.scenarios, data?.gbpPerEur]);
 
+  const pnlExplainTableMeta = useMemo(() => {
+    if (!data?.pnlExplain) return null;
+    const all = data.pnlExplain.positions;
+    const material = all.filter((r) => Math.abs(r.pnlTotal) >= 1);
+    return {
+      all,
+      totalCount: all.length,
+      material,
+      hiddenCount: all.length - material.length,
+    };
+  }, [data?.pnlExplain]);
+
   const cards = useMemo(() => {
     if (!data) return [];
     const pct = Math.round(confidence * 100);
@@ -356,138 +371,217 @@ export default function OptimisePage() {
         </p>
       </div>
 
-      <section className="space-y-3" aria-label="Curve exposure by tenor bucket">
-        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-          Curve exposure
-        </p>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {curveBuckets.map((b) => {
-            const empty =
-              b.gbPowerMw === 0 && b.ttfMw === 0 && b.nbpMw === 0;
-            return (
-              <div
-                key={b.label}
-                className={`rounded-[4px] border-[0.5px] border-ivory-border bg-paper p-4 ${
-                  empty ? "opacity-50" : ""
-                }`}
-              >
-                <p className="font-serif text-sm font-medium text-ink">
-                  {b.label}
-                </p>
-                <div className="mt-3 space-y-2 text-xs">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-ink-mid">GB Power (MW)</span>
-                    <SignedCurveExposureValue value={b.gbPowerMw} />
-                  </div>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-ink-mid">TTF (MW)</span>
-                    <SignedCurveExposureValue value={b.ttfMw} />
-                  </div>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-ink-mid">NBP (therms)</span>
-                    <SignedCurveExposureValue value={b.nbpMw} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      <section className="grid gap-3 md:grid-cols-4">
+        <label className="text-xs text-ink-mid">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Objective
+          </span>
+          <select
+            value={objective}
+            onChange={(e) => setObjective(e.target.value as "cvar" | "var")}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+          >
+            <option value="cvar">Minimise CVaR (tail at confidence below)</option>
+            <option value="var">Minimise VaR (tail at confidence below)</option>
+          </select>
+        </label>
+        <label className="text-xs text-ink-mid">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Confidence
+          </span>
+          <select
+            value={confidence}
+            onChange={(e) => setConfidence(Number(e.target.value))}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+          >
+            <option value={0.95}>95%</option>
+            <option value={0.99}>99%</option>
+          </select>
+        </label>
+        <label className="text-xs text-ink-mid">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Max trades
+          </span>
+          <select
+            value={maxTrades}
+            onChange={(e) => setMaxTrades(Number(e.target.value))}
+            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+          </select>
+        </label>
+        <div className="flex items-end">
+          <label className="flex w-full items-center justify-between gap-3 rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+              Stress scenarios
+            </span>
+            <input
+              type="checkbox"
+              checked={includeStress}
+              onChange={(e) => setIncludeStress(e.target.checked)}
+              className="h-5 w-9 appearance-none rounded-full border border-ivory-border bg-ivory transition-colors checked:border-[#1D6B4E]/40 checked:bg-[#1D6B4E]/25"
+            />
+          </label>
         </div>
       </section>
 
-      {spreadExposure &&
-      (spreadExposure.netSparkMw !== 0 || spreadExposure.netDarkMw !== 0) ? (
-        <section
-          className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
-          aria-label="Spread exposure"
+      <section
+        className="rounded-[4px] border-[0.5px] border-ivory-border bg-card"
+        aria-label="Book exposure"
+      >
+        <button
+          type="button"
+          onClick={() => setExposureOpen((o) => !o)}
+          aria-expanded={exposureOpen}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-ivory-dark/25"
         >
-          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Spread exposure
-          </p>
-          <div className="mt-4 flex flex-wrap gap-4">
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
-              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                Net spark (MW)
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Book exposure
+          </span>
+          {exposureOpen ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-ink-mid" aria-hidden />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-ink-mid" aria-hidden />
+          )}
+        </button>
+        {exposureOpen ? (
+          <div className="space-y-6 border-t border-ivory-border/60 px-4 pb-4 pt-4">
+            <div className="space-y-3" aria-label="Curve exposure by tenor bucket">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                Curve exposure
               </p>
-              <p className="mt-1 font-serif text-xl tabular-nums text-ink">
-                <SignedCurveExposureValue value={spreadExposure.netSparkMw} />{" "}
-                <span className="text-sm font-sans text-ink-mid">MW</span>
-              </p>
-            </div>
-            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
-              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
-                Net dark (MW)
-              </p>
-              <p className="mt-1 font-serif text-xl tabular-nums text-ink">
-                <SignedCurveExposureValue value={spreadExposure.netDarkMw} />{" "}
-                <span className="text-sm font-sans text-ink-mid">MW</span>
-              </p>
-            </div>
-          </div>
-
-          {spreadExposure.worstSparkScenarios.length > 0 ? (
-            <div className="mt-5">
-              <p className="text-xs font-semibold text-ink">
-                5 Worst Historical Spark Scenarios
-              </p>
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full min-w-[400px] text-[12px]">
-                  <thead>
-                    <tr className="border-b border-ivory-border text-left">
-                      <th className="pb-2 pr-3 font-semibold text-ink">Date</th>
-                      <th className="pb-2 pr-3 font-semibold text-ink">
-                        Spread move (£/MWh)
-                      </th>
-                      <th className="pb-2 text-right font-semibold text-ink">
-                        {`Book P&L`}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {spreadExposure.worstSparkScenarios.map((row) => (
-                      <tr
-                        key={row.label}
-                        className="border-b border-ivory-border/50"
-                      >
-                        <td className="py-2 pr-3 text-ink">
-                          {formatScenarioDateCell(row.label)}
-                        </td>
-                        <td className="py-2 pr-3 font-mono tabular-nums">
-                          <span
-                            className={
-                              row.spreadMovePound > 0
-                                ? "text-[#1D6B4E]"
-                                : row.spreadMovePound < 0
-                                  ? "text-[#8B3A3A]"
-                                  : "text-ink-mid"
-                            }
-                          >
-                            {row.spreadMovePound >= 0 ? "+" : "−"}£
-                            {Math.abs(row.spreadMovePound).toFixed(2)}/MWh
-                          </span>
-                        </td>
-                        <td
-                          className={`py-2 text-right font-mono tabular-nums ${
-                            row.bookPnl >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
-                          }`}
-                        >
-                          {formatGbp(row.bookPnl)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                {curveBuckets.map((b) => {
+                  const empty =
+                    b.gbPowerMw === 0 && b.ttfMw === 0 && b.nbpMw === 0;
+                  return (
+                    <div
+                      key={b.label}
+                      className={`rounded-[4px] border-[0.5px] border-ivory-border bg-paper p-4 ${
+                        empty ? "opacity-50" : ""
+                      }`}
+                    >
+                      <p className="font-serif text-sm font-medium text-ink">
+                        {b.label}
+                      </p>
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-ink-mid">GB Power (MW)</span>
+                          <SignedCurveExposureValue value={b.gbPowerMw} />
+                        </div>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-ink-mid">TTF (MW)</span>
+                          <SignedCurveExposureValue value={b.ttfMw} />
+                        </div>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-ink-mid">NBP (therms)</span>
+                          <SignedCurveExposureValue value={b.nbpMw} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          ) : null}
 
-          {spreadExposure.darkSpreadCaveat ? (
-            <p className="mt-4 text-xs text-ink-mid">
-              Dark spread P&amp;L approximated as power-equivalent — coal price
-              series not yet available.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
+            {spreadExposure &&
+            (spreadExposure.netSparkMw !== 0 ||
+              spreadExposure.netDarkMw !== 0) ? (
+              <div aria-label="Spread exposure">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+                  Spread exposure
+                </p>
+                <div className="mt-4 flex flex-wrap gap-4">
+                  <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Net spark (MW)
+                    </p>
+                    <p className="mt-1 font-serif text-xl tabular-nums text-ink">
+                      <SignedCurveExposureValue value={spreadExposure.netSparkMw} />{" "}
+                      <span className="text-sm font-sans text-ink-mid">MW</span>
+                    </p>
+                  </div>
+                  <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                      Net dark (MW)
+                    </p>
+                    <p className="mt-1 font-serif text-xl tabular-nums text-ink">
+                      <SignedCurveExposureValue value={spreadExposure.netDarkMw} />{" "}
+                      <span className="text-sm font-sans text-ink-mid">MW</span>
+                    </p>
+                  </div>
+                </div>
+
+                {spreadExposure.worstSparkScenarios.length > 0 ? (
+                  <div className="mt-5">
+                    <p className="text-xs font-semibold text-ink">
+                      5 Worst Historical Spark Scenarios
+                    </p>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full min-w-[400px] text-[12px]">
+                        <thead>
+                          <tr className="border-b border-ivory-border text-left">
+                            <th className="pb-2 pr-3 font-semibold text-ink">Date</th>
+                            <th className="pb-2 pr-3 font-semibold text-ink">
+                              Spread move (£/MWh)
+                            </th>
+                            <th className="pb-2 text-right font-semibold text-ink">
+                              {`Book P&L`}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {spreadExposure.worstSparkScenarios.map((row) => (
+                            <tr
+                              key={row.label}
+                              className="border-b border-ivory-border/50"
+                            >
+                              <td className="py-2 pr-3 text-ink">
+                                {formatScenarioDateCell(row.label)}
+                              </td>
+                              <td className="py-2 pr-3 font-mono tabular-nums">
+                                <span
+                                  className={
+                                    row.spreadMovePound > 0
+                                      ? "text-[#1D6B4E]"
+                                      : row.spreadMovePound < 0
+                                        ? "text-[#8B3A3A]"
+                                        : "text-ink-mid"
+                                  }
+                                >
+                                  {row.spreadMovePound >= 0 ? "+" : "−"}£
+                                  {Math.abs(row.spreadMovePound).toFixed(2)}/MWh
+                                </span>
+                              </td>
+                              <td
+                                className={`py-2 text-right font-mono tabular-nums ${
+                                  row.bookPnl >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
+                                }`}
+                              >
+                                {formatGbp(row.bookPnl)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
+                {spreadExposure.darkSpreadCaveat ? (
+                  <p className="mt-4 text-xs text-ink-mid">
+                    Dark spread P&amp;L approximated as power-equivalent — coal price
+                    series not yet available.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
 
       {data?.sparkSpread && bookHasPowerAndGasForSpark(positions) ? (
         <section
@@ -576,63 +670,6 @@ export default function OptimisePage() {
           </p>
         </PortfolioModelTrustBanner>
       ) : null}
-
-      <section className="grid gap-3 md:grid-cols-4">
-        <label className="text-xs text-ink-mid">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Objective
-          </span>
-          <select
-            value={objective}
-            onChange={(e) => setObjective(e.target.value as "cvar" | "var")}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
-          >
-            <option value="cvar">Minimise CVaR (tail at confidence below)</option>
-            <option value="var">Minimise VaR (tail at confidence below)</option>
-          </select>
-        </label>
-        <label className="text-xs text-ink-mid">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Confidence
-          </span>
-          <select
-            value={confidence}
-            onChange={(e) => setConfidence(Number(e.target.value))}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
-          >
-            <option value={0.95}>95%</option>
-            <option value={0.99}>99%</option>
-          </select>
-        </label>
-        <label className="text-xs text-ink-mid">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-            Max trades
-          </span>
-          <select
-            value={maxTrades}
-            onChange={(e) => setMaxTrades(Number(e.target.value))}
-            className="mt-2 w-full rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2 text-sm text-ink outline-none transition-colors hover:bg-ivory-dark/40 focus:bg-ivory-dark/40"
-          >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </select>
-        </label>
-        <div className="flex items-end">
-          <label className="flex w-full items-center justify-between gap-3 rounded-[4px] border-[0.5px] border-ivory-border bg-transparent px-3 py-2">
-            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
-              Stress scenarios
-            </span>
-            <input
-              type="checkbox"
-              checked={includeStress}
-              onChange={(e) => setIncludeStress(e.target.checked)}
-              className="h-5 w-9 appearance-none rounded-full border border-ivory-border bg-ivory transition-colors checked:border-[#1D6B4E]/40 checked:bg-[#1D6B4E]/25"
-            />
-          </label>
-        </div>
-      </section>
 
       {userId === null && !loading && (
         <p className="text-sm text-ink-mid">Sign in to view optimise recommendations.</p>
@@ -1247,32 +1284,76 @@ export default function OptimisePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.pnlExplain.positions.map((row, ri) => (
-                      <tr
-                        key={`${row.instrument}-${row.market}-${ri}`}
-                        className="border-b border-ivory-border/50"
-                      >
-                        <td className="py-2 pr-3 text-ink">{row.instrument}</td>
-                        <td className="py-2 pr-3 text-ink-mid">{row.market}</td>
-                        <td className="py-2 pr-3 font-mono tabular-nums text-ink">
-                          {row.size.toLocaleString("en-GB")}
-                          {row.unit ? (
-                            <span className="text-ink-mid"> {row.unit}</span>
-                          ) : null}
-                        </td>
-                        <td className="py-2 pr-3 text-ink-mid">{row.factorSummary}</td>
-                        <td
-                          className={`py-2 text-right font-mono tabular-nums ${
-                            row.pnlTotal >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
-                          }`}
-                        >
-                          {formatGbp(row.pnlTotal)}
-                        </td>
-                      </tr>
-                    ))}
+                    {pnlExplainTableMeta
+                      ? (() => {
+                          const displayRows = showAllExplain
+                            ? pnlExplainTableMeta.all
+                            : pnlExplainTableMeta.material;
+                          if (
+                            displayRows.length === 0 &&
+                            !showAllExplain &&
+                            pnlExplainTableMeta.totalCount > 0
+                          ) {
+                            return (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="py-4 text-center text-sm text-ink-mid"
+                                >
+                                  No material P&amp;L moves on this date.
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return displayRows.map((row, ri) => (
+                            <tr
+                              key={`${row.instrument}-${row.market}-${ri}`}
+                              className="border-b border-ivory-border/50"
+                            >
+                              <td className="py-2 pr-3 text-ink">{row.instrument}</td>
+                              <td className="py-2 pr-3 text-ink-mid">{row.market}</td>
+                              <td className="py-2 pr-3 font-mono tabular-nums text-ink">
+                                {row.size.toLocaleString("en-GB")}
+                                {row.unit ? (
+                                  <span className="text-ink-mid"> {row.unit}</span>
+                                ) : null}
+                              </td>
+                              <td className="py-2 pr-3 text-ink-mid">{row.factorSummary}</td>
+                              <td
+                                className={`py-2 text-right font-mono tabular-nums ${
+                                  row.pnlTotal >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
+                                }`}
+                              >
+                                {formatGbp(row.pnlTotal)}
+                              </td>
+                            </tr>
+                          ));
+                        })()
+                      : null}
                   </tbody>
                 </table>
               </div>
+              {pnlExplainTableMeta && pnlExplainTableMeta.totalCount > 0 ? (
+                <div className="mt-3">
+                  {showAllExplain ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllExplain(false)}
+                      className="text-xs text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+                    >
+                      Show material only
+                    </button>
+                  ) : pnlExplainTableMeta.hiddenCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllExplain(true)}
+                      className="text-xs text-ink-mid underline decoration-ivory-border underline-offset-2 transition-colors hover:text-ink"
+                    >
+                      Show all {pnlExplainTableMeta.totalCount} positions
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           ) : null}
 
