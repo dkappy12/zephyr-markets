@@ -5,6 +5,7 @@ import { PortfolioModelTrustBanner } from "@/components/portfolio/PortfolioModel
 import { type PositionRow } from "@/lib/portfolio/book";
 import {
   bookHasPowerAndGasForSpark,
+  computeSpreadExposure,
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   optionBookNoticeRowsOptimise,
@@ -13,6 +14,7 @@ import {
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
   tenorBucketedExposure,
+  type Scenario,
   type SparkSpreadExposureResult,
 } from "@/lib/portfolio/optimise";
 import {
@@ -106,6 +108,7 @@ type ApiResponse = {
   sparkSpread?: SparkSpreadExposureResult;
   latestDayMoves?: LatestDayMoves | null;
   pnlExplain?: PnlExplainResult | null;
+  scenarios?: Scenario[];
 };
 
 function formatGbp(n: number): string {
@@ -261,6 +264,11 @@ export default function OptimisePage() {
     [positions],
   );
 
+  const spreadExposure = useMemo(() => {
+    if (!data?.scenarios || data.gbpPerEur == null) return null;
+    return computeSpreadExposure(positions, data.scenarios, data.gbpPerEur);
+  }, [positions, data?.scenarios, data?.gbpPerEur]);
+
   const cards = useMemo(() => {
     if (!data) return [];
     const pct = Math.round(confidence * 100);
@@ -385,6 +393,101 @@ export default function OptimisePage() {
           })}
         </div>
       </section>
+
+      {spreadExposure &&
+      (spreadExposure.netSparkMw !== 0 || spreadExposure.netDarkMw !== 0) ? (
+        <section
+          className="rounded-[4px] border-[0.5px] border-ivory-border bg-card p-5"
+          aria-label="Spread exposure"
+        >
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+            Spread exposure
+          </p>
+          <div className="mt-4 flex flex-wrap gap-4">
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                Net spark (MW)
+              </p>
+              <p className="mt-1 font-serif text-xl tabular-nums text-ink">
+                <SignedCurveExposureValue value={spreadExposure.netSparkMw} />{" "}
+                <span className="text-sm font-sans text-ink-mid">MW</span>
+              </p>
+            </div>
+            <div className="rounded-[4px] border-[0.5px] border-ivory-border bg-paper px-4 py-3">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-light">
+                Net dark (MW)
+              </p>
+              <p className="mt-1 font-serif text-xl tabular-nums text-ink">
+                <SignedCurveExposureValue value={spreadExposure.netDarkMw} />{" "}
+                <span className="text-sm font-sans text-ink-mid">MW</span>
+              </p>
+            </div>
+          </div>
+
+          {spreadExposure.worstSparkScenarios.length > 0 ? (
+            <div className="mt-5">
+              <p className="text-xs font-semibold text-ink">
+                5 Worst Historical Spark Scenarios
+              </p>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full min-w-[400px] text-[12px]">
+                  <thead>
+                    <tr className="border-b border-ivory-border text-left">
+                      <th className="pb-2 pr-3 font-semibold text-ink">Date</th>
+                      <th className="pb-2 pr-3 font-semibold text-ink">
+                        Spread move (£/MWh)
+                      </th>
+                      <th className="pb-2 text-right font-semibold text-ink">
+                        {`Book P&L`}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spreadExposure.worstSparkScenarios.map((row) => (
+                      <tr
+                        key={row.label}
+                        className="border-b border-ivory-border/50"
+                      >
+                        <td className="py-2 pr-3 text-ink">
+                          {formatScenarioDateCell(row.label)}
+                        </td>
+                        <td className="py-2 pr-3 font-mono tabular-nums">
+                          <span
+                            className={
+                              row.spreadMovePound > 0
+                                ? "text-[#1D6B4E]"
+                                : row.spreadMovePound < 0
+                                  ? "text-[#8B3A3A]"
+                                  : "text-ink-mid"
+                            }
+                          >
+                            {row.spreadMovePound >= 0 ? "+" : "−"}£
+                            {Math.abs(row.spreadMovePound).toFixed(2)}/MWh
+                          </span>
+                        </td>
+                        <td
+                          className={`py-2 text-right font-mono tabular-nums ${
+                            row.bookPnl >= 0 ? "text-[#1D6B4E]" : "text-[#8B3A3A]"
+                          }`}
+                        >
+                          {formatGbp(row.bookPnl)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {spreadExposure.darkSpreadCaveat ? (
+            <p className="mt-4 text-xs text-ink-mid">
+              Dark spread P&amp;L approximated as power-equivalent — coal price
+              series not yet available.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {data?.sparkSpread && bookHasPowerAndGasForSpark(positions) ? (
         <section

@@ -273,6 +273,12 @@ const HISTORICAL_MOVE_CAPS = {
   nbpMovePth: 30,
 } as const;
 
+/**
+ * Standard CCGT-style heat rate: **MWh of (TTF-linked) gas burn per MWh of
+ * power output**. Used for spark spread positions, spread exposure, and spark diagnostics.
+ */
+const SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER = 1.4;
+
 const directionMult = positionDirectionSign;
 
 function hasMaterialPositions(positions: PositionRow[]): boolean {
@@ -434,6 +440,30 @@ export function optionBookNoticeRowsOptimise(
 }
 
 function pnlForPosition(position: PositionRow, scenario: Scenario, gbpPerEur: number): number {
+  const itype = (position.instrument_type ?? "").toLowerCase();
+  const size = Number(position.size ?? 0);
+  const dm = directionMult(position.direction);
+
+  if (itype === "spark_spread") {
+    if (!Number.isFinite(size) || size === 0) return 0;
+    const fx = Number.isFinite(scenario.gbpPerEur)
+      ? (scenario.gbpPerEur as number)
+      : gbpPerEur;
+    // SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER = 1.4
+    return (
+      (scenario.gbPowerMove -
+        scenario.ttfMoveEurMwh * fx * SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER) *
+      size *
+      dm
+    );
+  }
+
+  if (itype === "dark_spread") {
+    if (!Number.isFinite(size) || size === 0) return 0;
+    // Coal price series unavailable — dark spread approximated as power-equivalent. Known approximation.
+    return scenario.gbPowerMove * size * dm;
+  }
+
   const m = marketKey(position.market);
   const eff = linearExposureForScenarioPnl(position);
   if (!Number.isFinite(eff) || eff === 0) return 0;
@@ -915,13 +945,6 @@ export function optimisePortfolio(input: {
   };
 }
 
-/**
- * Standard CCGT-style heat rate: **MWh of (TTF-linked) gas burn per MWh of
- * power output**. Used to express the gas leg of a day-ahead spark move in
- * £/MWh alongside the GB power leg.
- */
-const SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER = 1.4;
-
 export type SparkSpreadScenarioPoint = {
   label: string;
   spreadMove: number;
@@ -1010,6 +1033,71 @@ export function bookHasPowerAndGasForSpark(positions: PositionRow[]): boolean {
     if (hasPower && hasGas) return true;
   }
   return false;
+}
+
+export type SpreadExposure = {
+  netSparkMw: number;
+  netDarkMw: number;
+  worstSparkScenarios: Array<{
+    label: string;
+    spreadMovePound: number;
+    bookPnl: number;
+  }>;
+  darkSpreadCaveat: boolean;
+};
+
+function netMwByInstrumentType(
+  positions: PositionRow[],
+  instrumentTypeLower: string,
+): number {
+  let sum = 0;
+  for (const p of positions) {
+    if ((p.instrument_type ?? "").toLowerCase() !== instrumentTypeLower) continue;
+    const s = Number(p.size ?? 0);
+    if (!Number.isFinite(s) || s === 0) continue;
+    sum += s * directionMult(p.direction);
+  }
+  return sum;
+}
+
+/**
+ * Net MW in spark/dark spread positions and worst historical spark legs vs
+ * baseline GBP/EUR spread moves.
+ */
+export function computeSpreadExposure(
+  positions: PositionRow[],
+  scenarios: Scenario[],
+  gbpPerEur: number,
+): SpreadExposure {
+  const sparkPositions = positions.filter(
+    (p) => (p.instrument_type ?? "").toLowerCase() === "spark_spread",
+  );
+  const netSparkMw = netMwByInstrumentType(positions, "spark_spread");
+  const netDarkMw = netMwByInstrumentType(positions, "dark_spread");
+
+  const historical = scenarios.filter((s) => s.source === "historical");
+  const rows = historical.map((scenario) => {
+    let bookPnl = 0;
+    for (const p of sparkPositions) {
+      bookPnl += pnlForPosition(p, scenario, gbpPerEur);
+    }
+    const spreadMovePound =
+      scenario.gbPowerMove -
+      scenario.ttfMoveEurMwh *
+        gbpPerEur *
+        SPARK_HEAT_RATE_MWH_GAS_PER_MWH_POWER;
+    return { label: scenario.label, spreadMovePound, bookPnl };
+  });
+
+  const sorted = [...rows].sort((a, b) => a.bookPnl - b.bookPnl);
+  const worstSparkScenarios = sorted.slice(0, 5);
+
+  return {
+    netSparkMw,
+    netDarkMw,
+    worstSparkScenarios,
+    darkSpreadCaveat: netDarkMw !== 0,
+  };
 }
 
 /** Latest historical day-over-day scenario (API); optional FX for TTF attribution. */

@@ -392,6 +392,7 @@ export async function GET(req: Request) {
       sparkSpread,
       latestDayMoves,
       pnlExplain,
+      scenarios,
       ...result,
     });
   } catch (error: unknown) {
