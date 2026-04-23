@@ -1,6 +1,6 @@
 # Portfolio observability — runbook & alerting hints
 
-**CI / local:** `npm test` runs Vitest on `lib/**/*.test.ts` (health response shape, personalise guardrails, `PORTFOLIO_API_LOG_EVENTS`).
+**CI / local:** GitHub Actions (`.github/workflows/ci.yml`) runs `npm ci`, `npm run lint`, `npm test`, and `npm run build` on pushes and pull requests to `main`. Locally, `npm test` runs Vitest on `lib/**/*.test.ts` (health response shape, personalise guardrails, `PORTFOLIO_API_LOG_EVENTS`).
 
 Operational reference for **`/api/health`** portfolio probes and structured **`portfolio_api`** logs (stdout JSON via `lib/ops/logger.ts`). Pair with **`auth_audit_log`** in Supabase for events that also call `logAuthAuditEvent`.
 
