@@ -39,6 +39,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 const sectionLabel =
   "text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid";
 
+type GmailPendingImport = {
+  id: string;
+  sender: string | null;
+  subject: string | null;
+  received_at: string | null;
+};
+
 function netDeltaBucketLabel(bucket: NetDeltaBucket): string {
   switch (bucket) {
     case "GB_POWER":
@@ -319,6 +326,22 @@ export function BookPageClient() {
   const [closePrice, setClosePrice] = useState("");
   const [closeDate, setCloseDate] = useState(utcToday());
   const [emailOpen, setEmailOpen] = useState(false);
+  const [brokerSenderFilter, setBrokerSenderFilter] = useState("");
+  const [gmailStatusLoading, setGmailStatusLoading] = useState(false);
+  const [gmailStatusError, setGmailStatusError] = useState<string | null>(null);
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailAddress, setGmailAddress] = useState<string | null>(null);
+  const [gmailSyncBusy, setGmailSyncBusy] = useState(false);
+  const [gmailSyncResult, setGmailSyncResult] = useState<string | null>(null);
+  const [gmailPendingImports, setGmailPendingImports] = useState<GmailPendingImport[]>(
+    [],
+  );
+  const [gmailSkippedImportIds, setGmailSkippedImportIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [gmailParseBusyImportId, setGmailParseBusyImportId] = useState<string | null>(
+    null,
+  );
   const [billingChecked, setBillingChecked] = useState(false);
   const [portfolioEnabled, setPortfolioEnabled] = useState(false);
   const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(
@@ -363,6 +386,40 @@ export function BookPageClient() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   }, []);
+
+  const loadGmailStatus = useCallback(async () => {
+    setGmailStatusLoading(true);
+    setGmailStatusError(null);
+    try {
+      const response = await fetch("/api/gmail/status", { method: "GET" });
+      const body = (await response.json().catch(() => ({}))) as {
+        connected?: boolean;
+        gmail_address?: string | null;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(body.error ?? "Failed to load Gmail connection status");
+      }
+      setGmailConnected(Boolean(body.connected));
+      setGmailAddress(body.gmail_address ?? null);
+    } catch (e: unknown) {
+      setGmailStatusError(
+        e instanceof Error ? e.message : "Failed to load Gmail connection status",
+      );
+      setGmailConnected(false);
+      setGmailAddress(null);
+    } finally {
+      setGmailStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!emailOpen) return;
+    setGmailSyncResult(null);
+    setGmailPendingImports([]);
+    setGmailSkippedImportIds(new Set());
+    void loadGmailStatus();
+  }, [emailOpen, loadGmailStatus]);
 
   const downloadExport = useCallback(
     async (type: "positions" | "pnl" | "signals") => {
@@ -880,6 +937,96 @@ export function BookPageClient() {
       setCloseModal(null);
       bumpBookActivity();
       await loadPositions();
+    }
+  }
+
+  async function syncGmailImports() {
+    setGmailSyncBusy(true);
+    setGmailSyncResult(null);
+    try {
+      const response = await fetch("/api/gmail/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        synced?: number;
+        skipped?: number;
+        imports?: GmailPendingImport[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(body.error ?? "Failed to sync Gmail confirmations");
+      }
+      const synced = Number(body.synced ?? 0);
+      const imports = Array.isArray(body.imports) ? body.imports : [];
+      setGmailPendingImports(imports);
+      setGmailSkippedImportIds(new Set());
+      setGmailSyncResult(
+        synced > 0
+          ? `Found ${synced} new confirmation${synced === 1 ? "" : "s"}`
+          : "No new confirmations",
+      );
+    } catch (e: unknown) {
+      showToast(
+        e instanceof Error ? e.message : "Failed to sync Gmail confirmations",
+        "err",
+      );
+    } finally {
+      setGmailSyncBusy(false);
+    }
+  }
+
+  async function classifyPendingImport(importId: string) {
+    setGmailParseBusyImportId(importId);
+    try {
+      const response = await fetch("/api/gmail/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ import_id: importId }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        classified?: ClassifiedPosition[];
+        error?: string;
+      };
+      if (!response.ok || !Array.isArray(body.classified)) {
+        throw new Error(body.error ?? "Failed to classify broker email");
+      }
+      handleClassified({
+        headers: [],
+        rows: [],
+        classified: body.classified,
+      });
+      setEmailOpen(false);
+      setGmailPendingImports((prev) => prev.filter((item) => item.id !== importId));
+      setGmailSkippedImportIds((prev) => {
+        const next = new Set(prev);
+        next.delete(importId);
+        return next;
+      });
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "Failed to classify email", "err");
+    } finally {
+      setGmailParseBusyImportId(null);
+    }
+  }
+
+  async function disconnectGmail() {
+    if (!window.confirm("Disconnect your Gmail account from Zephyr?")) return;
+    try {
+      const response = await fetch("/api/gmail/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Failed to disconnect Gmail");
+      setGmailConnected(false);
+      setGmailAddress(null);
+      setGmailPendingImports([]);
+      setGmailSkippedImportIds(new Set());
+      setGmailSyncResult(null);
+      showToast("Gmail disconnected", "ok");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "Failed to disconnect Gmail", "err");
     }
   }
 
@@ -1574,20 +1721,176 @@ export function BookPageClient() {
       ) : null}
 
       {emailOpen ? (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-ink/25 px-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-md rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] p-6 shadow-lg">
-            <h3 className="font-serif text-lg text-ink">Broker email</h3>
-            <p className="mt-3 text-sm leading-relaxed text-ink-mid">
-              Gmail parsing and automatic book updates are coming soon. Join the
-              waitlist to get early access when we ship this integration.
-            </p>
+        <div
+          className="fixed inset-0 z-[65] flex items-center justify-center bg-ink/25 px-4 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="gmail-import-title"
+        >
+          <div className="relative w-full max-w-lg rounded-[6px] border border-[#D4CCBB] bg-[#F5F0E8] p-6 shadow-lg">
             <button
               type="button"
               onClick={() => setEmailOpen(false)}
-              className="mt-6 rounded-[4px] border border-ink bg-ink px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7]"
+              className="absolute right-4 top-4 text-[11px] uppercase tracking-[0.1em] text-ink-mid hover:text-ink"
             >
-              OK
+              Close
             </button>
+
+            {gmailStatusLoading ? (
+              <div className="py-8">
+                <h3 id="gmail-import-title" className="font-serif text-xl text-ink">
+                  Connect broker email
+                </h3>
+                <p className="mt-3 text-sm text-ink-mid">Loading Gmail status…</p>
+              </div>
+            ) : gmailStatusError ? (
+              <div className="py-2">
+                <h3 id="gmail-import-title" className="font-serif text-xl text-ink">
+                  Connect broker email
+                </h3>
+                <p className="mt-3 text-sm text-[#8B3A3A]">{gmailStatusError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadGmailStatus()}
+                  className="mt-5 rounded-[4px] border-[0.5px] border-ink bg-ink px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7]"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !gmailConnected ? (
+              <div>
+                <h3 id="gmail-import-title" className="font-serif text-xl text-ink">
+                  Connect broker email
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-ink-mid">
+                  Connect your Gmail account and sync trade confirmations directly
+                  into your book. Zephyr reads emails from your broker and extracts
+                  positions automatically.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const filter = brokerSenderFilter.trim();
+                    const url = filter
+                      ? `/api/gmail/connect?broker_sender_filter=${encodeURIComponent(filter)}`
+                      : "/api/gmail/connect";
+                    window.location.href = url;
+                  }}
+                  className="mt-5 rounded-[4px] border border-[#1D6B4E] bg-[#1D6B4E] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] hover:opacity-90"
+                >
+                  Connect Gmail
+                </button>
+                <label className="mt-5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                  Broker sender filter (optional)
+                  <input
+                    type="text"
+                    value={brokerSenderFilter}
+                    onChange={(e) => setBrokerSenderFilter(e.target.value)}
+                    placeholder="e.g. confirmations@broker.com"
+                    className="mt-1 w-full rounded-[4px] border border-[#D4CCBB] bg-card px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                  />
+                </label>
+                <p className="mt-4 text-[11px] leading-relaxed text-ink-light">
+                  Zephyr requests read-only access to your Gmail. We never store full
+                  email contents beyond what is needed to parse trade details.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <h3 id="gmail-import-title" className="font-serif text-xl text-ink">
+                  Connect broker email
+                </h3>
+                <div className="mt-3 flex items-center gap-2 text-sm text-ink">
+                  <span className="h-2 w-2 rounded-full bg-[#1D6B4E]" />
+                  <span>
+                    Connected: {gmailAddress ?? "Gmail account"}
+                  </span>
+                </div>
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void syncGmailImports()}
+                    disabled={gmailSyncBusy}
+                    className="rounded-[4px] border-[0.5px] border-ink bg-ink px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] disabled:opacity-60"
+                  >
+                    {gmailSyncBusy ? "Syncing…" : "Sync trade confirmations"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void disconnectGmail()}
+                    className="text-[11px] font-medium text-[#8B3A3A] underline-offset-2 hover:underline"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+
+                {gmailSyncResult ? (
+                  <p className="mt-3 text-sm text-ink-mid">{gmailSyncResult}</p>
+                ) : null}
+
+                {gmailPendingImports.filter(
+                  (item) => !gmailSkippedImportIds.has(item.id),
+                ).length > 0 ? (
+                  <div className="mt-5 rounded-[6px] border border-[#D4CCBB] bg-card">
+                    <p className="border-b border-ivory-border px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid">
+                      Pending confirmations
+                    </p>
+                    <div className="max-h-[300px] space-y-3 overflow-y-auto p-4">
+                      {gmailPendingImports
+                        .filter((item) => !gmailSkippedImportIds.has(item.id))
+                        .map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-[6px] border border-[#D4CCBB] bg-ivory/40 p-3"
+                          >
+                            <p className="text-xs text-ink-mid">
+                              {item.sender ?? "Unknown sender"}
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-ink">
+                              {item.subject ?? "(No subject)"}
+                            </p>
+                            <p className="mt-1 text-[11px] text-ink-light">
+                              {item.received_at
+                                ? new Date(item.received_at).toLocaleString("en-GB", {
+                                    day: "numeric",
+                                    month: "short",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : "Date unavailable"}
+                            </p>
+                            <div className="mt-3 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void classifyPendingImport(item.id)}
+                                disabled={gmailParseBusyImportId === item.id}
+                                className="rounded-[4px] border border-[#1D6B4E] bg-[#1D6B4E] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#FDFBF7] disabled:opacity-60"
+                              >
+                                {gmailParseBusyImportId === item.id
+                                  ? "Parsing…"
+                                  : "Parse"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setGmailSkippedImportIds((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(item.id);
+                                    return next;
+                                  })
+                                }
+                                className="rounded-[4px] border border-[#D4CCBB] bg-transparent px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-mid hover:bg-ivory-dark/50"
+                              >
+                                Skip
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
       ) : null}
