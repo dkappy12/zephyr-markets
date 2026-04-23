@@ -2,11 +2,13 @@
 
 import { TierGate } from "@/components/billing/TierGate";
 import { PortfolioModelTrustBanner } from "@/components/portfolio/PortfolioModelTrustBanner";
+import { type PositionRow } from "@/lib/portfolio/book";
 import {
   type HedgeTrade,
   minHistoricalScenariosForConfidence,
   STABILITY_INDEX_PASS_MAX,
   STABILITY_INDEX_SCALE_MAX,
+  tenorBucketedExposure,
 } from "@/lib/portfolio/optimise";
 import {
   LOW_TAIL_CONFIDENCE_SUMMARY,
@@ -106,6 +108,18 @@ function formatGbp(n: number): string {
   })}`;
 }
 
+function SignedCurveExposureValue({ value }: { value: number }) {
+  const colorClass =
+    value > 0 ? "text-[#1D6B4E]" : value < 0 ? "text-[#8B3A3A]" : "text-ink-mid";
+  const sign = value >= 0 ? "+" : "−";
+  return (
+    <span className={`font-mono tabular-nums ${colorClass}`}>
+      {sign}
+      {Math.abs(value).toFixed(1)}
+    </span>
+  );
+}
+
 export default function OptimisePage() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const [userId, setUserId] = useState<string | null | undefined>(undefined);
@@ -119,6 +133,7 @@ export default function OptimisePage() {
   const [openScenarios, setOpenScenarios] = useState<Record<string, boolean>>({});
   const [openAlternatives, setOpenAlternatives] = useState<Record<number, boolean>>({});
   const [currentTier, setCurrentTier] = useState<"free" | "pro" | "team" | null>(null);
+  const [positions, setPositions] = useState<PositionRow[]>([]);
   const optimiseRequestId = useRef(0);
 
   useEffect(() => {
@@ -179,6 +194,33 @@ export default function OptimisePage() {
   useEffect(() => {
     void loadOptimise();
   }, [loadOptimise]);
+
+  useEffect(() => {
+    if (userId === undefined || userId === null) {
+      setPositions([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("positions")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("is_closed", false)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      if (error) setPositions([]);
+      else setPositions((data ?? []) as PositionRow[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, supabase]);
+
+  const curveBuckets = useMemo(
+    () => tenorBucketedExposure(positions),
+    [positions],
+  );
 
   const cards = useMemo(() => {
     if (!data) return [];
@@ -266,6 +308,44 @@ export default function OptimisePage() {
           impact and executable lot constraints.
         </p>
       </div>
+
+      <section className="space-y-3" aria-label="Curve exposure by tenor bucket">
+        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-mid">
+          Curve exposure
+        </p>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {curveBuckets.map((b) => {
+            const empty =
+              b.gbPowerMw === 0 && b.ttfMw === 0 && b.nbpMw === 0;
+            return (
+              <div
+                key={b.label}
+                className={`rounded-[4px] border-[0.5px] border-ivory-border bg-paper p-4 ${
+                  empty ? "opacity-50" : ""
+                }`}
+              >
+                <p className="font-serif text-sm font-medium text-ink">
+                  {b.label}
+                </p>
+                <div className="mt-3 space-y-2 text-xs">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-ink-mid">GB Power (MW)</span>
+                    <SignedCurveExposureValue value={b.gbPowerMw} />
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-ink-mid">TTF (MW)</span>
+                    <SignedCurveExposureValue value={b.ttfMw} />
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-ink-mid">NBP (therms)</span>
+                    <SignedCurveExposureValue value={b.nbpMw} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {data?.quality === "low" && !loading && userId ? (
         <PortfolioModelTrustBanner eyebrow={MODEL_TRUST_SECTION_EYEBROW} severity="caution">

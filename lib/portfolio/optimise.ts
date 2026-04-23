@@ -1,5 +1,105 @@
-import { positionDirectionSign, type PositionRow } from "@/lib/portfolio/book";
+import {
+  positionDirectionSign,
+  tenorToExpiryDate,
+  type PositionRow,
+} from "@/lib/portfolio/book";
 import { PORTFOLIO_STRESS_SCENARIOS } from "@/lib/portfolio/stress-scenarios-data";
+
+export type TenorBucket = {
+  label: string;
+  gbPowerMw: number;
+  ttfMw: number;
+  nbpMw: number;
+  positionCount: number;
+};
+
+const TENOR_BUCKET_ORDER = [
+  "Prompt",
+  "Front Quarter",
+  "Back Year",
+  "Cal+2",
+] as const;
+
+/**
+ * Net signed exposure (MW for GB power and TTF; therms for NBP) by tenor
+ * bucket vs a reference date. Tenor is resolved via {@link tenorToExpiryDate};
+ * null or same-calendar-day-as-reference (spot/prompt) maps to Prompt.
+ */
+export function tenorBucketedExposure(
+  positions: PositionRow[],
+  referenceDate: Date = new Date(),
+): TenorBucket[] {
+  const directionMult = positionDirectionSign;
+
+  function exposureMarketKey(
+    market: string | null,
+  ): "GB_POWER" | "TTF" | "NBP" | "OTHER" {
+    const m = (market ?? "").toUpperCase().replace(/\s+/g, "_");
+    if (m.includes("GB_POWER")) return "GB_POWER";
+    if (m === "TTF") return "TTF";
+    if (m === "NBP") return "NBP";
+    return "OTHER";
+  }
+
+  const refDayStr = referenceDate.toISOString().slice(0, 10);
+
+  function monthsAfterReference(expiryYmd: string): number {
+    const [y, mo, d] = expiryYmd.split("-").map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return 0;
+    const refMs = Date.UTC(
+      referenceDate.getUTCFullYear(),
+      referenceDate.getUTCMonth(),
+      referenceDate.getUTCDate(),
+    );
+    const expMs = Date.UTC(y, mo - 1, d);
+    return (expMs - refMs) / (86400000 * 30.4375);
+  }
+
+  function bucketLabelForExpiry(
+    expiryYmd: string | null,
+  ): (typeof TENOR_BUCKET_ORDER)[number] {
+    if (expiryYmd == null || expiryYmd === refDayStr) return "Prompt";
+    const months = monthsAfterReference(expiryYmd);
+    if (months < 1) return "Prompt";
+    if (months < 3) return "Front Quarter";
+    if (months < 12) return "Back Year";
+    return "Cal+2";
+  }
+
+  const accum = new Map<
+    (typeof TENOR_BUCKET_ORDER)[number],
+    { gb: number; ttf: number; nbp: number; n: number }
+  >();
+  for (const label of TENOR_BUCKET_ORDER) {
+    accum.set(label, { gb: 0, ttf: 0, nbp: 0, n: 0 });
+  }
+
+  for (const p of positions) {
+    const expiryYmd = tenorToExpiryDate(p.tenor, referenceDate);
+    const label = bucketLabelForExpiry(expiryYmd);
+    const row = accum.get(label)!;
+    row.n += 1;
+
+    const key = exposureMarketKey(p.market);
+    const size = Number(p.size ?? 0);
+    if (!Number.isFinite(size) || size === 0) continue;
+    const dm = directionMult(p.direction);
+    if (key === "GB_POWER") row.gb += size * dm;
+    else if (key === "TTF") row.ttf += size * dm;
+    else if (key === "NBP") row.nbp += size * dm;
+  }
+
+  return TENOR_BUCKET_ORDER.map((label) => {
+    const a = accum.get(label)!;
+    return {
+      label,
+      gbPowerMw: a.gb,
+      ttfMw: a.ttf,
+      nbpMw: a.nbp,
+      positionCount: a.n,
+    };
+  });
+}
 
 /** Top-package objective spread / mean; pass when at or below this (lower = stabler). */
 export const STABILITY_INDEX_PASS_MAX = 0.12;
