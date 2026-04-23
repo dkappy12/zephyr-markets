@@ -15,6 +15,7 @@ type Props = {
   onImport: () => void;
   importing: boolean;
   onCancel: () => void;
+  subtitle?: string;
 };
 
 export function ReviewImportOverlay({
@@ -26,6 +27,7 @@ export function ReviewImportOverlay({
   onImport,
   importing,
   onCancel,
+  subtitle = "Zephyr has classified your CSV. Confirm what to import.",
 }: Props) {
   if (!open) return null;
 
@@ -47,7 +49,7 @@ export function ReviewImportOverlay({
               Review your positions
             </h2>
             <p className="mt-1 text-sm text-ink-mid">
-              Zephyr has classified your CSV. Confirm what to import.
+              {subtitle}
             </p>
           </div>
           <button

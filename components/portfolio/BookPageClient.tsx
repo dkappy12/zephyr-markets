@@ -319,6 +319,9 @@ export function BookPageClient() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [editPos, setEditPos] = useState<PositionRow | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSubtitle, setReviewSubtitle] = useState<string>(
+    "Zephyr has classified your CSV. Confirm what to import.",
+  );
   const [keeping, setKeeping] = useState<ReviewItem[]>([]);
   const [discarding, setDiscarding] = useState<ReviewItem[]>([]);
   const [importBusy, setImportBusy] = useState(false);
@@ -331,6 +334,9 @@ export function BookPageClient() {
   const [gmailStatusError, setGmailStatusError] = useState<string | null>(null);
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailAddress, setGmailAddress] = useState<string | null>(null);
+  const [gmailStoredSenderFilter, setGmailStoredSenderFilter] = useState<
+    string | null
+  >(null);
   const [gmailSyncBusy, setGmailSyncBusy] = useState(false);
   const [gmailSyncResult, setGmailSyncResult] = useState<string | null>(null);
   const [gmailPendingImports, setGmailPendingImports] = useState<GmailPendingImport[]>(
@@ -395,6 +401,7 @@ export function BookPageClient() {
       const body = (await response.json().catch(() => ({}))) as {
         connected?: boolean;
         gmail_address?: string | null;
+        broker_sender_filter?: string | null;
         error?: string;
       };
       if (!response.ok) {
@@ -402,12 +409,17 @@ export function BookPageClient() {
       }
       setGmailConnected(Boolean(body.connected));
       setGmailAddress(body.gmail_address ?? null);
+      setGmailStoredSenderFilter(body.broker_sender_filter ?? null);
+      if (typeof body.broker_sender_filter === "string") {
+        setBrokerSenderFilter(body.broker_sender_filter);
+      }
     } catch (e: unknown) {
       setGmailStatusError(
         e instanceof Error ? e.message : "Failed to load Gmail connection status",
       );
       setGmailConnected(false);
       setGmailAddress(null);
+      setGmailStoredSenderFilter(null);
     } finally {
       setGmailStatusLoading(false);
     }
@@ -766,11 +778,14 @@ export function BookPageClient() {
     });
   }, [positions, bookTableSort]);
 
-  function handleClassified(payload: {
+  function handleClassified(
+    payload: {
     headers: string[];
     rows: Record<string, unknown>[];
     classified: ClassifiedPosition[];
-  }) {
+    },
+    options?: { subtitle?: string },
+  ) {
     const k: ReviewItem[] = [];
     const d: ReviewItem[] = [];
     payload.classified.forEach((c, i) => {
@@ -783,6 +798,9 @@ export function BookPageClient() {
     });
     setKeeping(k);
     setDiscarding(d);
+    setReviewSubtitle(
+      options?.subtitle ?? "Zephyr has classified your CSV. Confirm what to import.",
+    );
     setReviewOpen(true);
   }
 
@@ -995,7 +1013,7 @@ export function BookPageClient() {
         headers: [],
         rows: [],
         classified: body.classified,
-      });
+      }, { subtitle: "Zephyr has classified your email. Confirm what to import." });
       setEmailOpen(false);
       setGmailPendingImports((prev) => prev.filter((item) => item.id !== importId));
       setGmailSkippedImportIds((prev) => {
@@ -1667,6 +1685,7 @@ export function BookPageClient() {
         onRemoveKeeping={removeKeeping}
         onImport={() => void runCsvImport()}
         importing={importBusy}
+        subtitle={reviewSubtitle}
         onCancel={() => {
           setReviewOpen(false);
           setKeeping([]);
@@ -1806,6 +1825,12 @@ export function BookPageClient() {
                     Connected: {gmailAddress ?? "Gmail account"}
                   </span>
                 </div>
+                {!gmailStoredSenderFilter?.trim() ? (
+                  <p className="mt-2 text-xs text-amber-900">
+                    No sender filter set. Sync will fetch all recent emails. Add a
+                    filter in settings to only pull from your broker.
+                  </p>
+                ) : null}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <button
                     type="button"

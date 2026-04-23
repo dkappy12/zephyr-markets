@@ -13,9 +13,12 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from("gmail_connections")
-      .select("gmail_address")
+      .select("gmail_address, broker_sender_filter")
       .eq("user_id", user.id)
-      .maybeSingle<{ gmail_address: string | null }>();
+      .maybeSingle<{
+        gmail_address: string | null;
+        broker_sender_filter: string | null;
+      }>();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -24,6 +27,7 @@ export async function GET() {
     return NextResponse.json({
       connected: Boolean(data),
       gmail_address: data?.gmail_address ?? null,
+      broker_sender_filter: data?.broker_sender_filter ?? null,
     });
   } catch (e: unknown) {
     return NextResponse.json(
