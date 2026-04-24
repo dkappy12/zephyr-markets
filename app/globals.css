@@ -44,6 +44,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --background: #1a1916;
   --foreground: #f0ebe1;
   --ivory: #1a1916;
@@ -62,6 +63,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --background: #1a1916;
     --foreground: #f0ebe1;
     --ivory: #1a1916;
@@ -79,8 +81,13 @@
   }
 }
 
+/**
+ * Match native UI (scrollbars, checkboxes, date inputs) to the active theme.
+ * `light dark` lets the browser pick and often yields harsh black scrollbars in
+ * light mode on Windows; tie `color-scheme` to the same tokens as :root / dark.
+ */
 html {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 body {
@@ -89,6 +96,52 @@ body {
   font-family: var(--font-dm-sans), "DM Sans", ui-sans-serif, system-ui,
     sans-serif;
   font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-mid) 55%, var(--ivory-border))
+    var(--ivory-dark);
+}
+
+/* Chromium / Safari / Edge */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--ivory-dark);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-mid) 50%, var(--ivory-border));
+  border-radius: 9999px;
+  border: 2px solid var(--ivory-dark);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-mid) 75%, var(--ink-light));
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--ivory-dark);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--bull);
+  cursor: pointer;
+}
+
+/* Default size for native controls; skip custom toggles (e.g. appearance-none). */
+input[type="checkbox"]:where(:not(.appearance-none)),
+input[type="radio"]:where(:not(.appearance-none)) {
+  width: 1rem;
+  height: 1rem;
+  vertical-align: middle;
 }
 
 ::selection {
