@@ -1190,6 +1190,7 @@ function attributionTriple(
   baselineGbpPerEur: number,
 ): { total: number; gas: number; power: number; fx: number } {
   const mk = marketKey(position.market);
+  const itype = (position.instrument_type ?? "").toLowerCase();
   const scenNoFx: Scenario = { ...scen, gbpPerEur: undefined };
 
   if (mk === "OTHER") {
@@ -1197,6 +1198,25 @@ function attributionTriple(
   }
 
   const total = pnlForPosition(position, scen, baselineGbpPerEur);
+
+  if (itype === "spark_spread") {
+    const powerOnly: Scenario = {
+      ...scen,
+      ttfMoveEurMwh: 0,
+      nbpMovePth: 0,
+    };
+    const power = pnlForPosition(position, powerOnly, baselineGbpPerEur);
+    const gasOnly: Scenario = {
+      ...scen,
+      gbPowerMove: 0,
+    };
+    const gas = pnlForPosition(position, gasOnly, baselineGbpPerEur);
+    return { total, gas, power, fx: 0 };
+  }
+
+  if (itype === "dark_spread") {
+    return { total, gas: 0, power: total, fx: 0 };
+  }
 
   if (mk === "GB_POWER") {
     const powerOnly: Scenario = {
