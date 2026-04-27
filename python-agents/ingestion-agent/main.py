@@ -215,10 +215,10 @@ _KALMAN_LIVE_COEFFS: list[float] | None = None
 KF_Q_DIAG = [3e-8, 1.7e-6, 1.5e-5, 4.4e-4, 5e-4, 1.1e-4, 5.7e-5, 2.6e-4]
 
 # Kalman filter — initial covariance P0 (diagonal, moderate confidence in hand-tuned priors)
-KF_P0_DIAG = [0.0025, 0.0225, 0.20, 4.00, 100.0, 0.39, 0.20, 1.96]
+KF_P0_DIAG = [0.0025, 0.0100, 0.10, 1.00, 25.0, 0.20, 0.10, 0.50]
 
 # Kalman filter — observation noise variance R
-KF_R = 36.0  # (6 £/MWh)^2
+KF_R = 225.0  # (£15/MWh)² — calibrated to observed MAE during warm-up period.
 
 # Kalman filter — RD piecewise breakpoints [GW]
 KF_RD_BREAKPOINTS = [0.0, 20.0, 28.0, 32.0, 35.0]
@@ -227,7 +227,7 @@ KF_RD_BREAKPOINTS = [0.0, 20.0, 28.0, 32.0, 35.0]
 KF_WIND_BREAKPOINTS = [0.0, 5.0, 15.0]
 
 # Kalman filter — minimum filled days before trusting posterior
-KF_MIN_FILLED_DAYS = 10
+KF_MIN_FILLED_DAYS = 14
 
 # Kalman filter — per-segment minimum observation counts (last 30 days)
 KF_MIN_OBS_PER_SEGMENT = {"b2": 50, "b3": 30, "b4": 20, "b5": 10, "w1": 40, "w2": 30, "w3": 15}
