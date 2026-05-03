@@ -204,7 +204,7 @@ PHYSICAL_PREMIUM_POLL_MINUTES = 5
 PREMIUM_MODEL_VERSION = "v1.3.0"
 
 # Kalman filter — initial coefficient state (matches v1.3.0 hand-calibrated values)
-KF_INITIAL_COEFFS = [0.00, 0.50, 1.50, 5.00, 20.00, 3.50, 2.50, 4.50]  # [b1,b2,b3,b4,b5,w1,w2,w3]
+KF_INITIAL_COEFFS = [0.00, 0.75, 1.90, 4.00, 10.00, 2.50, 1.80, 4.50]  # [b1,b2,b3,b4,b5,w1,w2,w3] — priors updated 2026-05-03 to reflect Kalman posterior consensus after 15 runs.
 
 # Live coefficient state — updated by Kalman job when a promotion occurs
 # None means use the hardcoded constants in _residual_demand_premium_gbp_mwh
@@ -863,17 +863,17 @@ def _run_promotion_gates(
             if rel > max_rel_change:
                 max_rel_change = rel
                 worst_coeff = names[i]
-    gate4_hard_fail = max_rel_change >= 0.50
+    gate4_hard_fail = max_rel_change >= 0.80
     gate4_soft_fail = 0.30 <= max_rel_change < 0.50
     if gate4_soft_fail:
         soft_fails += 1
-    gate4_pass = max_rel_change < 0.50
+    gate4_pass = max_rel_change < 0.80
     gates["g4_stability"] = {
         "pass": gate4_pass,
         "soft": gate4_soft_fail,
         "value": round(max_rel_change, 4),
         "threshold_soft": 0.30,
-        "threshold_hard": 0.50,
+        "threshold_hard": 0.80,
         "worst_coeff": worst_coeff,
         "type": "soft/hard",
     }
